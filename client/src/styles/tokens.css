@@ -1,0 +1,34 @@
+:root {
+  color-scheme: dark;
+
+  --lm-bg: #0d0a09;
+  --lm-bg-tint: #17110d;
+  --lm-surface: rgba(255, 255, 255, 0.05);
+  --lm-surface-2: rgba(255, 255, 255, 0.08);
+  --lm-surface-3: rgba(255, 255, 255, 0.12);
+  --lm-border: rgba(255, 255, 255, 0.08);
+  --lm-border-strong: rgba(255, 255, 255, 0.16);
+
+  --lm-primary: #ecc275;
+  --lm-primary-strong: #f4d089;
+  --lm-primary-ink: #241705;
+  --lm-primary-soft: rgba(236, 194, 117, 0.16);
+
+  --lm-text: #f4f0ea;
+  --lm-dim: #9c9186;
+  --lm-mute: #6a6058;
+
+  --lm-online: #67d391;
+  --lm-danger: #e5836f;
+
+  --lm-radius-sm: 10px;
+  --lm-radius-md: 14px;
+  --lm-radius-lg: 20px;
+
+  --lm-font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --lm-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.8);
+  --lm-scrim-x: linear-gradient(90deg, var(--lm-bg) 0%, rgba(13, 10, 9, 0.82) 34%, rgba(13, 10, 9, 0.28) 62%, rgba(13, 10, 9, 0.35) 100%);
+  --lm-scrim-y: linear-gradient(0deg, var(--lm-bg) 4%, rgba(13, 10, 9, 0) 48%);
+  --lm-scrim-top: linear-gradient(180deg, rgba(13, 10, 9, 0.7) 0%, rgba(13, 10, 9, 0) 24%);
+}

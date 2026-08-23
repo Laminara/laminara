@@ -1,0 +1,91 @@
+---
+title: "Установка"
+description: "Запуск сервера в Docker, под systemd или из исходников."
+---
+
+Сервер — один статический бинарник. Выберите способ под свою инфраструктуру: Docker для быстрого старта, systemd для железа или VPS, сборка из исходников для разработки.
+
+<Warning>
+Сервер работает только на Linux. Он запускает скачанную Java для установщиков Forge и NeoForge, поэтому базовый образ должен быть с glibc — в нашем `Dockerfile` это `debian:12-slim`.
+</Warning>
+
+## Установщик
+
+Проще всего — установщик. Одна команда, дальше он всё спросит и соберёт сам.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MrLeonardosMi/Laminara/main/install.sh | bash
+```
+
+Что он делает:
+
+- определяет архитектуру и скачивает бинарь из релизов GitHub;
+- спрашивает по шагам — хранилище (диск или S3), источник аккаунтов (JSON-файл с первым аккаунтом, SQL или HTTP), хранилище сессий, публичный адрес, вход в игре и скины;
+- генерирует `config.json`, создаёт каталог данных и первый аккаунт (пароль хешируется argon2id);
+- по выбору ставит systemd-сервис или поднимает Docker-стек с Redis.
+
+Ключи подписи сервер создаёт сам при первом запуске, а библиотеки и Java докачивает при сборках — заводить руками ничего не нужно.
+
+Дальше — способы собрать всё вручную.
+
+## Docker
+
+```sh
+make generate            # сгенерировать gen/ из protobuf перед сборкой образа
+cp deploy/config.example.json deploy/config.json
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Compose поднимает сам сервер и Redis. Постоянные данные — профили сборок, объекты, ключи подписи — лежат в томе `laminara-data` (`/var/lib/laminara` внутри контейнера). Разделы для Postgres и S3-хранилища в файле закомментированы; включите их, если они вам нужны.
+
+## systemd
+
+Для установки на хост есть готовый unit с `Type=notify` — сервер сам сообщает systemd о готовности и об остановке.
+
+<Steps>
+  <Step title="Соберите бинарник">
+    ```sh
+    make build
+    sudo install -m0755 bin/laminara-server /usr/local/bin/laminara-server
+    ```
+  </Step>
+  <Step title="Заведите пользователя и каталоги">
+    ```sh
+    sudo useradd --system --home /var/lib/laminara --shell /usr/sbin/nologin laminara
+    sudo install -d -o laminara -g laminara /var/lib/laminara /etc/laminara
+    sudo install -m0640 -o laminara -g laminara deploy/config.example.json /etc/laminara/config.json
+    ```
+  </Step>
+  <Step title="Поставьте unit и запустите">
+    ```sh
+    sudo install -m0644 deploy/systemd/laminara-server.service /etc/systemd/system/
+    sudo systemctl enable --now laminara-server
+    ```
+  </Step>
+</Steps>
+
+Unit ограничивает права: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, запись разрешена только в `/var/lib/laminara` и `/run/laminara`.
+
+## Из исходников
+
+Нужен только Go — генератор кода тянется через `go tool`, отдельный `protoc` не требуется.
+
+```sh
+make generate      # protobuf -> gen/go
+make build         # go build ./...
+make test          # прогнать тесты
+make run           # запустить в текущем терминале
+```
+
+## Управление запущенным сервером
+
+Тот же бинарник — клиент к своему демону: он подключается к процессу по Unix-сокету.
+
+```sh
+laminara-server status          # состояние
+laminara-server console         # интерактивная консоль с живыми логами
+laminara-server logs -f         # только логи, потоком
+laminara-server stop            # остановить
+```
+
+Полный список команд — в [справочнике CLI](/reference/cli).

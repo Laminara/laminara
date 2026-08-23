@@ -1,0 +1,4 @@
+# A launcher is downloaded and run, never installed, so it cannot ask the player
+# for the Visual C++ redistributable first: the MSVC runtime is linked in.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

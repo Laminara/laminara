@@ -1,0 +1,93 @@
+---
+title: "Вход в игре и скины"
+description: "authlib-injector-совместимый вход и подпись скинов."
+---
+
+В игру игроки заходят через authlib-injector. Он направляет игру на Yggdrasil-endpoint Laminara, а тот проверяет логин через тот же источник учёток, что и лаунчер, выдаёт игровые токены и подписывает скины.
+
+Включается разделом `yggdrasil`:
+
+```json
+{
+  "yggdrasil": {
+    "enabled": true,
+    "serverName": "Laminara",
+    "rsaKeyPath": "/var/lib/laminara/yggdrasil-rsa.pem",
+    "skinProvider": "template",
+    "skinConfig": { "skin": "https://skins.example.com/%nickname%.png", "slim": true },
+    "skinDomains": ["skins.example.com"]
+  }
+}
+```
+
+Yggdrasil поднимается на том же публичном порту, что и лаунчер, по пути `/yggdrasil/`. authlib-injector запускается с этим адресом:
+
+```
+-javaagent:authlib-injector.jar=https://ваш-домен/yggdrasil/
+```
+
+## Скины — тоже адаптеры
+
+Откуда брать скины, задаёт `skinProvider`.
+
+<Tabs>
+  <Tab title="template — прямые ссылки">
+    Ссылка на файл скина с подстановками: `%nickname%`, `%username%` и `%uuid%` заменяются на данные игрока.
+    ```json
+    "skinProvider": "template",
+    "skinConfig": {
+      "skin": "https://skins.example.com/%nickname%.png",
+      "cape": "https://skins.example.com/capes/%uuid%.png",
+      "slim": true
+    }
+    ```
+    `cape` и `slim` (тонкая модель рук) необязательны.
+  </Tab>
+  <Tab title="json — ответ вашего сервиса">
+    Laminara запрашивает JSON у вашего эндпоинта (в URL те же подстановки) и берёт ссылки из ответа.
+    ```json
+    "skinProvider": "json",
+    "skinConfig": { "url": "https://site.example/skins/%nickname%" }
+    ```
+    Ответ — объект с полями `skin`, `cape` и `model` (`slim` или пусто).
+  </Tab>
+  <Tab title="sql — колонки вашей базы">
+    Берёт ссылки прямо из таблицы сайта. Подходит, когда у каждого игрока свой адрес скина
+    и шаблон не подставить.
+    ```json
+    "skinProvider": "sql",
+    "skinConfig": {
+      "driver": "mariadb",
+      "dsn": "laminara:пароль@tcp(127.0.0.1:3306)/site?charset=utf8mb4",
+      "table": "users",
+      "fields": { "username": "username", "skin": "skin", "cape": "cape" }
+    }
+    ```
+    `driver` — `mariadb`, `mysql` или `postgres`. `cape` и `model` необязательны; если колонка
+    `model` есть, значение `slim` включает тонкую модель рук, иначе берётся `slim` из конфига.
+
+    Если текстуры лежат не в одной таблице, задайте `query` вместо `table` и `fields` —
+    выборка возвращает скин, затем плащ и модель, а единственный параметр подставляется из
+    `lookup` (`username` по умолчанию, либо `uuid`):
+    ```json
+    "skinConfig": {
+      "driver": "mariadb",
+      "dsn": "…",
+      "lookup": "uuid",
+      "query": "SELECT skin, cape FROM textures WHERE uuid = ?"
+    }
+    ```
+    Пользователю базы достаточно `SELECT` на эти колонки — записывать Laminara ничего не будет.
+    Игрок без скина не считается ошибкой: профиль просто отдаётся без текстур.
+  </Tab>
+</Tabs>
+
+`skinDomains` перечисляет домены, с которых игра примет текстуры. Домены ваших скинов должны быть в этом списке.
+
+## Подпись текстур
+
+В корне `/yggdrasil/` сервер публикует RSA-ключ — он создаётся и сохраняется по `rsaKeyPath` при первом запуске. Свойство текстур каждого профиля подписывается этим ключом по схеме RSA-SHA1, ровно так, как проверяет authlib-injector. Поэтому игра доверяет скинам.
+
+<Note>
+Логин Yggdrasil проверяет через тот же адаптер `auth`, что и лаунчер, — отдельного хранилища аккаунтов для игры нет. Laminara выдаёт свои игровые токены и держит короткий кеш «кто на какой сервер зашёл» для рукопожатия join/hasJoined.
+</Note>

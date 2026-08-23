@@ -1,0 +1,137 @@
+---
+title: Модули
+description: Как написать модуль Laminara — расширить сервер своими командами.
+---
+
+Модуль — это отдельный исполняемый файл, который сервер запускает изолированным
+субпроцессом и общается с ним по gRPC. Модуль добавляет команды в единый реестр
+сервера, поэтому его команды появляются в CLI, консоли, `exec` и `help` наравне
+со встроенными. Падение модуля не роняет сервер, а писать модуль можно на любом
+языке, поддерживающем gRPC-контракт (Go — из коробки, через SDK).
+
+## Модуль на Go
+
+Возьмите SDK `github.com/laminara/laminara/sdk/go/module` и реализуйте два метода —
+`Info()` и `Commands()`:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+
+	module "github.com/laminara/laminara/sdk/go/module"
+)
+
+type greeter struct {
+	greeting string
+}
+
+func (g *greeter) Info() module.Info {
+	return module.Info{Name: "greeter", Version: "0.1.0", Description: "Пример модуля"}
+}
+
+func (g *greeter) Commands() []module.Command {
+	return []module.Command{{
+		Name:     "greet",
+		Aliases:  []string{"hi"},
+		Synopsis: "поприветствовать",
+		Run: func(_ context.Context, args []string, out io.Writer) error {
+			who := "мир"
+			if len(args) > 0 {
+				who = strings.Join(args, " ")
+			}
+			fmt.Fprintf(out, "%s, %s!\n", g.greeting, who)
+			return nil
+		},
+	}}
+}
+
+func main() {
+	module.Serve(&greeter{greeting: "Привет"})
+}
+```
+
+`Run` пишет вывод в `out` — он стримится обратно тому, кто вызвал команду.
+
+## Конфигурация
+
+Чтобы модуль принимал настройки, реализуйте необязательный интерфейс
+`Configure(config []byte) error` — сервер передаст блок конфигурации (сырой JSON)
+до чтения `Info`:
+
+```go
+func (g *greeter) Configure(config []byte) error {
+	var settings struct {
+		Greeting string `json:"greeting"`
+	}
+	if err := json.Unmarshal(config, &settings); err != nil {
+		return err
+	}
+	if settings.Greeting != "" {
+		g.greeting = settings.Greeting
+	}
+	return nil
+}
+```
+
+## События
+
+Модуль может реагировать на события сервера — реализуйте `Events()` (список топиков)
+и `OnEvent`:
+
+```go
+func (g *greeter) Events() []string {
+	return []string{"build.published"}
+}
+
+func (g *greeter) OnEvent(topic string, data map[string]string) error {
+	// например, отправить уведомление в Discord
+	fmt.Printf("%s: сборка %s\n", topic, data["name"])
+	return nil
+}
+```
+
+Доступные топики: `build.prepared`, `build.published`, `build.deleted`; имя сборки —
+в `data["name"]`. Каждое событие доставляется подписанному модулю в отдельной
+горутине, поэтому медленный модуль не блокирует сервер.
+
+## Сборка и установка
+
+Соберите модуль в обычный бинарь и положите его в каталог модулей сервера:
+
+```bash
+go build -o /var/lib/laminara/modules/greeter ./greeter
+```
+
+Укажите каталог и (необязательно) конфигурацию модулей в конфиге сервера —
+ключ конфигурации совпадает с именем файла модуля:
+
+```json
+{
+  "modules": {
+    "dir": "/var/lib/laminara/modules",
+    "config": {
+      "greeter": { "greeting": "Здорово" }
+    }
+  }
+}
+```
+
+Сервер подхватит модуль при запуске. Проверьте:
+
+```
+$ laminara-server exec "modules"
+greeter          0.1.0    Пример модуля
+
+$ laminara-server exec "greet Игорь"
+Здорово, Игорь!
+
+$ laminara-server status --json   # modulesLoaded увеличится
+```
+
+Команда модуля видна и в `help`, и в интерактивной консоли (наберите `/`, затем
+имя команды). Подробности устройства — в ADR-0011.

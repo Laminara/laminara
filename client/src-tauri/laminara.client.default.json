@@ -1,0 +1,15 @@
+{
+  "endpoints": [{ "id": "local", "baseUrl": "http://127.0.0.1:8099" }],
+  "serverPublicKeyHex": "",
+  "branding": {
+    "name": "LAMINARA",
+    "windowTitle": "Laminara",
+    "tagline": "Войдите аккаунтом LAMINARA",
+    "primaryColor": "",
+    "primaryInk": "",
+    "backgroundColor": "",
+    "logoDataUri": "",
+    "heroMediaDataUri": "",
+    "siteUrl": ""
+  }
+}

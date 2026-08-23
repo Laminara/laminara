@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 176 32">
+  <rect width="32" height="32" rx="8" fill="#6366F1"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round">
+    <path d="M7 11.5 C12 9.5, 20 9.5, 25 11.5"/>
+    <path d="M7 16 C12 18, 20 14, 25 16"/>
+    <path d="M7 20.5 C12 22.5, 20 22.5, 25 20.5"/>
+  </g>
+  <text x="42" y="22" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="19" font-weight="600" letter-spacing="0.2" fill="#F8FAFC">Laminara</text>
+</svg>

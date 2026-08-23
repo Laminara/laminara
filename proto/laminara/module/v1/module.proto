@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package laminara.module.v1;
+
+message InfoRequest {}
+
+message CommandSpec {
+  string name = 1;
+  repeated string aliases = 2;
+  string synopsis = 3;
+}
+
+message InfoResponse {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  repeated CommandSpec commands = 4;
+  repeated string events = 5;
+}
+
+message ExecuteRequest {
+  string command = 1;
+  repeated string args = 2;
+}
+
+message ExecuteResponse {
+  bytes output = 1;
+  bool done = 2;
+  string error = 3;
+}
+
+message ConfigureRequest {
+  bytes config = 1;
+}
+
+message ConfigureResponse {}
+
+message EmitRequest {
+  string topic = 1;
+  map<string, string> data = 2;
+}
+
+message EmitResponse {}
+
+service ModuleService {
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc Execute(ExecuteRequest) returns (stream ExecuteResponse);
+  rpc Emit(EmitRequest) returns (EmitResponse);
+}

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package laminara.api.v1;
+
+import "laminara/core/v1/platform.proto";
+
+enum SignalKind {
+  SIGNAL_KIND_UNSPECIFIED = 0;
+  SIGNAL_KIND_PLATFORM_KEY = 1;
+  SIGNAL_KIND_SMBIOS_UUID = 2;
+  SIGNAL_KIND_BOARD_SERIAL = 3;
+  SIGNAL_KIND_PLATFORM_UUID = 4;
+  SIGNAL_KIND_PLATFORM_SERIAL = 5;
+  SIGNAL_KIND_MACHINE_ID = 6;
+  SIGNAL_KIND_DISK_SERIAL = 7;
+  SIGNAL_KIND_OS_INSTALL_ID = 8;
+  SIGNAL_KIND_MAC_ADDRESS = 9;
+  SIGNAL_KIND_VOLUME_ID = 10;
+  SIGNAL_KIND_GPU = 11;
+  SIGNAL_KIND_CPU = 12;
+  SIGNAL_KIND_MEMORY_SIZE = 13;
+  SIGNAL_KIND_HOSTNAME = 14;
+}
+
+enum CollectorFlag {
+  COLLECTOR_FLAG_UNSPECIFIED = 0;
+  COLLECTOR_FLAG_VIRTUAL_MACHINE = 1;
+  COLLECTOR_FLAG_ELEVATED = 2;
+  COLLECTOR_FLAG_PLATFORM_KEY_FALLBACK = 3;
+  COLLECTOR_FLAG_SMBIOS_UNREADABLE = 4;
+  COLLECTOR_FLAG_CONTAINER = 5;
+  COLLECTOR_FLAG_WEAK = 6;
+}
+
+enum BanScope {
+  BAN_SCOPE_UNSPECIFIED = 0;
+  BAN_SCOPE_ACCOUNT = 1;
+  BAN_SCOPE_MACHINE = 2;
+  BAN_SCOPE_CLUSTER = 3;
+}
+
+message Signal {
+  SignalKind kind = 1;
+  bytes digest = 2;
+  uint32 confidence = 3;
+}
+
+message MachineReport {
+  uint32 schema_version = 1;
+  repeated Signal signals = 2;
+  repeated CollectorFlag flags = 3;
+  laminara.core.v1.Platform platform = 4;
+  string os_version = 5;
+  string launcher_version = 6;
+  bytes nonce = 7;
+  bytes platform_key_public = 8;
+  bytes platform_key_signature = 9;
+  int64 collected_at_unix_nanos = 10;
+}
+
+message GetChallengeRequest {}
+
+message GetChallengeResponse {
+  bytes nonce = 1;
+  int64 expires_unix_nanos = 2;
+  uint32 report_schema_version = 3;
+}
+
+message ReportMachineRequest {
+  MachineReport machine = 1;
+}
+
+message ReportMachineResponse {
+  MachineVerdict verdict = 1;
+}
+
+message MachineVerdict {
+  string machine_id = 1;
+  bool first_seen = 2;
+  string machine_ticket = 3;
+  int64 ticket_expires_unix_nanos = 4;
+}
+
+message BanInfo {
+  string reason = 1;
+  int64 expires_unix_nanos = 2;
+  string reference = 3;
+  BanScope scope = 4;
+}

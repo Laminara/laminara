@@ -1,0 +1,51 @@
+services:
+  laminara:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: laminara/laminara-server:latest
+    restart: unless-stopped
+    command: ["start", "--config", "/etc/laminara/config.json"]
+    ports:
+      - "127.0.0.1:8099:8099"
+    volumes:
+      - ./config.json:/etc/laminara/config.json:ro
+      - laminara-data:/var/lib/laminara
+    depends_on:
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  # Enable only if the auth adapter reads from a database you host here.
+  # postgres:
+  #   image: postgres:18-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: laminara
+  #     POSTGRES_PASSWORD: change-me
+  #     POSTGRES_DB: laminara
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+
+  # Self-hosted S3 (recommended for scale). The install script can wire this up;
+  # see docs/guide/storage.md for Garage / SeaweedFS / Backblaze B2.
+  # garage:
+  #   image: dxflrs/garage:v1.0.1
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./garage.toml:/etc/garage.toml:ro
+  #     - garage-meta:/var/lib/garage/meta
+  #     - garage-data:/var/lib/garage/data
+
+volumes:
+  laminara-data:
+  redis-data:
+  # postgres-data:
+  # garage-meta:
+  # garage-data:

@@ -1,0 +1,62 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+@theme inline {
+  --color-bg: var(--lm-bg);
+  --color-bg-tint: var(--lm-bg-tint);
+  --color-surface: var(--lm-surface);
+  --color-surface-2: var(--lm-surface-2);
+  --color-surface-3: var(--lm-surface-3);
+  --color-border: var(--lm-border);
+  --color-border-strong: var(--lm-border-strong);
+
+  --color-primary: var(--lm-primary);
+  --color-primary-strong: var(--lm-primary-strong);
+  --color-primary-ink: var(--lm-primary-ink);
+  --color-primary-soft: var(--lm-primary-soft);
+
+  --color-text: var(--lm-text);
+  --color-dim: var(--lm-dim);
+  --color-mute: var(--lm-mute);
+  --color-online: var(--lm-online);
+  --color-danger: var(--lm-danger);
+
+  --radius-sm: var(--lm-radius-sm);
+  --radius-md: var(--lm-radius-md);
+  --radius-lg: var(--lm-radius-lg);
+
+  --font-sans: var(--lm-font-sans);
+
+  --shadow-panel: var(--lm-shadow);
+  --shadow-online: 0 0 10px var(--lm-online);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--lm-bg);
+  color: var(--lm-text);
+  font-family: var(--lm-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  user-select: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--lm-primary) 32%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--lm-surface-2);
+  border-radius: 999px;
+}

@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package laminara.api.v1;
+
+import "laminara/api/v1/machine.proto";
+import "laminara/core/v1/platform.proto";
+
+message Tokens {
+  string access = 1;
+  int64 access_expires_unix_nanos = 2;
+  string refresh = 3;
+  int64 refresh_expires_unix_nanos = 4;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+  MachineReport machine = 3;
+}
+
+message LoginResponse {
+  Tokens tokens = 1;
+  MachineVerdict machine = 2;
+}
+
+message RefreshRequest {
+  string refresh = 1;
+}
+
+message RefreshResponse {
+  Tokens tokens = 1;
+}
+
+message ProfileSummary {
+  string name = 1;
+  string version = 2;
+  uint64 total_size = 3;
+  string server_address = 4;
+  string loader = 5;
+  bool has_features = 6;
+  repeated laminara.core.v1.Platform platforms = 7;
+  bool locked = 8;
+  string lock_reason = 9;
+}
+
+message ListProfilesRequest {
+  laminara.core.v1.Platform platform = 1;
+}
+
+message ListProfilesResponse {
+  repeated ProfileSummary profiles = 1;
+}
+
+message GetManifestRequest {
+  string profile = 1;
+  laminara.core.v1.Platform platform = 2;
+}
+
+message GetManifestResponse {
+  bytes manifest = 1;
+  bytes signature = 2;
+}
+
+message NewsItem {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  int64 published_at_unix_nanos = 4;
+  string tag = 5;
+  string link = 6;
+  string banner_data_uri = 7;
+}
+
+message GetNewsRequest {}
+
+message GetNewsResponse {
+  repeated NewsItem items = 1;
+}
+
+message CheckUpdateRequest {
+  string current_version = 1;
+  laminara.core.v1.Platform platform = 2;
+}
+
+message CheckUpdateResponse {
+  bytes release = 1;
+  bytes signature = 2;
+}
+
+service LauncherService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+  rpc GetManifest(GetManifestRequest) returns (GetManifestResponse);
+  rpc CheckUpdate(CheckUpdateRequest) returns (CheckUpdateResponse);
+  rpc GetNews(GetNewsRequest) returns (GetNewsResponse);
+  rpc GetChallenge(GetChallengeRequest) returns (GetChallengeResponse);
+  rpc ReportMachine(ReportMachineRequest) returns (ReportMachineResponse);
+}

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Laminara",
+  "colors": {
+    "primary": "#6366F1",
+    "light": "#A5B4FC",
+    "dark": "#4F46E5"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://github.com/laminara/laminara"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/laminara/laminara"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/laminara/laminara"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Документация",
+        "groups": [
+          {
+            "group": "Знакомство",
+            "icon": "compass",
+            "pages": [
+              "index",
+              "quickstart",
+              "console",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Сервер",
+            "icon": "server",
+            "pages": [
+              "server/install",
+              "server/configuration",
+              "server/production",
+              "server/signing",
+              "server/machines"
+            ]
+          },
+          {
+            "group": "Сборки",
+            "icon": "cubes",
+            "pages": [
+              "builds/preparing",
+              "builds/loaders",
+              "builds/publishing",
+              "builds/settings",
+              "builds/features",
+              "builds/access"
+            ]
+          },
+          {
+            "group": "Лаунчер",
+            "icon": "gamepad",
+            "pages": [
+              "launcher",
+              "launcher/building",
+              "launcher/updates",
+              "launcher/news"
+            ]
+          },
+          {
+            "group": "Вход игроков",
+            "icon": "user-lock",
+            "pages": [
+              "auth/adapters",
+              "auth/yggdrasil"
+            ]
+          },
+          {
+            "group": "Хранилище",
+            "icon": "database",
+            "pages": [
+              "storage"
+            ]
+          },
+          {
+            "group": "Модули",
+            "icon": "puzzle-piece",
+            "pages": [
+              "modules"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Справочник",
+        "groups": [
+          {
+            "group": "Сервер",
+            "pages": [
+              "reference/cli",
+              "reference/config"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

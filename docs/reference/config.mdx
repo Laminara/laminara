@@ -1,0 +1,129 @@
+---
+title: "Конфигурация"
+description: "Все поля config.json по разделам."
+---
+
+Сервер читает один JSON-файл (флаг `--config`). Разделы независимы: работает тот, что описан. Обзор и примеры — в разделе [Конфигурация](/server/configuration).
+
+## auth
+
+<ParamField path="provider" type="string" required>`jsonfile`, `sql` или `http`.</ParamField>
+<ParamField path="config" type="object" required>Настройки выбранного провайдера (см. ниже).</ParamField>
+<ParamField path="sessions.backend" type="string">`memory` или `redis`.</ParamField>
+<ParamField path="sessions.redisAddr" type="string">Адрес Redis при `backend: redis`.</ParamField>
+<ParamField path="accessTTL" type="duration">Время жизни токена доступа, например `15m`.</ParamField>
+<ParamField path="refreshTTL" type="duration">Время жизни токена обновления, например `720h`.</ParamField>
+
+Поля `config` по провайдерам:
+
+- **jsonfile** — `path`, `hash`, `fields{username, password, uuid}`
+- **sql** — `driver`, `dsn`, `table`, `hash`, `fields{username, password, uuid}`
+- **http** — `url`, `usernameField`, `passwordField`, `uuidField`, `successField`
+
+Значения `hash`: `argon2id`, `bcrypt`, `sha256`, `sha512`, `md5`, `plain`. Подробнее — [Аутентификация](/auth/adapters).
+
+<ParamField path="config.query" type="string">Для `sql`: свой запрос вместо `table`/`fields`, когда нужна связка таблиц или учёт флага бана. Логин — единственный подстановочный знак, выбираются пароль и (необязательно) UUID.</ParamField>
+
+## storage
+
+<ParamField path="backend" type="string" required>`fs` или `s3`.</ParamField>
+<ParamField path="config" type="object" required>Настройки бэкенда.</ParamField>
+
+Поля `config`:
+
+- **fs** — `root`, `xaccelPrefix`
+- **s3** — `endpoint`, `region`, `bucket`, `accessKeyId`, `secretAccessKey`, `pathStyle`, `secure`
+
+Подробнее — [Хранилище](/storage).
+
+## build
+
+<ParamField path="profilesDir" type="string" required>Каталог с папками профилей сборок.</ParamField>
+<ParamField path="trustedSigningKeys" type="array">Ключи, которые лаунчер обязан принимать помимо активного: публичный ключ в hex или путь к файлу ключа. Нужны для смены ключа — см. [Ключ подписи](/server/signing).</ParamField>
+<ParamField path="signingKeyPath" type="string" required>Путь к ключу подписи Ed25519. Создаётся автоматически, если файла ещё нет.</ParamField>
+
+## api
+
+<ParamField path="addr" type="string" required>Адрес публичного слушателя, например `0.0.0.0:8099`.</ParamField>
+<ParamField path="xAccel" type="boolean">Раздавать файлы через nginx `X-Accel-Redirect` (для файлового хранилища).</ParamField>
+
+## yggdrasil
+
+<ParamField path="enabled" type="boolean">Включает вход в игре.</ParamField>
+<ParamField path="serverName" type="string">Имя, которое видит authlib-injector.</ParamField>
+<ParamField path="rsaKeyPath" type="string">Путь к RSA-ключу для подписи текстур. Создаётся автоматически.</ParamField>
+<ParamField path="skinProvider" type="string">`template`, `json` или `sql`.</ParamField>
+<ParamField path="skinConfig" type="object">Настройки адаптера скинов.</ParamField>
+<ParamField path="skinDomains" type="array">Домены, с которых игра примет текстуры.</ParamField>
+
+Подробнее — [Вход в игре и скины](/auth/yggdrasil).
+
+## modules
+
+<ParamField path="dir" type="string">Каталог с исполняемыми файлами модулей. Каждый подхватывается при запуске.</ParamField>
+<ParamField path="config" type="object">Конфигурация модулей по имени файла: `{ "greeter": { … } }`.</ParamField>
+
+Подробнее — [Модули](/modules).
+
+## launcher
+
+<ParamField path="dir" type="string">Каталог с версиями лаунчера: `<dir>/<версия>/<артефакты>`. Публикуется командой `launcher publish`.</ParamField>
+
+Подробнее — [Обновление лаунчера](/launcher/updates).
+
+## branding
+
+<ParamField path="name" type="string">Имя, которое лаунчер показывает вместо «LAMINARA».</ParamField>
+<ParamField path="windowTitle" type="string">Заголовок окна лаунчера.</ParamField>
+<ParamField path="tagline" type="string">Строка над формой входа.</ParamField>
+<ParamField path="primaryColor" type="string">Акцентный цвет, например `#4ade80`.</ParamField>
+<ParamField path="primaryInk" type="string">Цвет текста на акцентном фоне.</ParamField>
+<ParamField path="backgroundColor" type="string">Фон приложения.</ParamField>
+<ParamField path="logoPath" type="string">Файл логотипа (`.svg`/`.png`). Встраивается в конфиг лаунчера как data-URI.</ParamField>
+<ParamField path="heroMediaPath" type="string">Фоновое видео или картинка главного экрана.</ParamField>
+<ParamField path="siteUrl" type="string">Ссылка на сайт проекта.</ParamField>
+
+Блок отдаётся командой `client-config` и запекается в лаунчер при сборке.
+
+## access
+
+<ParamField path="sources" type="object">Источники списков доступа по имени: `{ "closed-beta": { "type": "file" | "http", "config": { … } } }`.</ParamField>
+<ParamField path="rules" type="array">Правила: `builds` (шаблоны имён), `source`, `visibility` (`listed`/`hidden`), `message`.</ParamField>
+<ParamField path="publicObjects" type="boolean">Оставить `/objects/` без авторизации даже при наличии правил. По умолчанию `false`.</ParamField>
+
+Подробнее — [Доступ к сборкам](/builds/access).
+
+## hwid
+
+<ParamField path="mode" type="string">`off` · `observe` (по умолчанию) · `enforce`.</ParamField>
+<ParamField path="saltPath" type="string">Файл соли, которой хешируются измерения. Запекается в лаунчер командой `client-config`.</ParamField>
+<ParamField path="ticketSecretPath" type="string">Ключ HMAC для тикетов входа в игру.</ParamField>
+<ParamField path="store" type="object">`memory` или `sql` (`driver`: `sqlite`/`postgres`/`mysql`, `dsn`).</ParamField>
+<ParamField path="requireReport · requireChallenge · requireLauncher · requireHardwareKey" type="boolean">Строгость: отчёт обязателен, ответ на nonce обязателен, вход в игру только через лаунчер, ключ машины только в TPM.</ParamField>
+<ParamField path="minScore · minKinds · clusterScore · fanOutLimit · maxClusterSize" type="number">Пороги совпадения и границы кластера.</ParamField>
+<ParamField path="vmPolicy" type="string">`allow` · `flag` · `deny`.</ParamField>
+<ParamField path="hardwareBanTTL · retention · ipRetention" type="string">Срок аппаратного бана и хранения данных.</ParamField>
+
+Подробнее — [Машины и баны](/server/machines).
+
+## rateLimit
+
+Включён по умолчанию: публичный вход, открытый для перебора паролей, — не то состояние,
+которое кто-то выбирает осознанно.
+
+<ParamField path="disabled" type="boolean">Выключить все бюджеты. Только для сервера, недоступного из интернета.</ParamField>
+<ParamField path="backend" type="string">`memory` (по умолчанию) или `redis` — общий счётчик на несколько экземпляров.</ParamField>
+<ParamField path="redisAddr" type="string">Адрес Redis для `backend: redis`.</ParamField>
+<ParamField path="login" type="object">Бюджет на один адрес: `{ "limit": 10, "per": "5m" }`.</ParamField>
+<ParamField path="account" type="object">Бюджет на один ник, намеренно щедрый: `{ "limit": 50, "per": "15m" }`. Жёсткий лимит здесь дал бы любому способ заблокировать конкретного игрока чужими неудачными попытками.</ParamField>
+<ParamField path="challenge" type="object">Бюджет на запросы nonce: `{ "limit": 60, "per": "1m" }`.</ParamField>
+
+Тратится только **неудачная** попытка входа: игрок, который вводит пароль верно, в счётчики
+не попадает вообще.
+
+## news
+
+<ParamField path="source" type="object">`{ "type": "file" | "http", "config": { … } }`. Нет блока — новостей нет.</ParamField>
+<ParamField path="limit" type="number">Сколько записей отдавать лаунчеру. По умолчанию `20`.</ParamField>
+
+Подробнее — [Новости](/launcher/news).

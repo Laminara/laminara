@@ -1,0 +1,28 @@
+[Unit]
+Description=Laminara launcher server
+Documentation=https://github.com/laminara/laminara
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=laminara
+Group=laminara
+ExecStart=/usr/local/bin/laminara-server start --config /etc/laminara/config.json
+ExecStop=/usr/local/bin/laminara-server stop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+RuntimeDirectory=laminara
+StateDirectory=laminara
+Environment=XDG_RUNTIME_DIR=/run/laminara
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/laminara /run/laminara
+
+[Install]
+WantedBy=multi-user.target

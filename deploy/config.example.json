@@ -1,0 +1,115 @@
+{
+  "auth": {
+    "provider": "jsonfile",
+    "config": {
+      "path": "/var/lib/laminara/users.json",
+      "hash": "argon2id"
+    },
+    "sessions": {
+      "backend": "redis",
+      "redisAddr": "redis:6379"
+    }
+  },
+  "storage": {
+    "backend": "fs",
+    "config": {
+      "root": "/var/lib/laminara/objects",
+      "xAccelPrefix": "/internal-objects/"
+    }
+  },
+  "build": {
+    "profilesDir": "/var/lib/laminara/profiles",
+    "signingKeyPath": "/var/lib/laminara/signing.key",
+    "trustedSigningKeys": []
+  },
+  "api": {
+    "addr": "0.0.0.0:8099",
+    "xAccel": true
+  },
+  "yggdrasil": {
+    "enabled": true,
+    "serverName": "Laminara",
+    "rsaKeyPath": "/var/lib/laminara/yggdrasil-rsa.pem",
+    "skinProvider": "template",
+    "skinConfig": {
+      "skin": "https://skins.example.com/%nickname%.png",
+      "slim": true
+    },
+    "skinDomains": [
+      "skins.example.com"
+    ]
+  },
+  "modules": {
+    "dir": "/var/lib/laminara/modules",
+    "config": {}
+  },
+  "access": {
+    "sources": {
+      "closed-beta": {
+        "type": "file",
+        "config": {
+          "path": "/etc/laminara/closed-beta.json"
+        }
+      }
+    },
+    "rules": [
+      {
+        "builds": [
+          "test-*"
+        ],
+        "source": "closed-beta",
+        "visibility": "listed",
+        "message": "Закрытый тест — напишите в Discord за доступом"
+      }
+    ]
+  },
+  "branding": {
+    "name": "LAMINARA",
+    "windowTitle": "Laminara",
+    "tagline": "Войдите аккаунтом LAMINARA",
+    "primaryColor": "",
+    "primaryInk": "",
+    "backgroundColor": "",
+    "logoPath": "",
+    "heroMediaPath": "",
+    "siteUrl": ""
+  },
+  "hwid": {
+    "mode": "observe",
+    "saltPath": "/var/lib/laminara/hwid.salt",
+    "ticketSecretPath": "/var/lib/laminara/hwid-ticket.key",
+    "store": {
+      "backend": "sql",
+      "config": {
+        "driver": "sqlite",
+        "dsn": "/var/lib/laminara/machines.db"
+      }
+    },
+    "requireLauncher": false,
+    "vmPolicy": "flag",
+    "requireHardwareKey": false
+  },
+  "rateLimit": {
+    "backend": "memory",
+    "login": {
+      "limit": 10,
+      "per": "5m"
+    },
+    "account": {
+      "limit": 50,
+      "per": "15m"
+    },
+    "challenge": {
+      "limit": 60,
+      "per": "1m"
+    }
+  },
+  "news": {
+    "source": {
+      "type": "file",
+      "config": {
+        "path": "/var/lib/laminara/news.json"
+      }
+    }
+  }
+}

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package laminara.admin.v1;
+
+import "laminara/core/v1/platform.proto";
+
+message StatusRequest {}
+
+message StatusResponse {
+  string version = 1;
+  int64 started_at_unix_nanos = 2;
+  uint32 modules_loaded = 3;
+  uint64 memory_bytes = 4;
+  uint32 goroutines = 5;
+}
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+message LogLine {
+  int64 time_unix_nanos = 1;
+  LogLevel level = 2;
+  string source = 3;
+  string message = 4;
+  map<string, string> fields = 5;
+}
+
+message StreamLogsRequest {
+  LogLevel min_level = 1;
+  string source = 2;
+  uint32 backscroll = 3;
+  bool follow = 4;
+}
+
+message StreamLogsResponse {
+  LogLine line = 1;
+}
+
+message ExecRequest {
+  string line = 1;
+}
+
+message ExecOutputChunk {
+  string text = 1;
+  bool stderr = 2;
+}
+
+message ExecResult {
+  int32 exit_code = 1;
+}
+
+message ExecProgress {
+  string phase = 1;
+  int64 current = 2;
+  int64 total = 3;
+  string message = 4;
+}
+
+message ExecResponse {
+  oneof event {
+    ExecOutputChunk output = 1;
+    ExecResult result = 2;
+    ExecProgress progress = 3;
+  }
+}
+
+message ListVersionsRequest {
+  string query = 1;
+}
+
+message VersionInfo {
+  string id = 1;
+  string type = 2;
+}
+
+message ListVersionsResponse {
+  repeated VersionInfo versions = 1;
+  string latest_release = 2;
+  string latest_snapshot = 3;
+}
+
+message ListLoadersRequest {
+  string mc_version = 1;
+}
+
+message LoaderInfo {
+  string name = 1;
+  repeated string versions = 2;
+}
+
+message ListLoadersResponse {
+  repeated LoaderInfo loaders = 1;
+}
+
+message ListBuildsRequest {}
+
+message BuildInfo {
+  string name = 1;
+  string status = 2;
+  repeated laminara.core.v1.Platform prepared = 3;
+  repeated laminara.core.v1.Platform published = 4;
+}
+
+message ListBuildsResponse {
+  repeated BuildInfo builds = 1;
+}
+
+service AdminService {
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+  rpc Exec(ExecRequest) returns (stream ExecResponse);
+  rpc ListVersions(ListVersionsRequest) returns (ListVersionsResponse);
+  rpc ListLoaders(ListLoadersRequest) returns (ListLoadersResponse);
+  rpc ListBuilds(ListBuildsRequest) returns (ListBuildsResponse);
+}
