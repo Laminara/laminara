@@ -5,19 +5,16 @@ import { ipc } from "@/lib/ipc";
 import { useLauncher } from "@/store";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { MemoryField } from "./MemoryField";
 
 export function GeneralSettingsModal() {
   const close = useLauncher((state) => state.closeModal);
   const [settings, setSettings] = useState<GeneralSettings | null>(null);
-  const [memory, setMemory] = useState(4096);
   const [installDir, setInstallDir] = useState("");
   const [cleaned, setCleaned] = useState<number | null>(null);
 
   useEffect(() => {
     void ipc.generalSettings().then((data) => {
       setSettings(data);
-      setMemory(data.defaultMemoryMb);
       setInstallDir(data.installDir);
     });
   }, []);
@@ -28,7 +25,6 @@ export function GeneralSettingsModal() {
   };
 
   const save = async () => {
-    await ipc.setDefaultMemory(memory);
     if (settings && installDir && installDir !== settings.installDir) {
       await ipc.setInstallDir(installDir);
     }
@@ -36,14 +32,9 @@ export function GeneralSettingsModal() {
   };
 
   return (
-    <Modal title="Настройки" subtitle="Общие параметры лаунчера" onClose={close}>
+    <Modal title="Настройки" subtitle="Общие параметры лаунчера" compact onClose={close}>
       {settings && (
         <div className="flex flex-col gap-6">
-          <section>
-            <MemoryField valueMb={memory} onChange={setMemory} />
-            <p className="mt-2 text-xs text-mute">Память по умолчанию для сборок без своей настройки.</p>
-          </section>
-
           <div>
             <div className="mb-1.5 text-sm text-dim">Папка установки</div>
             <div className="flex gap-2">
@@ -70,12 +61,8 @@ export function GeneralSettingsModal() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-border pt-4 text-xs text-mute">
-            <span>Laminara</span>
-            <span>v{settings.version}</span>
-          </div>
-
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between border-t border-border pt-4">
+            <span className="text-xs text-mute">Laminara v{settings.version}</span>
             <Button onClick={() => void save()} className="px-6">
               Сохранить
             </Button>

@@ -343,15 +343,17 @@ impl Core {
             .unwrap_or(0);
         let selection = self.build_settings(profile).feature_selection;
         sync::sync(
-            &self.transport,
-            &base,
-            &profile_dir,
-            &state_dir,
-            &cas_dir,
-            &manifest.manifest,
-            &selection,
-            parallel,
-            cancel,
+            sync::SyncPlan {
+                transport: &self.transport,
+                base_url: &base,
+                profile_dir: &profile_dir,
+                state_dir: &state_dir,
+                cas_dir: &cas_dir,
+                manifest: &manifest.manifest,
+                selection: &selection,
+                max_parallel: parallel,
+                cancel,
+            },
             on_progress,
         )
         .await
@@ -456,14 +458,6 @@ impl Core {
             .get(profile)
             .cloned()
             .unwrap_or_default()
-    }
-
-    pub fn set_default_memory(&self, mb: u32) -> Result<(), CoreError> {
-        let mut next = ClientConfig::clone(&self.config.load());
-        next.default_memory_mb = mb.clamp(512, 65536);
-        next.save(&self.paths.config_file())?;
-        self.config.store(Arc::new(next));
-        Ok(())
     }
 
     pub fn set_build_memory(

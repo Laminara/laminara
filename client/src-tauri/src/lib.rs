@@ -3,7 +3,7 @@ mod commands;
 mod logging;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -45,7 +45,7 @@ pub fn embedded_branding() -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
-fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &PathBuf) -> Result<ClientConfig, String> {
+fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientConfig, String> {
     let file = paths.config_file();
     let embedded: EmbeddedConfig = serde_json::from_str(EMBEDDED_CLIENT_CONFIG)
         .map_err(|e| format!("embedded client config: {e}"))?;
@@ -162,7 +162,6 @@ pub fn run() {
             commands::stop,
             commands::player_counts,
             commands::general_settings,
-            commands::set_default_memory,
             commands::build_settings,
             commands::set_build_memory,
             commands::build_features,

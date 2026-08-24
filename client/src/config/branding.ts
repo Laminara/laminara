@@ -15,7 +15,7 @@ export interface Branding {
 const fallback: Branding = {
   name: "LAMINARA",
   windowTitle: "Laminara",
-  tagline: "Войдите аккаунтом LAMINARA",
+  tagline: "",
   primaryColor: "",
   primaryInk: "",
   backgroundColor: "",
@@ -43,7 +43,7 @@ export function applyBranding(raw: Partial<Branding> | null | undefined) {
   if (current.windowTitle) document.title = current.windowTitle;
 }
 
-const HERO_FALLBACK = "/hero.mp4";
+const HERO_FALLBACK = "/hero.jpg";
 
 function isVideo(source: string) {
   if (source.startsWith("data:")) return source.startsWith("data:video/");

@@ -33,8 +33,10 @@ export function Login() {
         <div className="mb-7 flex justify-center">
           <BrandMark />
         </div>
-        <h1 className="text-center text-xl font-bold">Вход в лаунчер</h1>
-        <p className="mb-6 mt-1 text-center text-sm text-dim">{brand().tagline}</p>
+        <h1 className="mb-6 text-center text-xl font-bold">Вход в лаунчер</h1>
+        {brand().tagline && (
+          <p className="-mt-5 mb-6 text-center text-sm text-dim">{brand().tagline}</p>
+        )}
 
         <div className="flex flex-col gap-3">
           <input
