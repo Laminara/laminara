@@ -63,6 +63,9 @@ message FeatureOption {
   repeated string files = 5;
   repeated FeatureGroup groups = 6;
   OptionMeta meta = 7;
+  repeated string jvm_args = 8;
+  repeated string game_args = 9;
+  repeated string classpath = 10;
 }
 
 message FeatureGroup {

@@ -41,6 +41,7 @@ pub struct Core {
     client_token: String,
     machine_salt: Option<[u8; 32]>,
     machine_facts: tokio::sync::OnceCell<Arc<crate::machine::MachineFacts>>,
+    manifests: std::sync::Mutex<std::collections::HashMap<String, Arc<VerifiedManifest>>>,
 }
 
 impl Core {
@@ -59,6 +60,7 @@ impl Core {
             client_token,
             machine_salt,
             machine_facts: tokio::sync::OnceCell::new(),
+            manifests: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -179,13 +181,24 @@ impl Core {
         self.pool.list_profiles().await
     }
 
-    pub async fn verified_manifest(&self, profile: &str) -> Result<VerifiedManifest, CoreError> {
+    pub async fn verified_manifest(
+        &self,
+        profile: &str,
+    ) -> Result<Arc<VerifiedManifest>, CoreError> {
         let response = self.pool.get_manifest(profile.to_string()).await?;
-        verify_and_decode(
+        let verified = Arc::new(verify_and_decode(
             &self.verifying_keys,
             &response.manifest,
             &response.signature,
-        )
+        )?);
+        if let Ok(mut cache) = self.manifests.lock() {
+            cache.insert(profile.to_string(), verified.clone());
+        }
+        Ok(verified)
+    }
+
+    fn cached_manifest(&self, profile: &str) -> Option<Arc<VerifiedManifest>> {
+        self.manifests.lock().ok()?.get(profile).cloned()
     }
 
     pub fn profile_dir(&self, profile: &str) -> PathBuf {
@@ -373,6 +386,15 @@ impl Core {
             .unwrap_or_else(|| profile_dir.clone());
         let jvm = self.effective_jvm(profile);
 
+        let manifest = match self.cached_manifest(profile) {
+            Some(manifest) => manifest,
+            None => self.verified_manifest(profile).await?,
+        };
+        let extras = crate::features::resolve_extras(
+            &manifest.manifest.features,
+            &self.build_settings(profile).feature_selection,
+        );
+
         let argv = build_argv(&LaunchInputs {
             profile: &launch_profile,
             profile_dir: &profile_dir,
@@ -384,6 +406,7 @@ impl Core {
             prefetch_b64: &prefetch,
             session,
             jvm_tuning: &jvm,
+            extras: &extras,
             client_version,
         });
 

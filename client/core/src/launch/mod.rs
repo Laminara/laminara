@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::account::GameSession;
 use crate::error::CoreError;
+use crate::features::LaunchExtras;
 use profile::LaunchProfile;
 
 pub const LAUNCH_PROFILE_NAME: &str = "laminara.profile.json";
@@ -20,6 +21,7 @@ pub struct LaunchInputs<'a> {
     pub prefetch_b64: &'a str,
     pub session: &'a GameSession,
     pub jvm_tuning: &'a [String],
+    pub extras: &'a LaunchExtras,
     pub client_version: &'a str,
 }
 
@@ -88,13 +90,14 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
     let classpath = profile
         .classpath
         .iter()
+        .chain(input.extras.classpath.iter())
         .map(|entry| join(entry))
         .collect::<Vec<_>>()
         .join(sep);
     argv.push("-cp".into());
     argv.push(classpath);
 
-    for arg in &profile.jvm_args {
+    for arg in profile.jvm_args.iter().chain(input.extras.jvm_args.iter()) {
         argv.push(substitute(arg, &libraries_dir, sep, &version));
     }
 
@@ -126,7 +129,11 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
         "release".into(),
     ]);
 
-    for arg in &profile.game_args {
+    for arg in profile
+        .game_args
+        .iter()
+        .chain(input.extras.game_args.iter())
+    {
         argv.push(substitute(arg, &libraries_dir, sep, &version));
     }
 
@@ -214,6 +221,10 @@ mod tests {
         }
     }
 
+    fn no_extras() -> LaunchExtras {
+        LaunchExtras::default()
+    }
+
     fn inputs<'a>(
         profile: &'a LaunchProfile,
         session: &'a GameSession,
@@ -223,6 +234,7 @@ mod tests {
         dir: &'a PathBuf,
         game: &'a PathBuf,
         tuning: &'a [String],
+        extras: &'a LaunchExtras,
     ) -> LaunchInputs<'a> {
         LaunchInputs {
             profile,
@@ -235,6 +247,7 @@ mod tests {
             prefetch_b64: "PREFETCH",
             session,
             jvm_tuning: tuning,
+            extras,
             client_version: "0.1.0",
         }
     }
@@ -252,7 +265,15 @@ mod tests {
         );
         let tuning = vec!["-Xmx4G".to_string()];
         let argv = build_argv(&inputs(
-            &profile, &session, &java, &natives, &jar, &dir, &game, &tuning,
+            &profile,
+            &session,
+            &java,
+            &natives,
+            &jar,
+            &dir,
+            &game,
+            &tuning,
+            &no_extras(),
         ));
         let line = argv.join(" ");
 
@@ -311,6 +332,7 @@ mod tests {
             &dir,
             &game,
             &[],
+            &no_extras(),
         ));
         let line = argv.join(" ");
 
@@ -325,5 +347,52 @@ mod tests {
         assert!(line.contains("--launchTarget forgeclient"));
         assert!(line.contains("--fml.mcVersion 1.21.1"));
         assert!(!line.contains("${"), "no unsubstituted placeholders remain");
+    }
+
+    #[test]
+    fn optional_mods_extend_the_launch_command() {
+        let mut profile = base_profile();
+        profile.jvm_args = vec!["-Dprofile.flag=1".into()];
+        profile.game_args = vec!["--profileArg".into()];
+        let session = session();
+        let (java, natives, jar, dir, game) = (
+            PathBuf::from("/p/runtime/windows-x64/bin/java"),
+            PathBuf::from("/p/natives/windows-x64"),
+            PathBuf::from("/res/authlib-injector.jar"),
+            PathBuf::from("/p"),
+            PathBuf::from("/p"),
+        );
+        let extras = LaunchExtras {
+            jvm_args: vec!["-Diris.enable=true".into()],
+            game_args: vec!["--zoom".into()],
+            classpath: vec!["mods/iris.jar".into()],
+        };
+        let argv = build_argv(&inputs(
+            &profile,
+            &session,
+            &java,
+            &natives,
+            &jar,
+            &dir,
+            &game,
+            &[],
+            &extras,
+        ));
+        let at = |needle: &str| {
+            argv.iter()
+                .position(|a| a == needle)
+                .unwrap_or_else(|| panic!("{needle} is missing from {argv:?}"))
+        };
+        let main_class = at(&profile.main_class);
+        let cp = at("-cp");
+
+        assert!(at("-Dprofile.flag=1") < at("-Diris.enable=true"));
+        assert!(at("-Diris.enable=true") < main_class);
+        assert!(at("--profileArg") < at("--zoom"));
+        assert!(main_class < at("--profileArg"));
+
+        let classpath: Vec<&str> = argv[cp + 1].split(';').collect();
+        assert_eq!(classpath.len(), 3);
+        assert!(classpath[2].ends_with("mods/iris.jar"));
     }
 }

@@ -39,6 +39,9 @@ func optionsFromSpec(options []OptionSpec) []*corev1.FeatureOption {
 			DefaultEnabled: o.DefaultEnabled,
 			Files:          o.Files,
 			Groups:         groupsFromSpec(o.Groups),
+			JvmArgs:        o.JvmArgs,
+			GameArgs:       o.GameArgs,
+			Classpath:      o.Classpath,
 		}
 		if o.Meta != nil {
 			option.Meta = &corev1.OptionMeta{
@@ -154,6 +157,9 @@ func validateGroups(groups []*corev1.FeatureGroup, policyByPath map[string]corev
 					return fmt.Errorf("option %q/%q: file %q is user_writable; optional files must be immutable or enforced", g.Id, o.Id, file)
 				}
 			}
+			if err := validateLaunchArgs(g.Id, o, policyByPath); err != nil {
+				return err
+			}
 			if err := validateGroups(o.Groups, policyByPath); err != nil {
 				return err
 			}
@@ -179,4 +185,79 @@ func computeAddedSizes(groups []*corev1.FeatureGroup, sizeByPath map[string]uint
 			computeAddedSizes(o.Groups, sizeByPath)
 		}
 	}
+}
+
+var reservedJvmArgs = map[string]bool{
+	"-cp":                 true,
+	"-classpath":          true,
+	"--class-path":        true,
+	"-Djava.class.path":   true,
+	"-Djava.library.path": true,
+	"-Dorg.lwjgl.system.SharedLibraryExtractPath": true,
+	"-Dminecraft.launcher.brand":                  true,
+	"-Dminecraft.launcher.version":                true,
+	"-Dauthlibinjector.side":                      true,
+	"-Dauthlibinjector.yggdrasil.prefetched":      true,
+}
+
+var reservedGameArgs = map[string]bool{
+	"--gameDir":     true,
+	"--assetsDir":   true,
+	"--assetIndex":  true,
+	"--accessToken": true,
+	"--uuid":        true,
+	"--username":    true,
+	"--version":     true,
+	"--versionType": true,
+	"--userType":    true,
+	"--clientId":    true,
+	"--xuid":        true,
+}
+
+func validateLaunchArgs(groupID string, o *corev1.FeatureOption, policyByPath map[string]corev1.FilePolicy) error {
+	for _, arg := range o.JvmArgs {
+		if !strings.HasPrefix(arg, "-") {
+			return fmt.Errorf("option %q/%q: jvmArgs entry %q is not a java option — it would be taken as the main class", groupID, o.Id, arg)
+		}
+		key := arg
+		if i := strings.IndexAny(arg, "=:"); i > 0 {
+			key = arg[:i]
+		}
+		if reservedJvmArgs[key] {
+			return fmt.Errorf("option %q/%q: jvmArgs must not set %q — the launcher builds the classpath from the profile and the chosen options", groupID, o.Id, key)
+		}
+	}
+	for _, arg := range o.GameArgs {
+		key := arg
+		if i := strings.Index(arg, "="); i > 0 {
+			key = arg[:i]
+		}
+		if reservedGameArgs[key] {
+			return fmt.Errorf("option %q/%q: gameArgs must not set %q — the launcher passes it itself", groupID, o.Id, key)
+		}
+	}
+	for _, entry := range o.Classpath {
+		if err := validateClasspathEntry(entry); err != nil {
+			return fmt.Errorf("option %q/%q: %w", groupID, o.Id, err)
+		}
+		if _, ok := policyByPath[entry]; !ok {
+			return fmt.Errorf("option %q/%q: classpath entry %q is not in the build", groupID, o.Id, entry)
+		}
+	}
+	return nil
+}
+
+func validateClasspathEntry(entry string) error {
+	if entry == "" {
+		return fmt.Errorf("classpath entry is empty")
+	}
+	if strings.ContainsAny(entry, ":;\\") || strings.HasPrefix(entry, "/") {
+		return fmt.Errorf("classpath entry %q must be a path inside the profile, written with forward slashes", entry)
+	}
+	for _, segment := range strings.Split(entry, "/") {
+		if segment == ".." {
+			return fmt.Errorf("classpath entry %q leaves the profile directory", entry)
+		}
+	}
+	return nil
 }

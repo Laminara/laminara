@@ -25,8 +25,11 @@ func TestFeatureModelFromSpec(t *testing.T) {
 		ID: "graphics", Title: "Графика", Selection: "single",
 		Options: []OptionSpec{{
 			ID: "sodium", Title: "Sodium", DefaultEnabled: true, Files: []string{"mods/sodium.jar"},
-			Meta:   &MetaSpec{Badge: "Рекомендуется"},
-			Groups: []GroupSpec{{ID: "extras", Selection: "multi", Options: []OptionSpec{{ID: "extra", Files: []string{"mods/extra.jar"}}}}},
+			JvmArgs:   []string{"-Dsodium.fast=true"},
+			GameArgs:  []string{"--sodium"},
+			Classpath: []string{"libraries/sodium/agent.jar"},
+			Meta:      &MetaSpec{Badge: "Рекомендуется"},
+			Groups:    []GroupSpec{{ID: "extras", Selection: "multi", Options: []OptionSpec{{ID: "extra", Files: []string{"mods/extra.jar"}}}}},
 		}},
 	}}}
 	m := featureModelFromSpec(spec)
@@ -42,6 +45,15 @@ func TestFeatureModelFromSpec(t *testing.T) {
 	}
 	if g.Options[0].Groups[0].Selection != corev1.SelectionType_SELECTION_TYPE_MULTI {
 		t.Fatal("nested selection not mapped")
+	}
+	if len(g.Options[0].JvmArgs) != 1 || g.Options[0].JvmArgs[0] != "-Dsodium.fast=true" {
+		t.Fatalf("jvm args = %v", g.Options[0].JvmArgs)
+	}
+	if len(g.Options[0].GameArgs) != 1 || g.Options[0].GameArgs[0] != "--sodium" {
+		t.Fatalf("game args = %v", g.Options[0].GameArgs)
+	}
+	if len(g.Options[0].Classpath) != 1 || g.Options[0].Classpath[0] != "libraries/sodium/agent.jar" {
+		t.Fatalf("classpath = %v", g.Options[0].Classpath)
 	}
 }
 
@@ -122,5 +134,43 @@ func TestComputeAddedSizes(t *testing.T) {
 	computeAddedSizes(m.Groups, map[string]uint64{"x": 100, "y": 50})
 	if got := m.Groups[0].Options[0].Meta.AddedSize; got != 150 {
 		t.Fatalf("added size = %d, want 150", got)
+	}
+}
+
+func TestValidateLaunchArgs(t *testing.T) {
+	policy := policyMap("mods/a.jar")
+	build := func(o OptionSpec) *corev1.FeatureModel {
+		o.ID = "a"
+		o.Files = []string{"mods/a.jar"}
+		return featureModelFromSpec(&FeatureSpec{Groups: []GroupSpec{{ID: "g", Selection: "multi", Options: []OptionSpec{o}}}})
+	}
+
+	good := build(OptionSpec{
+		JvmArgs:   []string{"-Xmx4G", "-javaagent:${library_directory}/a/agent.jar"},
+		GameArgs:  []string{"--guard"},
+		Classpath: []string{"mods/a.jar"},
+	})
+	if err := validateFeatures(good, policy); err != nil {
+		t.Fatalf("valid arguments rejected: %v", err)
+	}
+
+	bad := map[string]OptionSpec{
+		"classpath override":  {JvmArgs: []string{"-cp", "/etc/passwd"}},
+		"class path property": {JvmArgs: []string{"-Djava.class.path=/etc/passwd"}},
+		"game dir override":   {GameArgs: []string{"--gameDir", "/tmp"}},
+		"absolute entry":      {Classpath: []string{"/etc/passwd"}},
+		"escaping entry":      {Classpath: []string{"../../etc/passwd"}},
+		"separator entry":     {Classpath: []string{"a.jar:/etc/passwd"}},
+		"empty entry":         {Classpath: []string{""}},
+		"missing entry":       {Classpath: []string{"libraries/absent.jar"}},
+		"lost dash":           {JvmArgs: []string{"Xmx2G"}},
+		"library path":        {JvmArgs: []string{"-Djava.library.path=/tmp"}},
+		"prefetched textures": {JvmArgs: []string{"-Dauthlibinjector.yggdrasil.prefetched=x"}},
+		"user type":           {GameArgs: []string{"--userType", "legacy"}},
+	}
+	for name, spec := range bad {
+		if err := validateFeatures(build(spec), policy); err == nil {
+			t.Fatalf("%s must be rejected", name)
+		}
 	}
 }

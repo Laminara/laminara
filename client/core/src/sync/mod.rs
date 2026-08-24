@@ -341,7 +341,7 @@ struct PlanItem {
     released: bool,
 }
 
-fn validate_manifest_path(path: &str) -> Result<(), CoreError> {
+pub(crate) fn validate_manifest_path(path: &str) -> Result<(), CoreError> {
     if path.is_empty() || path.starts_with('/') || path.contains('\\') {
         return Err(CoreError::Sync(format!("unsafe manifest path: {path}")));
     }

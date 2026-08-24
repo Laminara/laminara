@@ -35,12 +35,22 @@ struct ActiveOption {
     files: Vec<String>,
     requires: Vec<String>,
     incompatible_with: Vec<String>,
+    jvm_args: Vec<String>,
+    game_args: Vec<String>,
+    classpath: Vec<String>,
 }
 
-pub fn resolve_active(
+#[derive(Debug, Default)]
+pub struct LaunchExtras {
+    pub jvm_args: Vec<String>,
+    pub game_args: Vec<String>,
+    pub classpath: Vec<String>,
+}
+
+fn active_options(
     model: &Option<FeatureModel>,
     selection: &FeatureSelection,
-) -> (HashSet<String>, HashSet<String>) {
+) -> BTreeMap<String, ActiveOption> {
     let mut active: BTreeMap<String, ActiveOption> = BTreeMap::new();
     let mut order = 0usize;
     if let Some(model) = model {
@@ -49,6 +59,14 @@ pub fn resolve_active(
         }
     }
     enforce_constraints(&mut active);
+    active
+}
+
+pub fn resolve_active(
+    model: &Option<FeatureModel>,
+    selection: &FeatureSelection,
+) -> (HashSet<String>, HashSet<String>) {
+    let active = active_options(model, selection);
 
     let addrs: HashSet<String> = active.keys().cloned().collect();
     let files = active
@@ -56,6 +74,26 @@ pub fn resolve_active(
         .flat_map(|option| option.files.iter().cloned())
         .collect();
     (addrs, files)
+}
+
+pub fn resolve_extras(model: &Option<FeatureModel>, selection: &FeatureSelection) -> LaunchExtras {
+    let active = active_options(model, selection);
+
+    let mut ordered: Vec<&ActiveOption> = active.values().collect();
+    ordered.sort_by_key(|option| option.order);
+
+    let mut extras = LaunchExtras::default();
+    for option in ordered {
+        extras.jvm_args.extend(option.jvm_args.iter().cloned());
+        extras.game_args.extend(option.game_args.iter().cloned());
+        for entry in &option.classpath {
+            match crate::sync::validate_manifest_path(entry) {
+                Ok(()) => extras.classpath.push(entry.clone()),
+                Err(error) => tracing::warn!("classpath entry dropped: {error}"),
+            }
+        }
+    }
+    extras
 }
 
 fn walk(
@@ -79,6 +117,9 @@ fn walk(
                     incompatible_with: meta
                         .map(|m| m.incompatible_with.clone())
                         .unwrap_or_default(),
+                    jvm_args: option.jvm_args.clone(),
+                    game_args: option.game_args.clone(),
+                    classpath: option.classpath.clone(),
                 },
             );
             *order += 1;
@@ -492,6 +533,121 @@ mod tests {
         assert_eq!(
             optional,
             HashSet::from(["sodium.jar".to_string(), "e.jar".to_string()])
+        );
+    }
+
+    #[test]
+    fn chosen_options_add_launch_arguments_in_order() {
+        let mut shaders = option("shaders", true, &["mods/iris.jar"]);
+        shaders.jvm_args = vec!["-Diris.enable=true".into()];
+        shaders.classpath = vec!["mods/iris.jar".into()];
+        let mut zoom = option("zoom", true, &["mods/zoom.jar"]);
+        zoom.game_args = vec!["--zoom".into()];
+        let plain = option("plain", false, &["mods/plain.jar"]);
+
+        let model = Some(FeatureModel {
+            groups: vec![group(
+                "graphics",
+                SelectionType::Multi,
+                false,
+                vec![shaders, zoom, plain],
+            )],
+        });
+
+        let extras = resolve_extras(&model, &sel(&[("graphics", &["shaders", "zoom", "plain"])]));
+        assert_eq!(extras.jvm_args, vec!["-Diris.enable=true"]);
+        assert_eq!(extras.game_args, vec!["--zoom"]);
+        assert_eq!(extras.classpath, vec!["mods/iris.jar"]);
+    }
+
+    #[test]
+    fn arguments_follow_the_order_of_the_options_not_their_ids() {
+        let mut zebra = option("zebra", true, &["mods/zebra.jar"]);
+        zebra.jvm_args = vec!["-Dzebra=1".into(), "-Dzebra=2".into()];
+        zebra.game_args = vec!["--zebra".into()];
+        zebra.classpath = vec!["mods/zebra.jar".into()];
+        let mut alpha = option("alpha", true, &["mods/alpha.jar"]);
+        alpha.jvm_args = vec!["-Dalpha=1".into(), "-Dalpha=2".into()];
+        alpha.game_args = vec!["--alpha".into()];
+        alpha.classpath = vec!["mods/alpha.jar".into()];
+
+        let model = Some(FeatureModel {
+            groups: vec![group(
+                "graphics",
+                SelectionType::Multi,
+                false,
+                vec![zebra, alpha],
+            )],
+        });
+
+        let extras = resolve_extras(&model, &sel(&[("graphics", &["alpha", "zebra"])]));
+        assert_eq!(
+            extras.jvm_args,
+            vec!["-Dzebra=1", "-Dzebra=2", "-Dalpha=1", "-Dalpha=2"]
+        );
+        assert_eq!(extras.game_args, vec!["--zebra", "--alpha"]);
+        assert_eq!(extras.classpath, vec!["mods/zebra.jar", "mods/alpha.jar"]);
+    }
+
+    #[test]
+    fn a_classpath_entry_that_escapes_the_profile_is_dropped() {
+        let mut cheat = option("cheat", true, &["mods/cheat.jar"]);
+        cheat.classpath = vec![
+            "/etc/passwd".into(),
+            "../../escape.jar".into(),
+            ".laminara/state.jar".into(),
+            "mods/cheat.jar".into(),
+        ];
+
+        let model = Some(FeatureModel {
+            groups: vec![group("graphics", SelectionType::Multi, false, vec![cheat])],
+        });
+
+        let extras = resolve_extras(&model, &sel(&[("graphics", &["cheat"])]));
+        assert_eq!(extras.classpath, vec!["mods/cheat.jar"]);
+    }
+
+    #[test]
+    fn arguments_of_a_switched_off_option_do_not_leak() {
+        let mut shaders = option("shaders", false, &["mods/iris.jar"]);
+        shaders.jvm_args = vec!["-Diris.enable=true".into()];
+        let model = Some(FeatureModel {
+            groups: vec![group(
+                "graphics",
+                SelectionType::Multi,
+                false,
+                vec![shaders],
+            )],
+        });
+
+        let extras = resolve_extras(&model, &sel(&[("graphics", &[])]));
+        assert!(
+            extras.jvm_args.is_empty(),
+            "a switched off option must not touch the launch command"
+        );
+    }
+
+    #[test]
+    fn option_dropped_by_a_constraint_takes_its_arguments_with_it() {
+        let mut needs_base = option("extra", true, &["mods/extra.jar"]);
+        needs_base.jvm_args = vec!["-Dextra=1".into()];
+        needs_base.meta = Some(crate::proto::core::v1::OptionMeta {
+            requires: vec!["graphics#base".into()],
+            ..Default::default()
+        });
+        let model = Some(FeatureModel {
+            groups: vec![group(
+                "graphics",
+                SelectionType::Multi,
+                false,
+                vec![needs_base],
+            )],
+        });
+
+        let extras = resolve_extras(&model, &sel(&[("graphics", &["extra"])]));
+        assert!(
+            extras.jvm_args.is_empty(),
+            "an option dropped by a constraint takes its arguments with it"
         );
     }
 }

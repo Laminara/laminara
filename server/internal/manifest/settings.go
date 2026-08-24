@@ -58,6 +58,9 @@ type OptionSpec struct {
 	Files          []string    `json:"files,omitempty"`
 	Groups         []GroupSpec `json:"groups,omitempty"`
 	Meta           *MetaSpec   `json:"meta,omitempty"`
+	JvmArgs        []string    `json:"jvmArgs,omitempty"`
+	GameArgs       []string    `json:"gameArgs,omitempty"`
+	Classpath      []string    `json:"classpath,omitempty"`
 }
 
 type MetaSpec struct {
