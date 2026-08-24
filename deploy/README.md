@@ -1,25 +1,32 @@
-# Deploying Laminara
+# Развёртывание
 
-The server is a single static Go binary (`laminara-server`) that runs headless and exposes a control
-console over a Unix socket. It serves one public TCP listener (launcher API + object bytes + in-game
-Yggdrasil auth); put nginx in front of it for TLS.
+Сервер — один статический бинарь `laminara-server`. Работает без интерфейса, а управляется
+через Unix-сокет: та же команда подключается к запущенному процессу. Наружу он открывает один
+TCP-порт, на котором висят API лаунчера, раздача файлов и вход в игре; TLS перед ним держит
+nginx.
 
-## Layout
-- `Dockerfile` — multi-stage build → `debian:12-slim` runtime (glibc, so the downloaded Mojang JRE can
-  run the Forge/NeoForge installer processors).
-- `docker-compose.yml` — server + Redis; commented Postgres / S3 (Garage) for scale.
-- `systemd/laminara-server.service` — `Type=notify` unit (the daemon sends sd_notify).
-- `nginx/laminara.conf` — TLS reverse proxy + zero-copy object serving via `X-Accel-Redirect`.
-- `config.example.json` — full config (auth · storage · build · api · yggdrasil).
+Подробности по каждому разделу — в [документации](https://docs.laminara.dev).
 
-## Quick start (Docker)
+## Что здесь лежит
+
+| Файл | Зачем |
+| --- | --- |
+| `Dockerfile` | Многоступенчатая сборка в `debian:12-slim`. Именно glibc, а не distroless: скачанная Java должна запускать процессоры установщика Forge и NeoForge. |
+| `docker-compose.yml` | Сервер и Redis; Postgres и своё S3 закомментированы до того момента, когда понадобятся. |
+| `systemd/laminara-server.service` | Юнит `Type=notify` — демон сам сообщает systemd о готовности. |
+| `nginx/laminara.conf` | TLS-прокси и раздача файлов через `X-Accel-Redirect`. |
+| `config.example.json` | Конфиг со всеми разделами. |
+
+## Docker
+
 ```sh
-make generate                     # generate gen/ (protobuf) before building the image
-cp deploy/config.example.json deploy/config.json   # then edit
+make generate                                        # protobuf перед сборкой образа
+cp deploy/config.example.json deploy/config.json     # и отредактировать
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 ## systemd
+
 ```sh
 make build
 sudo install -m0755 bin/laminara-server /usr/local/bin/laminara-server
@@ -30,48 +37,59 @@ sudo install -m0644 deploy/systemd/laminara-server.service /etc/systemd/system/
 sudo systemctl enable --now laminara-server
 ```
 
-## nginx + TLS
-Point `nginx/laminara.conf` at your domain, obtain a certificate with certbot, and reload. The
-`/internal-objects/` location must `alias` the fs storage root and stays `internal`; the server sets
-`X-Accel-Redirect` (enabled by `api.xAccel: true`) so nginx streams object bytes with sendfile.
-For S3 storage the server instead redirects to a presigned URL and nginx is not on the byte path.
+## nginx и TLS
 
-## Operating the server
-Attach to the running daemon's console (same host):
+Замените домен в `nginx/laminara.conf`, получите сертификат certbot'ом и перезагрузите nginx.
+
+Локация `/internal-objects/` должна оставаться `internal` и указывать `alias` на корень
+файлового хранилища: сервер отвечает заголовком `X-Accel-Redirect` (включается
+`api.xAccel: true`), а байты отдаёт nginx через `sendfile`, не пропуская их через процесс
+сервера. С хранилищем S3 всё иначе — сервер выдаёт временную ссылку, и nginx на пути байтов
+не стоит.
+
+## Работа с сервером
+
 ```sh
 laminara-server status
-laminara-server console          # interactive
+laminara-server console                       # интерактивная консоль с мастерами
 laminara-server exec versions 1.21
 laminara-server exec loaders 1.21.1
-laminara-server exec prepare <name> <mcVersion> loader=<vanilla|fabric|quilt|forge|neoforge> [loaderVersion=..] [platform=windows-x64]
-laminara-server exec publish <name>
+laminara-server exec install <имя> <версия> [loader=neoforge] [loaderVersion=…] [platform=windows-x64]
+laminara-server exec publish <имя>
 ```
-`prepare` builds a ready-to-run client into `build.profilesDir/<name>` (editable files); `publish`
-snapshots it into a signed manifest the launcher fetches. New MC/loader versions are picked up from
-upstream automatically — no redeploy.
 
-## Branded launcher (baked-in server)
+`install` собирает готовый клиент в `build.profilesDir/<имя>` — папку можно править руками.
+`publish` снимает с неё подписанный манифест, за которым и приходит лаунчер. Новые версии
+Minecraft и загрузчиков подхватываются сами, передеплой для этого не нужен.
 
-Players should never type a server address — the launcher you hand them already knows your
-server(s) and trusts your signing key. Generate the client config from the running server, then
-build the launcher with it embedded:
+## Лаунчер под ваш проект
+
+Игрок не вводит адрес сервера: лаунчер, который вы ему даёте, уже знает адреса и доверяет
+вашим ключам подписи. Сначала соберите конфигурацию с работающего сервера, потом соберите
+с ней лаунчер:
 
 ```sh
 laminara-server client-config --config /etc/laminara/config.json \
   --endpoint https://eu.play.example.com \
-  --endpoint https://us.play.example.com  > laminara.client.json
+  --endpoint https://us.play.example.com > laminara.client.json
 
-# build the desktop launcher with your config baked in
-LAMINARA_CLIENT_CONFIG=$PWD/laminara.client.json  (cd client && pnpm tauri build)
+cd client
+./build-launcher.sh ../laminara.client.json --target windows
+./build-launcher.sh ../laminara.client.json --target linux
 ```
 
-`client-config` emits the ordered endpoint list (players' launchers probe them and pick the
-nearest healthy one, with failover) plus `serverPublicKeyHex` (used to verify every signed
-manifest). Ship the resulting binary; a first run bootstraps from the embedded config and the
-player only logs in. Without `LAMINARA_CLIENT_CONFIG` the build embeds
-`client/src-tauri/laminara.client.default.json` (localhost, for development).
+`client-config` отдаёт список адресов по порядку (лаунчер проверяет их и берёт ближайший
+живой, а при отказе переключается), всё кольцо ключей подписи, соль машинного отпечатка и
+оформление с картинками. Готовый файл раздаёте игрокам — при первом запуске он берёт всё из
+запечённой конфигурации, игроку остаётся только войти.
 
-## In-game auth (authlib-injector)
-Launch the game with authlib-injector pointing at `https://<domain>/yggdrasil/`. Laminara verifies
-credentials through the same auth adapter, issues in-game tokens, and signs skin textures (RSA-SHA1)
-served by the configured skin adapter (`template` or `json`).
+Без `LAMINARA_CLIENT_CONFIG` сборка возьмёт `client/src-tauri/laminara.client.default.json` —
+это localhost для разработки, не для игроков. Подробности: [сборка
+лаунчера](https://docs.laminara.dev/launcher/building/).
+
+## Вход в игре
+
+Игра запускается с authlib-injector, направленным на `https://<домен>/yggdrasil/`. Пароль
+проверяется тем же адаптером аккаунтов, что и в лаунчере; Laminara выдаёт игровые токены и
+подписывает текстуры скинов (RSA-SHA1). Откуда брать скины, задаёт адаптер — `template`,
+`json` или `sql`.

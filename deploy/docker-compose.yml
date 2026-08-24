@@ -16,13 +16,13 @@ services:
         condition: service_started
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
 
-  # Enable only if the auth adapter reads from a database you host here.
+  # Включайте, только если адаптер аккаунтов читает базу, которую вы держите здесь.
   # postgres:
   #   image: postgres:18-alpine
   #   restart: unless-stopped
@@ -33,8 +33,8 @@ services:
   #   volumes:
   #     - postgres-data:/var/lib/postgresql/data
 
-  # Self-hosted S3 (recommended for scale). The install script can wire this up;
-  # see docs/guide/storage.md for Garage / SeaweedFS / Backblaze B2.
+  # Своё S3 — когда одного сервера мало. Установщик умеет прописать его сам;
+  # варианты хранилища разобраны в документации, раздел «Хранилище».
   # garage:
   #   image: dxflrs/garage:v1.0.1
   #   restart: unless-stopped

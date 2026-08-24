@@ -1,6 +1,6 @@
 [Unit]
 Description=Laminara launcher server
-Documentation=https://github.com/laminara/laminara
+Documentation=https://docs.laminara.dev
 After=network-online.target
 Wants=network-online.target
 

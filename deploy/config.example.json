@@ -39,6 +39,9 @@
       "skins.example.com"
     ]
   },
+  "launcher": {
+    "dir": "/var/lib/laminara/launcher"
+  },
   "modules": {
     "dir": "/var/lib/laminara/modules",
     "config": {}

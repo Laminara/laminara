@@ -12,6 +12,7 @@ tidy:
 
 build: generate
 	go build ./...
+	go build -trimpath -o bin/laminara-server ./server/cmd/laminara-server
 
 test: generate
 	go test ./...
