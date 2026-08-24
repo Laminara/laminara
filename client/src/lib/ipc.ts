@@ -119,12 +119,12 @@ export const ipc = {
 
   checkUpdate: (): Promise<LauncherUpdate | null> => (isTauri ? core("check_update") : Promise.resolve(null)),
 
-  applyUpdate: async (onProgress: (done: number, total: number) => void): Promise<void> => {
+  applyUpdate: async (version: string, onProgress: (done: number, total: number) => void): Promise<void> => {
     if (!isTauri) return;
     const { Channel, invoke } = await import("@tauri-apps/api/core");
     const channel = new Channel<{ bytesDone: number; bytesTotal: number }>();
     channel.onmessage = (message) => onProgress(message.bytesDone, message.bytesTotal);
-    await invoke("apply_update", { onEvent: channel });
+    await invoke("apply_update", { version, onEvent: channel });
   },
 
   onGameExit: async (handler: (code: number) => void): Promise<() => void> => {

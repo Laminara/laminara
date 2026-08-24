@@ -938,10 +938,20 @@ pub struct UpdateDto {
     blocked_reason: Option<String>,
 }
 
+const UPDATED_TO: &str = "LAMINARA_UPDATED_TO";
+
 #[tauri::command]
 pub async fn check_update(state: State<'_, AppState>) -> Result<Option<UpdateDto>, String> {
     match state.core.check_update(env!("CARGO_PKG_VERSION")).await {
         Ok(Some(update)) => {
+            if std::env::var(UPDATED_TO).as_deref() == Ok(update.version.as_str()) {
+                tracing::warn!(
+                    "the update to {} left the launcher on {}, not offering it again",
+                    update.version,
+                    env!("CARGO_PKG_VERSION")
+                );
+                return Ok(None);
+            }
             tracing::info!("launcher update available: {}", update.version);
             Ok(Some(UpdateDto {
                 version: update.version,
@@ -965,6 +975,7 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<Option<UpdateDto
 pub async fn apply_update(
     app: AppHandle,
     state: State<'_, AppState>,
+    version: String,
     on_event: Channel<UpdateProgress>,
 ) -> Result<(), String> {
     if state.game_token.lock().await.is_some() {
@@ -983,7 +994,9 @@ pub async fn apply_update(
         .map_err(|e| player_error("update failed", e))?;
 
     tracing::info!("launcher updated, relaunching {}", target.display());
-    let _ = laminara_core::process::command(&target).spawn();
+    let _ = laminara_core::process::command(&target)
+        .env(UPDATED_TO, &version)
+        .spawn();
     app.exit(0);
     Ok(())
 }

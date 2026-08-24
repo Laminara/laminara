@@ -111,9 +111,11 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   checkUpdate: () => quietly(async () => set({ update: await ipc.checkUpdate() })),
 
   installUpdate: async () => {
+    const update = get().update;
+    if (!update) return;
     set({ updateProgress: { done: 0, total: 0 } });
     try {
-      await ipc.applyUpdate((done, total) => set({ updateProgress: { done, total } }));
+      await ipc.applyUpdate(update.version, (done, total) => set({ updateProgress: { done, total } }));
     } catch (err) {
       set({ updateProgress: null, update: null, error: String(err) });
       await get().continueStartup();
