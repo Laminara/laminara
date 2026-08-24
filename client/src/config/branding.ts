@@ -43,12 +43,22 @@ export function applyBranding(raw: Partial<Branding> | null | undefined) {
   if (current.windowTitle) document.title = current.windowTitle;
 }
 
+const HERO_FALLBACK = "/hero.mp4";
+
+function isVideo(source: string) {
+  if (source.startsWith("data:")) return source.startsWith("data:video/");
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(source);
+}
+
 export const branding = {
   get name() {
     return current.name;
   },
   get heroMedia() {
-    return current.heroMediaDataUri || "/hero.mp4";
+    return current.heroMediaDataUri || HERO_FALLBACK;
+  },
+  get heroIsVideo() {
+    return isVideo(current.heroMediaDataUri || HERO_FALLBACK);
   },
 };
 
