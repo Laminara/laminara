@@ -16,32 +16,33 @@ type iconSet struct {
 
 func unicodeIcons() iconSet {
 	return iconSet{
-		install: "↧",
-		builds:  "▤",
-		update:  "⟳",
-		publish: "↥",
-		remove:  "🗑",
+		install: "+",
+		builds:  "≡",
+		update:  "↻",
+		publish: "↑",
+		remove:  "−",
 		logs:    "≡",
 		help:    "?",
 		quit:    "✕",
-		cursor:  "▸",
+		cursor:  "›",
 		search:  "⌕",
-		dot:     "●",
+		dot:     "◆",
 	}
 }
 
 func nerdIcons() iconSet {
 	return iconSet{
-		install: "",
-		builds:  "",
-		update:  "",
-		publish: "",
-		logs:    "",
-		help:    "",
-		quit:    "",
-		cursor:  "",
-		search:  "",
-		dot:     "",
+		install: "",
+		builds:  "",
+		update:  "",
+		publish: "",
+		remove:  "",
+		logs:    "",
+		help:    "",
+		quit:    "",
+		cursor:  "",
+		search:  "",
+		dot:     "",
 	}
 }
 

@@ -59,9 +59,14 @@ func (w wizard) Update(msg tea.Msg) (wizard, tea.Cmd) {
 	case versionsMsg:
 		items := make([]pickItem, 0, len(msg.versions))
 		for _, v := range msg.versions {
-			items = append(items, pickItem{label: v.Id, value: v.Id, hint: v.Type})
+			hint := versionHint(v.Type)
+			if v.Id == msg.latestRelease {
+				hint = "последний релиз"
+			}
+			items = append(items, pickItem{label: v.Id, value: v.Id, hint: hint})
 		}
-		w.pick = newPicker(w.icons.install+" Версия Minecraft", items, w.icons, w.styles)
+		sortLatestFirst(items, msg.latestRelease)
+		w.pick = newPicker("Какую версию Minecraft собрать?", items, w.icons, w.styles)
 		w.step = wzVersion
 		w.loading = false
 		return w, nil
@@ -79,7 +84,7 @@ func (w wizard) Update(msg tea.Msg) (wizard, tea.Cmd) {
 			}
 			items = append(items, pickItem{label: l.Name, value: l.Name, hint: hint})
 		}
-		w.pick = newPicker(w.icons.builds+" Загрузчик", items, w.icons, w.styles)
+		w.pick = newPicker("С каким загрузчиком модов?", items, w.icons, w.styles)
 		w.step = wzLoader
 		w.loading = false
 		return w, nil
@@ -131,7 +136,7 @@ func (w wizard) advance(value string) (wizard, tea.Cmd) {
 		for _, version := range w.loaderIndex[value] {
 			items = append(items, pickItem{label: version, value: version})
 		}
-		w.pick = newPicker(w.icons.update+" Версия "+value, items, w.icons, w.styles)
+		w.pick = newPicker("Версия "+value+" — какую взять?", items, w.icons, w.styles)
 		w.step = wzLoaderVersion
 		return w, nil
 	case wzLoaderVersion:
@@ -152,7 +157,7 @@ func (w wizard) buildCommand() string {
 
 func (w wizard) View() string {
 	if w.loading {
-		return w.styles.wizardBox.Render(w.styles.dim.Render("загружаю…"))
+		return w.styles.wizardBox.Render(w.styles.dim.Render("Спрашиваю сервер…"))
 	}
 	if w.step == wzName {
 		summary := w.mc
@@ -161,11 +166,36 @@ func (w wizard) View() string {
 		} else {
 			summary += "  ·  vanilla"
 		}
-		body := w.styles.wizardTitle.Render(w.icons.install+" Имя сборки") + "\n" +
+		body := w.styles.wizardTitle.Render("Как назвать сборку?") + "\n" +
 			w.styles.dim.Render(summary) + "\n\n" +
-			"› " + w.name.View() + "\n\n" +
-			w.styles.dim.Render("Enter — собрать · Esc — отмена")
+			w.styles.selected.Render("› ") + w.name.View() + "\n\n" +
+			w.styles.faint.Render("Это имя увидит игрок в лаунчере.")
 		return w.styles.wizardBox.Render(body)
 	}
-	return w.styles.wizardBox.Render(w.pick.View() + "\n" + w.styles.dim.Render("↑↓ выбор · Enter · Esc — отмена"))
+	return w.styles.wizardBox.Render(w.pick.View())
+}
+
+func versionHint(kind string) string {
+	switch kind {
+	case "release":
+		return "релиз"
+	case "snapshot":
+		return "снапшот"
+	default:
+		return kind
+	}
+}
+
+func sortLatestFirst(items []pickItem, latest string) {
+	if latest == "" {
+		return
+	}
+	for i, item := range items {
+		if item.value != latest {
+			continue
+		}
+		copy(items[1:i+1], items[:i])
+		items[0] = item
+		return
+	}
 }

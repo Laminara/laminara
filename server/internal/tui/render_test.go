@@ -129,3 +129,26 @@ func TestRenderFrames(t *testing.T) {
 	fmt.Println("\n========== МАСТЕР: имя сборки ==========")
 	fmt.Println(m.View())
 }
+
+func TestComplete(t *testing.T) {
+	commands := []string{"builds", "ban", "bans", "install", "publish"}
+	cases := []struct {
+		typed  string
+		want   string
+		wantOk bool
+	}{
+		{"pub", "publish ", true},
+		{"b", "b", false},
+		{"ba", "ban", true},
+		{"buil", "builds ", true},
+		{"zzz", "", false},
+		{"publish Sur", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := complete(c.typed, commands)
+		if ok != c.wantOk || (ok && got != c.want) {
+			t.Fatalf("complete(%q) = %q,%v; want %q,%v", c.typed, got, ok, c.want, c.wantOk)
+		}
+	}
+}
