@@ -66,12 +66,12 @@ export default function App() {
             </div>
             <NewsPanel />
           </main>
+          {phase === "running" && <RunningBar />}
           <BuildStrip />
         </div>
       )}
 
       {phase === "syncing" && <SyncOverlay />}
-      {phase === "running" && <RunningBar />}
 
       {modal?.kind === "general" && <GeneralSettingsModal />}
       {modal?.kind === "build" && <BuildSettingsModal profile={modal.profile} />}
