@@ -38,9 +38,14 @@ export interface Build {
   lockReason?: string;
 }
 
+export interface ServerPlayers {
+  online: number;
+  max: number;
+}
+
 export interface PlayerCounts {
-  perBuild: Record<string, number>;
-  total: number;
+  perBuild: Record<string, ServerPlayers>;
+  total: ServerPlayers;
 }
 
 export interface GeneralSettings {

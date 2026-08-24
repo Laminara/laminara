@@ -660,14 +660,6 @@ pub fn general_settings(state: State<'_, AppState>) -> GeneralSettings {
 }
 
 #[tauri::command]
-pub async fn set_default_memory(state: State<'_, AppState>, mb: u32) -> Result<(), String> {
-    state
-        .core
-        .set_default_memory(mb)
-        .map_err(|e| player_error("set default memory", e))
-}
-
-#[tauri::command]
 pub fn branding() -> serde_json::Value {
     crate::embedded_branding()
 }
@@ -824,15 +816,22 @@ pub async fn set_build_features(
         .map_err(|e| player_error("set feature selection", e))
 }
 
+#[derive(Serialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerPlayers {
+    online: i64,
+    max: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerCounts {
-    per_build: HashMap<String, i64>,
-    total: i64,
+    per_build: HashMap<String, ServerPlayers>,
+    total: ServerPlayers,
 }
 
 #[tauri::command]
-pub async fn player_counts(state: State<'_, AppState>) -> Result<PlayerCounts, String> {
+pub async fn player_counts(state: State<'_, AppState>) -> Result<Option<PlayerCounts>, String> {
     let profiles = state
         .core
         .list_profiles()
@@ -844,31 +843,51 @@ pub async fn player_counts(state: State<'_, AppState>) -> Result<PlayerCounts, S
         .map(|p| (p.name, p.server_address.trim().to_string()))
         .collect();
 
+    if with_address.is_empty() {
+        return Ok(None);
+    }
+
     let mut addresses: Vec<String> = with_address.iter().map(|(_, addr)| addr.clone()).collect();
     addresses.sort();
     addresses.dedup();
 
     let pinged = join_all(addresses.into_iter().map(|addr| async move {
-        let (host, port) = slp::split_address(&addr);
-        let online = slp::ping(&host, port).await.map(|s| s.online);
-        (addr, online)
+        let status = slp::ping(&slp::split_address(&addr).0, slp::split_address(&addr).1).await;
+        (addr, status)
     }))
     .await;
 
-    let online_by_address: HashMap<String, i64> = pinged
+    let by_address: HashMap<String, ServerPlayers> = pinged
         .into_iter()
-        .filter_map(|(addr, online)| online.map(|value| (addr, value)))
+        .filter_map(|(addr, status)| {
+            status.map(|s| {
+                (
+                    addr,
+                    ServerPlayers {
+                        online: s.online,
+                        max: s.max,
+                    },
+                )
+            })
+        })
         .collect();
+
+    if by_address.is_empty() {
+        return Ok(None);
+    }
 
     let mut per_build = HashMap::new();
     for (name, addr) in &with_address {
-        if let Some(&online) = online_by_address.get(addr) {
-            per_build.insert(name.clone(), online);
+        if let Some(&players) = by_address.get(addr) {
+            per_build.insert(name.clone(), players);
         }
     }
-    let total: i64 = online_by_address.values().sum();
+    let total = by_address.values().fold(ServerPlayers::default(), |sum, players| ServerPlayers {
+        online: sum.online + players.online,
+        max: sum.max + players.max,
+    });
 
-    Ok(PlayerCounts { per_build, total })
+    Ok(Some(PlayerCounts { per_build, total }))
 }
 
 #[cfg(test)]

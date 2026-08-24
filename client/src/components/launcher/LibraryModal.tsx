@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLauncher } from "@/store";
 import { loaderLabels } from "@/config/branding";
 import { buildBlock } from "@/lib/buildState";
-import { cn, formatCount } from "@/lib/format";
+import { cn, formatBytes, formatCount, plural } from "@/lib/format";
 import { Modal } from "@/components/ui/Modal";
 
 export function LibraryModal() {
@@ -19,7 +19,7 @@ export function LibraryModal() {
   );
 
   return (
-    <Modal title="Все сборки" subtitle={`${builds.length} доступно`} onClose={close}>
+    <Modal title="Все сборки" subtitle={`${builds.length} ${plural(builds.length, "сборка", "сборки", "сборок")}`} onClose={close}>
       <input
         autoFocus
         placeholder="Поиск сборки…"
@@ -52,16 +52,16 @@ export function LibraryModal() {
                 {block ? (
                   <span className="text-[10px] font-bold uppercase tracking-wider text-mute">{block.badge}</span>
                 ) : (
-                  online != null && (
+                  online && (
                     <span className="flex items-center gap-1 text-[11px] text-dim">
                       <span className="h-1.5 w-1.5 rounded-full bg-online" />
-                      {formatCount(online)}
+                      {formatCount(online.online)} / {formatCount(online.max)}
                     </span>
                   )
                 )}
               </div>
               <span className="text-[15px] font-bold leading-tight">{build.name}</span>
-              <span className="text-xs tabular-nums text-dim">{block ? block.reason : build.version}</span>
+              <span className="text-xs tabular-nums text-dim">{block ? block.reason : formatBytes(build.sizeBytes)}</span>
             </button>
           );
         })}

@@ -19,11 +19,16 @@ export function Header() {
     <header data-tauri-drag-region className="relative z-30 flex items-center justify-between px-9 py-6">
       <BrandMark />
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2.5 rounded-full border border-border bg-surface px-4 py-2.5">
-          <OnlineDot />
-          <span className="text-sm font-semibold tabular-nums">{players ? formatCount(players.total) : "—"}</span>
-          <span className="text-[11px] uppercase tracking-wider text-dim">{labels.players}</span>
-        </div>
+        {players && (
+          <div className="flex items-center gap-2.5 rounded-full border border-border bg-panel px-4 py-2.5 backdrop-blur-md">
+            <OnlineDot />
+            <span className="text-sm font-semibold tabular-nums">
+              {formatCount(players.total.online)}
+              <span className="text-dim"> / {formatCount(players.total.max)}</span>
+            </span>
+            <span className="text-[11px] uppercase tracking-wider text-dim">{labels.players}</span>
+          </div>
+        )}
 
         <button
           onClick={() => openModal({ kind: "general" })}

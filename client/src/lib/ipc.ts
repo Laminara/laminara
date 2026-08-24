@@ -72,10 +72,16 @@ export const ipc = {
 
   stop: (): Promise<void> => (isTauri ? core("stop") : Promise.resolve()),
 
-  playerCounts: (): Promise<PlayerCounts> =>
+  playerCounts: (): Promise<PlayerCounts | null> =>
     isTauri
       ? core("player_counts")
-      : Promise.resolve({ perBuild: mockPlayerCounts, total: Object.values(mockPlayerCounts).reduce((a, b) => a + b, 0) }),
+      : Promise.resolve({
+          perBuild: mockPlayerCounts,
+          total: Object.values(mockPlayerCounts).reduce(
+            (sum, players) => ({ online: sum.online + players.online, max: sum.max + players.max }),
+            { online: 0, max: 0 },
+          ),
+        }),
 
   generalSettings: (): Promise<GeneralSettings> =>
     isTauri
@@ -87,7 +93,6 @@ export const ipc = {
           version: "0.1.0",
         }),
 
-  setDefaultMemory: (mb: number): Promise<void> => (isTauri ? core("set_default_memory", { mb }) : Promise.resolve()),
 
   setInstallDir: (path: string): Promise<void> => (isTauri ? core("set_install_dir", { path }) : Promise.resolve()),
 

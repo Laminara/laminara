@@ -1,4 +1,4 @@
-import type { Account, Build, BuildFeatures, EndpointStatus } from "@/lib/types";
+import type { Account, Build, BuildFeatures, EndpointStatus, ServerPlayers } from "@/lib/types";
 
 export const mockEndpoint: EndpointStatus = {
   id: "eu-1",
@@ -14,12 +14,12 @@ export const mockAccount: Account = {
   endpointId: "eu-1",
 };
 
-export const mockPlayerCounts: Record<string, number> = {
-  "Anarchy Universe": 1284,
-  "Automation Factory": 512,
-  "RPG Ascendancy": 964,
-  "Industrial Galaxy": 341,
-  "Pixelmon Odyssey": 1607,
+export const mockPlayerCounts: Record<string, ServerPlayers> = {
+  "Anarchy Universe": { online: 1284, max: 2000 },
+  "Automation Factory": { online: 512, max: 800 },
+  "RPG Ascendancy": { online: 964, max: 1500 },
+  "Industrial Galaxy": { online: 341, max: 500 },
+  "Pixelmon Odyssey": { online: 1607, max: 2500 },
 };
 
 export const mockBuilds: Build[] = [

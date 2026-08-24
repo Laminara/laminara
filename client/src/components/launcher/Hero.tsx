@@ -2,7 +2,7 @@ import { Gear, Play, SlidersHorizontal } from "@phosphor-icons/react";
 import { useLauncher, useSelectedBuild } from "@/store";
 import { labels, loaderLabels } from "@/config/branding";
 import { buildBlock } from "@/lib/buildState";
-import { formatCount } from "@/lib/format";
+import { formatBytes, formatCount } from "@/lib/format";
 import { Button } from "@/components/ui/Button";
 import { Dot } from "@/components/ui/atoms";
 import { OnlineDot } from "@/components/ui/OnlineDot";
@@ -24,15 +24,18 @@ export function Hero() {
         <Dot />
         <span>{build.loader ? loaderLabels[build.loader] : "Minecraft"}</span>
         <Dot />
-        <span>{build.version}</span>
+        <span>{formatBytes(build.sizeBytes)}</span>
       </div>
 
       <h1 className="max-w-2xl text-[84px] font-extrabold leading-[0.9] tracking-tight">{build.name}</h1>
 
-      {online != null && (
+      {online && (
         <div className="flex items-center gap-2.5 text-sm">
           <OnlineDot />
-          <span className="font-semibold tabular-nums text-text">{formatCount(online)}</span>
+          <span className="font-semibold tabular-nums text-text">
+            {formatCount(online.online)}
+            <span className="text-dim"> / {formatCount(online.max)}</span>
+          </span>
           <span className="text-dim">{labels.players}</span>
         </div>
       )}
