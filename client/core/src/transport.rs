@@ -56,10 +56,6 @@ impl Transport {
         }
     }
 
-    pub fn default() -> Self {
-        Self::new(default_http_client())
-    }
-
     pub fn client(&self) -> &reqwest::Client {
         &self.http
     }
@@ -102,5 +98,11 @@ impl Transport {
             }),
             Err(_) => Err(RpcError::PostSend(format!("http {status}"))),
         }
+    }
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self::new(default_http_client())
     }
 }

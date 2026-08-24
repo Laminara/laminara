@@ -116,6 +116,74 @@ pub fn compare(a: &str, b: &str) -> i32 {
     0
 }
 
+use crate::error::CoreError;
+use crate::transport::Transport;
+use std::path::{Path, PathBuf};
+
+pub async fn download_artifact(
+    transport: &Transport,
+    base_url: &str,
+    artifact: &LauncherArtifact,
+    staging: &Path,
+    on_bytes: impl Fn(u64, u64) + Send + Sync,
+) -> Result<PathBuf, CoreError> {
+    use futures::StreamExt;
+    use std::io::Write;
+
+    let object = artifact
+        .object
+        .as_ref()
+        .ok_or_else(|| CoreError::Launch("release artifact has no object".into()))?;
+    let hash = object
+        .hash
+        .as_ref()
+        .ok_or_else(|| CoreError::Launch("release artifact has no hash".into()))?;
+    let expected = hex::encode(&hash.value);
+    let key = crate::manifest::object_key(hash.algo, &hash.value);
+
+    std::fs::create_dir_all(staging)
+        .map_err(|e| CoreError::Launch(format!("create staging: {e}")))?;
+    let dest = staging.join(&artifact.file_name);
+    let _ = std::fs::remove_file(&dest);
+
+    let url = format!("{}/objects/{}", base_url.trim_end_matches('/'), key);
+    let response = transport
+        .client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?
+        .error_for_status()
+        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
+
+    let limit = object.size;
+    let mut file = std::fs::File::create(&dest)
+        .map_err(|e| CoreError::Launch(format!("create {}: {e}", dest.display())))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut done = 0u64;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
+        hasher.update(&chunk);
+        done += chunk.len() as u64;
+        if done > limit {
+            drop(file);
+            let _ = std::fs::remove_file(&dest);
+            return Err(CoreError::Untrusted);
+        }
+        file.write_all(&chunk)
+            .map_err(|e| CoreError::Launch(format!("write update: {e}")))?;
+        on_bytes(done, limit);
+    }
+    drop(file);
+
+    if hasher.finalize().to_hex().to_string() != expected {
+        let _ = std::fs::remove_file(&dest);
+        return Err(CoreError::Untrusted);
+    }
+    Ok(dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,72 +308,4 @@ mod tests {
         );
         assert!(artifact_for(&release, Platform::MacOsArm64, &portable).is_none());
     }
-}
-
-use crate::error::CoreError;
-use crate::transport::Transport;
-use std::path::{Path, PathBuf};
-
-pub async fn download_artifact(
-    transport: &Transport,
-    base_url: &str,
-    artifact: &LauncherArtifact,
-    staging: &Path,
-    on_bytes: impl Fn(u64, u64) + Send + Sync,
-) -> Result<PathBuf, CoreError> {
-    use futures::StreamExt;
-    use std::io::Write;
-
-    let object = artifact
-        .object
-        .as_ref()
-        .ok_or_else(|| CoreError::Launch("release artifact has no object".into()))?;
-    let hash = object
-        .hash
-        .as_ref()
-        .ok_or_else(|| CoreError::Launch("release artifact has no hash".into()))?;
-    let expected = hex::encode(&hash.value);
-    let key = crate::manifest::object_key(hash.algo, &hash.value);
-
-    std::fs::create_dir_all(staging)
-        .map_err(|e| CoreError::Launch(format!("create staging: {e}")))?;
-    let dest = staging.join(&artifact.file_name);
-    let _ = std::fs::remove_file(&dest);
-
-    let url = format!("{}/objects/{}", base_url.trim_end_matches('/'), key);
-    let response = transport
-        .client()
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?
-        .error_for_status()
-        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
-
-    let limit = object.size;
-    let mut file = std::fs::File::create(&dest)
-        .map_err(|e| CoreError::Launch(format!("create {}: {e}", dest.display())))?;
-    let mut hasher = blake3::Hasher::new();
-    let mut done = 0u64;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
-        hasher.update(&chunk);
-        done += chunk.len() as u64;
-        if done > limit {
-            drop(file);
-            let _ = std::fs::remove_file(&dest);
-            return Err(CoreError::Untrusted);
-        }
-        file.write_all(&chunk)
-            .map_err(|e| CoreError::Launch(format!("write update: {e}")))?;
-        on_bytes(done, limit);
-    }
-    drop(file);
-
-    if hasher.finalize().to_hex().to_string() != expected {
-        let _ = std::fs::remove_file(&dest);
-        return Err(CoreError::Untrusted);
-    }
-    Ok(dest)
 }

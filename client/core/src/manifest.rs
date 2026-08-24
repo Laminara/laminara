@@ -37,6 +37,19 @@ pub fn verify_and_decode(
     })
 }
 
+pub fn algo_name(algo: i32) -> &'static str {
+    match HashAlgo::try_from(algo).unwrap_or(HashAlgo::Blake3) {
+        HashAlgo::Sha256 => "sha256",
+        HashAlgo::Sha1 => "sha1",
+        _ => "blake3",
+    }
+}
+
+pub fn object_key(algo: i32, value: &[u8]) -> String {
+    let hex = hex::encode(value);
+    format!("{}/{}/{}/{}", algo_name(algo), &hex[0..2], &hex[2..4], hex)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,17 +85,4 @@ mod tests {
             "a key outside the ring must never verify"
         );
     }
-}
-
-pub fn algo_name(algo: i32) -> &'static str {
-    match HashAlgo::try_from(algo).unwrap_or(HashAlgo::Blake3) {
-        HashAlgo::Sha256 => "sha256",
-        HashAlgo::Sha1 => "sha1",
-        _ => "blake3",
-    }
-}
-
-pub fn object_key(algo: i32, value: &[u8]) -> String {
-    let hex = hex::encode(value);
-    format!("{}/{}/{}/{}", algo_name(algo), &hex[0..2], &hex[2..4], hex)
 }

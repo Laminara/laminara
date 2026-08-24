@@ -221,6 +221,24 @@ mod tests {
         }
     }
 
+    struct Paths {
+        java: PathBuf,
+        natives: PathBuf,
+        jar: PathBuf,
+        dir: PathBuf,
+        game: PathBuf,
+    }
+
+    fn paths() -> Paths {
+        Paths {
+            java: PathBuf::from("/p/runtime/windows-x64/bin/java"),
+            natives: PathBuf::from("/p/natives/windows-x64"),
+            jar: PathBuf::from("/res/authlib-injector.jar"),
+            dir: PathBuf::from("/p"),
+            game: PathBuf::from("/p"),
+        }
+    }
+
     fn no_extras() -> LaunchExtras {
         LaunchExtras::default()
     }
@@ -228,22 +246,18 @@ mod tests {
     fn inputs<'a>(
         profile: &'a LaunchProfile,
         session: &'a GameSession,
-        java: &'a PathBuf,
-        natives: &'a PathBuf,
-        jar: &'a PathBuf,
-        dir: &'a PathBuf,
-        game: &'a PathBuf,
+        paths: &'a Paths,
         tuning: &'a [String],
         extras: &'a LaunchExtras,
     ) -> LaunchInputs<'a> {
         LaunchInputs {
             profile,
-            profile_dir: dir,
-            game_dir: game,
-            java_bin: java,
-            natives_dir: natives,
+            profile_dir: &paths.dir,
+            game_dir: &paths.game,
+            java_bin: &paths.java,
+            natives_dir: &paths.natives,
             yggdrasil_root: "https://eu-1.example.net/yggdrasil/",
-            authlib_jar: jar,
+            authlib_jar: &paths.jar,
             prefetch_b64: "PREFETCH",
             session,
             jvm_tuning: tuning,
@@ -256,25 +270,9 @@ mod tests {
     fn vanilla_argv_supplies_base() {
         let profile = base_profile();
         let session = session();
-        let (java, natives, jar, dir, game) = (
-            PathBuf::from("/p/runtime/windows-x64/bin/java"),
-            PathBuf::from("/p/natives/windows-x64"),
-            PathBuf::from("/res/authlib-injector.jar"),
-            PathBuf::from("/p"),
-            PathBuf::from("/p"),
-        );
+        let paths = paths();
         let tuning = vec!["-Xmx4G".to_string()];
-        let argv = build_argv(&inputs(
-            &profile,
-            &session,
-            &java,
-            &natives,
-            &jar,
-            &dir,
-            &game,
-            &tuning,
-            &no_extras(),
-        ));
+        let argv = build_argv(&inputs(&profile, &session, &paths, &tuning, &no_extras()));
         let line = argv.join(" ");
 
         assert_eq!(argv[0], "/p/runtime/windows-x64/bin/java");
@@ -316,27 +314,11 @@ mod tests {
             "forgeclient".into(),
         ];
         let session = session();
-        let (java, natives, jar, dir, game) = (
-            PathBuf::from("/p/runtime/windows-x64/bin/java"),
-            PathBuf::from("/p/natives/windows-x64"),
-            PathBuf::from("/res/authlib-injector.jar"),
-            PathBuf::from("/p"),
-            PathBuf::from("/p"),
-        );
-        let argv = build_argv(&inputs(
-            &profile,
-            &session,
-            &java,
-            &natives,
-            &jar,
-            &dir,
-            &game,
-            &[],
-            &no_extras(),
-        ));
+        let paths = paths();
+        let argv = build_argv(&inputs(&profile, &session, &paths, &[], &no_extras()));
         let line = argv.join(" ");
 
-        let libraries = dir.join("libraries").to_string_lossy().into_owned();
+        let libraries = paths.dir.join("libraries").to_string_lossy().into_owned();
         assert!(line.contains("cpw.mods.bootstraplauncher.BootstrapLauncher"));
         assert!(line.contains(&format!("-DlibraryDirectory={libraries}")));
         assert!(line.contains("-DignoreList=client-extra,1.21.1.jar"));
@@ -355,29 +337,13 @@ mod tests {
         profile.jvm_args = vec!["-Dprofile.flag=1".into()];
         profile.game_args = vec!["--profileArg".into()];
         let session = session();
-        let (java, natives, jar, dir, game) = (
-            PathBuf::from("/p/runtime/windows-x64/bin/java"),
-            PathBuf::from("/p/natives/windows-x64"),
-            PathBuf::from("/res/authlib-injector.jar"),
-            PathBuf::from("/p"),
-            PathBuf::from("/p"),
-        );
+        let paths = paths();
         let extras = LaunchExtras {
             jvm_args: vec!["-Diris.enable=true".into()],
             game_args: vec!["--zoom".into()],
             classpath: vec!["mods/iris.jar".into()],
         };
-        let argv = build_argv(&inputs(
-            &profile,
-            &session,
-            &java,
-            &natives,
-            &jar,
-            &dir,
-            &game,
-            &[],
-            &extras,
-        ));
+        let argv = build_argv(&inputs(&profile, &session, &paths, &[], &extras));
         let at = |needle: &str| {
             argv.iter()
                 .position(|a| a == needle)

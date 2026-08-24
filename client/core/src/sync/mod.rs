@@ -81,7 +81,7 @@ fn save_ledger(path: &Path, ledger: &Ledger) -> Result<(), CoreError> {
 }
 
 enum Hasher {
-    Blake3(blake3::Hasher),
+    Blake3(Box<blake3::Hasher>),
     Sha256(sha2::Sha256),
     Sha1(sha1::Sha1),
 }
@@ -91,7 +91,7 @@ impl Hasher {
         match HashAlgo::try_from(algo).unwrap_or(HashAlgo::Blake3) {
             HashAlgo::Sha256 => Hasher::Sha256(sha2::Sha256::new()),
             HashAlgo::Sha1 => Hasher::Sha1(sha1::Sha1::new()),
-            _ => Hasher::Blake3(blake3::Hasher::new()),
+            _ => Hasher::Blake3(Box::new(blake3::Hasher::new())),
         }
     }
     fn update(&mut self, data: &[u8]) {
@@ -175,11 +175,11 @@ fn is_read_only(meta: &std::fs::Metadata) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return meta.permissions().mode() & 0o222 == 0;
+        meta.permissions().mode() & 0o222 == 0
     }
     #[cfg(not(unix))]
     {
-        return meta.permissions().readonly();
+        meta.permissions().readonly()
     }
 }
 
@@ -368,18 +368,33 @@ fn cancelled(token: &CancellationToken) -> Result<(), CoreError> {
     }
 }
 
+pub struct SyncPlan<'a> {
+    pub transport: &'a Transport,
+    pub base_url: &'a str,
+    pub profile_dir: &'a Path,
+    pub state_dir: &'a Path,
+    pub cas_dir: &'a Path,
+    pub manifest: &'a Manifest,
+    pub selection: &'a FeatureSelection,
+    pub max_parallel: usize,
+    pub cancel: CancellationToken,
+}
+
 pub async fn sync(
-    transport: &Transport,
-    base_url: &str,
-    profile_dir: &Path,
-    state_dir: &Path,
-    cas_dir: &Path,
-    manifest: &Manifest,
-    selection: &FeatureSelection,
-    max_parallel: usize,
-    cancel: CancellationToken,
+    plan: SyncPlan<'_>,
     on_progress: impl Fn(SyncProgress) + Send + Sync,
 ) -> Result<SyncOutcome, CoreError> {
+    let SyncPlan {
+        transport,
+        base_url,
+        profile_dir,
+        state_dir,
+        cas_dir,
+        manifest,
+        selection,
+        max_parallel,
+        cancel,
+    } = plan;
     let parallel = if max_parallel == 0 {
         DEFAULT_PARALLEL
     } else {
@@ -957,15 +972,17 @@ mod tests {
         let state = profile.join(".laminara");
         let cas = temp.path().join("objects");
         let outcome = sync(
-            &Transport::default(),
-            "http://127.0.0.1:1",
-            &profile,
-            &state,
-            &cas,
-            &Manifest::default(),
-            &FeatureSelection::default(),
-            2,
-            CancellationToken::new(),
+            SyncPlan {
+                transport: &Transport::default(),
+                base_url: "http://127.0.0.1:1",
+                profile_dir: &profile,
+                state_dir: &state,
+                cas_dir: &cas,
+                manifest: &Manifest::default(),
+                selection: &FeatureSelection::default(),
+                max_parallel: 2,
+                cancel: CancellationToken::new(),
+            },
             |_| {},
         )
         .await
@@ -1086,15 +1103,17 @@ mod live {
         let a_dir = temp.path().join("A");
         let a_state = a_dir.join(".laminara");
         let first = sync(
-            &transport,
-            &base,
-            &a_dir,
-            &a_state,
-            &cas,
-            &verified.manifest,
-            &FeatureSelection::default(),
-            8,
-            cancel.clone(),
+            SyncPlan {
+                transport: &transport,
+                base_url: &base,
+                profile_dir: &a_dir,
+                state_dir: &a_state,
+                cas_dir: &cas,
+                manifest: &verified.manifest,
+                selection: &FeatureSelection::default(),
+                max_parallel: 8,
+                cancel: cancel.clone(),
+            },
             |_| {},
         )
         .await
@@ -1108,15 +1127,17 @@ mod live {
         let b_dir = temp.path().join("B");
         let b_state = b_dir.join(".laminara");
         let second = sync(
-            &transport,
-            &base,
-            &b_dir,
-            &b_state,
-            &cas,
-            &verified.manifest,
-            &FeatureSelection::default(),
-            8,
-            cancel.clone(),
+            SyncPlan {
+                transport: &transport,
+                base_url: &base,
+                profile_dir: &b_dir,
+                state_dir: &b_state,
+                cas_dir: &cas,
+                manifest: &verified.manifest,
+                selection: &FeatureSelection::default(),
+                max_parallel: 8,
+                cancel: cancel.clone(),
+            },
             |_| {},
         )
         .await
@@ -1132,15 +1153,17 @@ mod live {
         assert!(second.linked > 0);
 
         let third = sync(
-            &transport,
-            &base,
-            &a_dir,
-            &a_state,
-            &cas,
-            &verified.manifest,
-            &FeatureSelection::default(),
-            8,
-            cancel,
+            SyncPlan {
+                transport: &transport,
+                base_url: &base,
+                profile_dir: &a_dir,
+                state_dir: &a_state,
+                cas_dir: &cas,
+                manifest: &verified.manifest,
+                selection: &FeatureSelection::default(),
+                max_parallel: 8,
+                cancel,
+            },
             |_| {},
         )
         .await

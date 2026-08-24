@@ -30,7 +30,7 @@ pub fn collect(out: &mut Vec<Measurement>, flags: &mut Vec<CollectorFlag>) {
 
     let board: Vec<String> = ["sys_vendor", "product_name", "board_name"]
         .iter()
-        .filter_map(|name| read_trimmed(&format!("/sys/class/dmi/id/{name}")))
+        .filter_map(|name| read_trimmed(format!("/sys/class/dmi/id/{name}")))
         .collect();
     if !board.is_empty() {
         push(out, SignalKind::Hostname, board.join(":"));
