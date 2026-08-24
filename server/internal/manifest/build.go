@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -106,12 +105,7 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		if err != nil {
 			return err
 		}
-		file, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		ref, err := b.cas.Put(ctx, file)
-		file.Close()
+		ref, err := b.cas.PutFile(ctx, p)
 		if err != nil {
 			return err
 		}

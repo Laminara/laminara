@@ -18,6 +18,8 @@ func init() {
 
 var _ Backend = (*fsBackend)(nil)
 
+var _ FileSource = (*fsBackend)(nil)
+
 type fsConfig struct {
 	Root         string `json:"root"`
 	XAccelPrefix string `json:"xaccelPrefix"`
@@ -50,7 +52,36 @@ func (b *fsBackend) resolve(key string) string {
 	return filepath.Join(b.root, filepath.FromSlash(key))
 }
 
+const objectMode = 0o644
+
 func (b *fsBackend) Put(_ context.Context, key string, r io.Reader, _ int64) error {
+	return b.stage(key, func(tmp *os.File) error {
+		_, err := io.Copy(tmp, r)
+		return err
+	})
+}
+
+func (b *fsBackend) PutFromFile(_ context.Context, key, src string, verify func(io.Reader) error) error {
+	return b.stage(key, func(tmp *os.File) error {
+		if err := cloneFile(tmp, src); err != nil {
+			if !cloneUnsupported(err) {
+				return err
+			}
+			if err := copyInto(tmp, src); err != nil {
+				return err
+			}
+		}
+		if verify == nil {
+			return nil
+		}
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		return verify(tmp)
+	})
+}
+
+func (b *fsBackend) stage(key string, write func(*os.File) error) error {
 	full := b.resolve(key)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
@@ -60,7 +91,12 @@ func (b *fsBackend) Put(_ context.Context, key string, r io.Reader, _ int64) err
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, r); err != nil {
+
+	if err := write(tmp); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(objectMode); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -68,6 +104,22 @@ func (b *fsBackend) Put(_ context.Context, key string, r io.Reader, _ int64) err
 		return err
 	}
 	return os.Rename(tmp.Name(), full)
+}
+
+func copyInto(dst *os.File, srcPath string) error {
+	if _, err := dst.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := dst.Truncate(0); err != nil {
+		return err
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	_, err = io.Copy(dst, src)
+	return err
 }
 
 func (b *fsBackend) Get(_ context.Context, key string) (io.ReadCloser, error) {
