@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
+	"github.com/laminara/laminara/server/internal/humanize"
 )
 
 func statusCmd() *cobra.Command {
@@ -31,12 +32,10 @@ func statusCmd() *cobra.Command {
 				fmt.Println(string(out))
 				return nil
 			}
-			uptime := time.Since(time.Unix(0, msg.StartedAtUnixNanos)).Truncate(time.Second)
-			fmt.Printf("version:    %s\n", msg.Version)
-			fmt.Printf("uptime:     %s\n", uptime)
-			fmt.Printf("modules:    %d\n", msg.ModulesLoaded)
-			fmt.Printf("memory:     %d KiB\n", msg.MemoryBytes/1024)
-			fmt.Printf("goroutines: %d\n", msg.Goroutines)
+			fmt.Printf("версия:   %s\n", msg.Version)
+			fmt.Printf("в работе: %s\n", humanize.Duration(time.Since(time.Unix(0, msg.StartedAtUnixNanos))))
+			fmt.Printf("модулей:  %d\n", msg.ModulesLoaded)
+			fmt.Printf("память:   %s\n", humanize.Bytes(msg.MemoryBytes))
 			return nil
 		},
 	}

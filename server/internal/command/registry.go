@@ -59,7 +59,7 @@ func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) err
 func HelpCommand(r *Registry) Command {
 	return Command{
 		Name:     "help",
-		Synopsis: "list available commands",
+		Synopsis: "список команд",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			for _, c := range r.List() {
 				fmt.Fprintf(out, "%-16s %s\n", c.Name, c.Synopsis)

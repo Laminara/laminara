@@ -17,7 +17,7 @@ import (
 func machinesCommand(gate *hwid.Gate) command.Command {
 	return command.Command{
 		Name:     "machines",
-		Synopsis: "inspect known machines (machines <player> | machines show <machineId> | machines trust <machineId> [off] | machines prune)",
+		Synopsis: "компьютеры игроков (machines <игрок> | machines show <id> | machines trust <id> [off] | machines prune)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
 				return errors.New("machine recognition is off (set hwid.mode)")
@@ -116,7 +116,7 @@ func showMachine(ctx context.Context, gate *hwid.Gate, machineID string, out io.
 func banCommand(gate *hwid.Gate) command.Command {
 	return command.Command{
 		Name:     "ban",
-		Synopsis: "ban a player (ban <player> [reason...] [--account|--machine <id>|--cluster <id>] [--days N|--permanent] [--yes])",
+		Synopsis: "забанить игрока (ban <игрок> [причина…] [--account|--machine <id>|--cluster <id>] [--days N|--permanent] [--yes])",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
 				return errors.New("machine recognition is off (set hwid.mode)")
@@ -212,7 +212,7 @@ func parseBanArgs(args []string) (hwid.BanRequest, string, error) {
 func bansCommand(gate *hwid.Gate) command.Command {
 	return command.Command{
 		Name:     "bans",
-		Synopsis: "list bans (bans [--all] | bans <reference> | bans lift <reference>)",
+		Synopsis: "баны (bans [--all] | bans <код> | bans lift <код>)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
 				return errors.New("machine recognition is off (set hwid.mode)")
@@ -273,7 +273,7 @@ func showBan(ctx context.Context, gate *hwid.Gate, reference string, out io.Writ
 func hwidCommand(gate *hwid.Gate) command.Command {
 	return command.Command{
 		Name:     "hwid",
-		Synopsis: "show machine recognition settings",
+		Synopsis: "как настроено распознавание компьютеров",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			if !gate.Enabled() {
 				fmt.Fprintln(out, "mode: off")

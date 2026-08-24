@@ -11,6 +11,7 @@ import (
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/admin"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/mojang"
@@ -62,12 +63,12 @@ const defaultPlatform = "windows-x64"
 
 func (s *Service) Commands() []command.Command {
 	return []command.Command{
-		{Name: "versions", Synopsis: "list Minecraft versions (versions [query])", Run: s.versions},
-		{Name: "loaders", Synopsis: "list mod loaders for a version (loaders <mcVersion>)", Run: s.loaders},
-		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "build a client (install <name> <mc> [loader=..] [loaderVersion=..] [platform=..] [java=..])", Run: s.prepare},
-		{Name: "publish", Aliases: []string{"release"}, Synopsis: "publish a built client (publish <name>)", Run: s.publish},
-		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "list built and published clients", Run: s.builds},
-		{Name: "delete", Aliases: []string{"deletebuild", "remove"}, Synopsis: "delete a build (delete <name>)", Run: s.delete},
+		{Name: "versions", Synopsis: "версии Minecraft (versions [фильтр])", Run: s.versions},
+		{Name: "loaders", Synopsis: "загрузчики модов для версии (loaders <версия>)", Run: s.loaders},
+		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "собрать клиент (install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..])", Run: s.prepare},
+		{Name: "publish", Aliases: []string{"release"}, Synopsis: "опубликовать сборку — лаунчеры увидят её (publish <имя>)", Run: s.publish},
+		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "сборки на сервере и их состояние", Run: s.builds},
+		{Name: "delete", Aliases: []string{"deletebuild", "remove"}, Synopsis: "удалить сборку (delete <имя>)", Run: s.delete},
 	}
 }
 
@@ -89,11 +90,11 @@ func (s *Service) builds(_ context.Context, _ []string, out io.Writer) error {
 		return err
 	}
 	if len(builds) == 0 {
-		fmt.Fprintln(out, "no builds yet")
+		fmt.Fprintln(out, "Сборок пока нет.")
 		return nil
 	}
 	for _, build := range builds {
-		fmt.Fprintf(out, "%-20s %s\n", build.Name, build.Status)
+		fmt.Fprintf(out, "%-20s %s\n", build.Name, statusWord(build.Status))
 	}
 	return nil
 }
@@ -159,7 +160,7 @@ func (s *Service) delete(_ context.Context, args []string, out io.Writer) error 
 		_ = os.Remove(manifestPath + ".sig")
 	}
 	s.fire("build.deleted", name)
-	fmt.Fprintf(out, "deleted build %q\n", name)
+	fmt.Fprintf(out, "Сборка «%s» удалена.\n", name)
 	return nil
 }
 
@@ -172,13 +173,13 @@ func (s *Service) versions(ctx context.Context, args []string, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "latest release: %s   latest snapshot: %s\n", list.LatestRelease, list.LatestSnapshot)
+	fmt.Fprintf(out, "Последний релиз: %s   последний снапшот: %s\n", list.LatestRelease, list.LatestSnapshot)
 	for i, version := range list.Versions {
 		if i >= 50 {
-			fmt.Fprintln(out, "… (refine with a query)")
+			fmt.Fprintln(out, "…дальше обрезано — уточните запрос, например: versions 1.21")
 			break
 		}
-		fmt.Fprintf(out, "%-18s %s\n", version.ID, version.Type)
+		fmt.Fprintf(out, "%-18s %s\n", version.ID, versionWord(version.Type))
 	}
 	return nil
 }
@@ -211,7 +212,7 @@ func (s *Service) loaders(ctx context.Context, args []string, out io.Writer) err
 			fmt.Fprintln(out, entry.Name)
 			continue
 		}
-		fmt.Fprintf(out, "%-10s latest %s (%d versions)\n", entry.Name, entry.Versions[0], len(entry.Versions))
+		fmt.Fprintf(out, "%-10s последняя %s, всего %s\n", entry.Name, entry.Versions[0], humanize.Count(len(entry.Versions), "версия", "версии", "версий"))
 	}
 	return nil
 }
@@ -275,7 +276,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 		key, _ := platform.Key(target)
 		goos, arch, ok := platform.Mojang(target)
 		if !ok {
-			fmt.Fprintf(out, "skipping %s: no Minecraft runtime for this platform\n", key)
+			fmt.Fprintf(out, "Пропускаю %s: Minecraft не выпускает клиент под эту платформу.\n", key)
 			continue
 		}
 
@@ -283,7 +284,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 		if layout.flat {
 			profileDir = filepath.Join(s.profilesDir, name)
 		}
-		fmt.Fprintf(out, "building %q (mc=%s loader=%s/%s platform=%s)…\n", name, id, orVanilla(loaderName), loaderVersion, key)
+		fmt.Fprintf(out, "Собираю «%s»: Minecraft %s, загрузчик %s %s, платформа %s…\n", name, id, orVanilla(loaderName), loaderVersion, key)
 		if _, err := s.preparer.Prepare(ctx, prepare.Options{
 			ProfileDir:    profileDir,
 			VersionURL:    versionURL,
@@ -294,7 +295,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 			LoaderVersion: loaderVersion,
 			JavaComponent: opts["java"],
 		}); err != nil {
-			fmt.Fprintf(out, "platform %s failed: %v\n", key, err)
+			fmt.Fprintf(out, "Платформа %s не собралась: %v\n", key, err)
 			failures = append(failures, key)
 			continue
 		}
@@ -306,7 +307,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 				return err
 			}
 		}
-		fmt.Fprintf(out, "built into %s\n", profileDir)
+		fmt.Fprintf(out, "Готово: %s\n", profileDir)
 	}
 	prepared := s.layout(name)
 	if !prepared.exists() {
@@ -314,12 +315,12 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	}
 	s.fire("build.prepared", name)
 	if len(failures) > 0 {
-		fmt.Fprintf(out, "skipped: %s\n", strings.Join(failures, ", "))
+		fmt.Fprintf(out, "Пропущено: %s\n", strings.Join(failures, ", "))
 	}
 	if prepared.flat {
-		fmt.Fprintf(out, "edit the build in %s, then: publish %s\n", prepared.root, name)
+		fmt.Fprintf(out, "Правьте сборку в %s, потом опубликуйте: publish %s\n", prepared.root, name)
 	} else {
-		fmt.Fprintf(out, "settings live in %s, mods and files in each platform folder, then: publish %s\n", filepath.Join(s.profilesDir, name, manifest.SettingsFileName), name)
+		fmt.Fprintf(out, "Настройки сборки — в %s, моды и файлы — в папке каждой платформы. Потом опубликуйте: publish %s\n", filepath.Join(s.profilesDir, name, manifest.SettingsFileName), name)
 	}
 	return nil
 }
@@ -397,7 +398,7 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 		if !ok {
 			label = "все платформы"
 		}
-		fmt.Fprintf(out, "published %q [%s]: %d files, %d bytes\n", name, label, len(published.Manifest.Files), published.Manifest.TotalSize)
+		fmt.Fprintf(out, "Опубликована «%s» (%s): %s, %s\n", name, label, humanize.Count(len(published.Manifest.Files), "файл", "файла", "файлов"), humanize.Bytes(published.Manifest.TotalSize))
 	}
 	s.fire("build.published", name)
 	return nil
@@ -437,4 +438,26 @@ func orVanilla(name string) string {
 		return "vanilla"
 	}
 	return name
+}
+
+func statusWord(status string) string {
+	switch status {
+	case "published":
+		return "опубликована"
+	case "prepared":
+		return "собрана, ждёт публикации"
+	default:
+		return status
+	}
+}
+
+func versionWord(kind string) string {
+	switch kind {
+	case "release":
+		return "релиз"
+	case "snapshot":
+		return "снапшот"
+	default:
+		return kind
+	}
 }

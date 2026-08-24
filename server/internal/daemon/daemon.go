@@ -27,6 +27,7 @@ import (
 	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/control"
 	"github.com/laminara/laminara/server/internal/events"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/logbus"
@@ -250,15 +251,13 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 func (d *Daemon) statusCommand() command.Command {
 	return command.Command{
 		Name:     "status",
-		Synopsis: "show server status",
+		Synopsis: "состояние сервера",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			s := d.status()
-			uptime := time.Since(time.Unix(0, s.StartedAtNano)).Truncate(time.Second)
-			fmt.Fprintf(out, "version:    %s\n", s.Version)
-			fmt.Fprintf(out, "uptime:     %s\n", uptime)
-			fmt.Fprintf(out, "modules:    %d\n", s.ModulesLoaded)
-			fmt.Fprintf(out, "memory:     %d KiB\n", s.MemoryBytes/1024)
-			fmt.Fprintf(out, "goroutines: %d\n", s.Goroutines)
+			fmt.Fprintf(out, "версия:   %s\n", s.Version)
+			fmt.Fprintf(out, "в работе: %s\n", humanize.Duration(time.Since(time.Unix(0, s.StartedAtNano))))
+			fmt.Fprintf(out, "модулей:  %d\n", s.ModulesLoaded)
+			fmt.Fprintf(out, "память:   %s\n", humanize.Bytes(s.MemoryBytes))
 			return nil
 		},
 	}
@@ -267,7 +266,7 @@ func (d *Daemon) statusCommand() command.Command {
 func (d *Daemon) versionCommand() command.Command {
 	return command.Command{
 		Name:     "version",
-		Synopsis: "show server version",
+		Synopsis: "версия сервера",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			fmt.Fprintln(out, version.Current)
 			return nil
@@ -278,7 +277,7 @@ func (d *Daemon) versionCommand() command.Command {
 func authCommand(service *auth.Service) command.Command {
 	return command.Command{
 		Name:     "auth",
-		Synopsis: "exercise the auth provider (auth test <user> <pass> | auth validate <token>)",
+		Synopsis: "проверить вход игроков (auth test <логин> <пароль> | auth validate <токен>)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if len(args) == 0 {
 				return errors.New("usage: auth test <username> <password> | auth validate <token>")

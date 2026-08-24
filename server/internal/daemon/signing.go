@@ -13,7 +13,7 @@ import (
 func signingCommand(ring *signing.Keyring) command.Command {
 	return command.Command{
 		Name:     "signing",
-		Synopsis: "show the signing keyring (signing keys | signing new <path>)",
+		Synopsis: "ключи подписи (signing keys | signing new <путь>)",
 		Run: func(_ context.Context, args []string, out io.Writer) error {
 			if ring == nil {
 				return errors.New("no signing key is configured")

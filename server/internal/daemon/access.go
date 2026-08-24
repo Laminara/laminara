@@ -14,7 +14,7 @@ import (
 func accessCommand(controller *access.Controller, builds func() ([]string, error)) command.Command {
 	return command.Command{
 		Name:     "access",
-		Synopsis: "inspect build access (access rules | access check <build> <username> [uuid] | access reload)",
+		Synopsis: "кто пускается в сборки (access rules | access check <сборка> <игрок> [uuid] | access reload)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if len(args) == 0 {
 				args = []string{"rules"}

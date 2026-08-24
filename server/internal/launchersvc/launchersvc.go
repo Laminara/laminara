@@ -42,7 +42,7 @@ func (s *Service) SetEmitter(emit func(topic string, data map[string]string)) {
 func (s *Service) Commands() []command.Command {
 	return []command.Command{{
 		Name:     "launcher",
-		Synopsis: "manage launcher releases (launcher versions|publish <version>|status)",
+		Synopsis: "версии лаунчера (launcher versions | launcher publish <версия> | launcher status)",
 		Run:      s.run,
 	}}
 }
