@@ -82,7 +82,7 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="primaryInk" type="string">Цвет текста на акцентном фоне.</ParamField>
 <ParamField path="backgroundColor" type="string">Фон приложения.</ParamField>
 <ParamField path="logoPath" type="string">Файл логотипа (`.svg`/`.png`). Встраивается в конфиг лаунчера как data-URI.</ParamField>
-<ParamField path="heroMediaPath" type="string">Фоновое видео или картинка главного экрана.</ParamField>
+<ParamField path="heroMediaPath" type="string">Фон главного экрана: картинка (`.jpg`, `.png`, `.webp`) или видео (`.mp4`, `.webm`). Картинка показывается везде одинаково, видео на Linux зависит от кодеков в системе игрока — если их нет, фон останется пустым. Пусто — фон по умолчанию.</ParamField>
 <ParamField path="siteUrl" type="string">Ссылка на сайт проекта.</ParamField>
 
 Блок отдаётся командой `client-config` и запекается в лаунчер при сборке.
