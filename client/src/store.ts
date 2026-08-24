@@ -211,6 +211,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
           set({ sync: { ...event.data } });
         }
       });
+      set({ builds: await ipc.listBuilds() });
       await ipc.launch(name);
       if (get().phase === "syncing") set({ phase: "running" });
     } catch (err) {

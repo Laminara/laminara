@@ -1,4 +1,5 @@
 import { useLauncher } from "@/store";
+import { plural } from "@/lib/format";
 import { Modal } from "@/components/ui/Modal";
 import { NewsCard } from "./NewsCard";
 
@@ -7,7 +8,7 @@ export function NewsModal() {
   const close = useLauncher((state) => state.closeModal);
 
   return (
-    <Modal title="Новости" subtitle={news.length === 1 ? "1 запись" : `${news.length} записей`} onClose={close}>
+    <Modal title="Новости" subtitle={`${news.length} ${plural(news.length, "запись", "записи", "записей")}`} onClose={close}>
       {news.length === 0 ? (
         <div className="flex h-full items-center justify-center text-sm text-mute">Пока новостей нет</div>
       ) : (

@@ -15,6 +15,15 @@ export function formatCount(value: number): string {
   return value.toLocaleString("ru-RU");
 }
 
+export function plural(value: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(value) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 export function formatNewsDate(unixNanos: number): string {
   if (!unixNanos) return "";
   return new Date(unixNanos / 1_000_000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
