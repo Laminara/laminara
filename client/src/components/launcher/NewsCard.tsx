@@ -7,7 +7,7 @@ export function NewsCard({ item, compact = false }: { item: NewsItem; compact?: 
   const date = formatNewsDate(item.publishedAtUnixNanos);
 
   return (
-    <article className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
+    <article className="flex flex-col overflow-hidden rounded-lg border border-border bg-panel backdrop-blur-md">
       {item.bannerDataUri && (
         <img
           src={item.bannerDataUri}

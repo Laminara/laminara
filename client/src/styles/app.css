@@ -7,6 +7,8 @@
   --color-surface: var(--lm-surface);
   --color-surface-2: var(--lm-surface-2);
   --color-surface-3: var(--lm-surface-3);
+  --color-panel: var(--lm-panel);
+  --color-panel-2: var(--lm-panel-2);
   --color-border: var(--lm-border);
   --color-border-strong: var(--lm-border-strong);
 

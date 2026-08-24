@@ -6,6 +6,8 @@
   --lm-surface: rgba(255, 255, 255, 0.05);
   --lm-surface-2: rgba(255, 255, 255, 0.08);
   --lm-surface-3: rgba(255, 255, 255, 0.12);
+  --lm-panel: rgba(13, 10, 9, 0.74);
+  --lm-panel-2: rgba(13, 10, 9, 0.86);
   --lm-border: rgba(255, 255, 255, 0.08);
   --lm-border-strong: rgba(255, 255, 255, 0.16);
 

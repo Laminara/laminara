@@ -30,7 +30,7 @@ export function NewsPanel() {
           <button
             key={item.id}
             onClick={() => openModal({ kind: "news" })}
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-left transition-colors hover:bg-surface-2"
+            className="flex items-center gap-2 rounded-lg border border-border bg-panel px-3.5 py-2.5 text-left backdrop-blur-md transition-colors hover:bg-panel-2"
           >
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-semibold">{item.title}</div>
