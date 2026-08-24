@@ -34,7 +34,7 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
         {installing ? (
           <span className="text-xs tabular-nums text-dim">{Math.round((build.progress ?? 0) * 100)}%</span>
         ) : (
-          online && (
+          online && online.max > 0 && (
             <span className="flex items-center gap-1.5 text-xs tabular-nums text-dim">
               <span className="h-1.5 w-1.5 rounded-full bg-online" />
               {formatCount(online.online)}

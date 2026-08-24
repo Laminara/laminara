@@ -22,9 +22,11 @@ export function UpdateOverlay() {
           </div>
         </div>
         <ProgressBar value={fraction} className="mt-5 h-1.5" />
-        <div className="mt-2 text-xs tabular-nums text-dim">
-          {formatBytes(progress?.done ?? 0)} / {formatBytes(total)}
-        </div>
+        {total > 0 && (
+          <div className="mt-2 text-xs tabular-nums text-dim">
+            {formatBytes(progress?.done ?? 0)} / {formatBytes(total)}
+          </div>
+        )}
       </div>
     </div>
   );

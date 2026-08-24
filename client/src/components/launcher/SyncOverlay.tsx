@@ -31,8 +31,14 @@ export function SyncOverlay() {
         <ProgressBar value={fraction} className="h-1.5" />
 
         <div className="mt-3 flex items-center justify-between text-sm text-dim">
-          <span className="tabular-nums">{sync ? `${formatBytes(sync.bytesDone)} / ${formatBytes(sync.bytesTotal)}` : "Подготовка…"}</span>
-          <span className="tabular-nums">{sync ? `${sync.filesDone} / ${sync.filesTotal} ${plural(sync.filesTotal, "файл", "файла", "файлов")}` : ""}</span>
+          <span className="tabular-nums">
+            {sync && sync.bytesTotal > 0 ? `${formatBytes(sync.bytesDone)} / ${formatBytes(sync.bytesTotal)}` : "Подготовка…"}
+          </span>
+          <span className="tabular-nums">
+            {sync && sync.filesTotal > 0
+              ? `${sync.filesDone} / ${sync.filesTotal} ${plural(sync.filesTotal, "файл", "файла", "файлов")}`
+              : ""}
+          </span>
         </div>
 
         {sync?.currentPath && <div className="mt-2 truncate text-xs text-mute">{sync.currentPath}</div>}

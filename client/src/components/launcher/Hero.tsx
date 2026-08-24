@@ -29,7 +29,7 @@ export function Hero() {
 
       <h1 className="max-w-2xl text-[84px] font-extrabold leading-[0.9] tracking-tight">{build.name}</h1>
 
-      {online && (
+      {online && online.max > 0 && (
         <div className="flex items-center gap-2.5 text-sm">
           <OnlineDot />
           <span className="font-semibold tabular-nums text-text">

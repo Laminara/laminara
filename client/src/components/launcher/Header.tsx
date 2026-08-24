@@ -19,7 +19,7 @@ export function Header() {
     <header data-tauri-drag-region className="relative z-30 flex items-center justify-between px-9 py-6">
       <BrandMark />
       <div className="flex items-center gap-3">
-        {players && (
+        {players && players.total.max > 0 && (
           <div className="flex items-center gap-2.5 rounded-full border border-border bg-panel px-4 py-2.5 backdrop-blur-md">
             <OnlineDot />
             <span className="text-sm font-semibold tabular-nums">
