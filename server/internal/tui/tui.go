@@ -101,7 +101,7 @@ func Run(ctx context.Context, client adminv1connect.AdminServiceClient, nerd boo
 	go streamLogs(ctx, client, logCh, st)
 
 	input := textinput.New()
-	input.Placeholder = "команда сервера — help покажет список"
+	input.Placeholder = "команда проекта — help покажет список"
 	input.Prompt = "› "
 	input.CharLimit = 512
 
@@ -126,7 +126,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m *Model) greet() {
 	m.appendLog(m.styles.selected.Render("Консоль Laminara"))
-	m.appendLog(m.styles.dim.Render("Сервер работает сам по себе — консоль лишь показывает его и передаёт команды."))
+	m.appendLog(m.styles.dim.Render("Проект работает сам по себе — консоль лишь показывает его и передаёт команды."))
 	m.appendLog(m.styles.dim.Render("Соберите клиент клавишей ") + m.styles.key.Render("i") + m.styles.dim.Render(", посмотрите сборки — ") + m.styles.key.Render("b") + m.styles.dim.Render(", справка — ") + m.styles.key.Render("?"))
 	m.appendLog("")
 }
@@ -359,7 +359,7 @@ func (m Model) onBuilds(msg buildsMsg) (tea.Model, tea.Cmd) {
 		for _, build := range msg.builds {
 			width = max(width, lipgloss.Width(build.Name))
 		}
-		m.appendLog(m.styles.dim.Render("Сборки на сервере:"))
+		m.appendLog(m.styles.dim.Render("Сборки проекта:"))
 		for _, build := range msg.builds {
 			name := m.styles.keyLabel.Render(build.Name + strings.Repeat(" ", width-lipgloss.Width(build.Name)))
 			m.appendLog("  " + m.styles.faint.Render(m.icons.builds) + " " + name + "   " + statusLabel(build.Status, m.styles))
@@ -469,7 +469,7 @@ func (m Model) headerView() string {
 
 func (m Model) summaryView() string {
 	if m.status.version == "" {
-		return m.styles.summary.Render("собираю сведения о сервере…")
+		return m.styles.summary.Render("собираю сведения о проекте…")
 	}
 	field := func(label, value string) string {
 		return m.styles.dim.Render(label+" ") + m.styles.summaryKey.Render(value)
@@ -493,11 +493,11 @@ func (m Model) helpView() string {
 		line("b", "показать сборки и их состояние"),
 		line("u", "пересобрать сборку под новую версию"),
 		line("p", "опубликовать сборку — лаунчеры увидят обновление"),
-		line("d", "удалить сборку с сервера"),
+		line("d", "удалить сборку из проекта"),
 		line("/", "ввести команду вручную — Tab дополняет, ↑↓ повторяют прошлые"),
 		line("↑↓", "прокрутить ленту логов"),
 		line("?", "эта справка"),
-		line("q", "выйти из консоли (сервер продолжит работать)"),
+		line("q", "выйти из консоли — проект продолжит работать"),
 		"",
 		m.styles.selected.Render("Команды"),
 		m.styles.dim.Render("help — весь список; status, builds, versions, loaders,"),
@@ -510,7 +510,7 @@ func (m Model) helpView() string {
 
 func (m Model) emptyHint() string {
 	lines := []string{
-		m.styles.dim.Render("Логи сервера появятся здесь."),
+		m.styles.dim.Render("Здесь пойдут события проекта."),
 		"",
 		m.styles.keyLabel.Render("Начните с ") + m.styles.key.Render("i") + m.styles.keyLabel.Render(" — консоль соберёт клиент и проведёт по шагам,"),
 		m.styles.keyLabel.Render("или нажмите ") + m.styles.key.Render("?") + m.styles.keyLabel.Render(" — короткая справка."),

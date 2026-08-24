@@ -67,7 +67,7 @@ func (s *Service) Commands() []command.Command {
 		{Name: "loaders", Synopsis: "загрузчики модов для версии (loaders <версия>)", Run: s.loaders},
 		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "собрать клиент (install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..])", Run: s.prepare},
 		{Name: "publish", Aliases: []string{"release"}, Synopsis: "опубликовать сборку — лаунчеры увидят её (publish <имя>)", Run: s.publish},
-		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "сборки на сервере и их состояние", Run: s.builds},
+		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "сборки проекта и их состояние", Run: s.builds},
 		{Name: "delete", Aliases: []string{"deletebuild", "remove"}, Synopsis: "удалить сборку (delete <имя>)", Run: s.delete},
 	}
 }

@@ -157,7 +157,7 @@ func (w wizard) buildCommand() string {
 
 func (w wizard) View() string {
 	if w.loading {
-		return w.styles.wizardBox.Render(w.styles.dim.Render("Спрашиваю сервер…"))
+		return w.styles.wizardBox.Render(w.styles.dim.Render("Спрашиваю проект…"))
 	}
 	if w.step == wzName {
 		summary := w.mc

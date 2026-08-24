@@ -251,7 +251,7 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 func (d *Daemon) statusCommand() command.Command {
 	return command.Command{
 		Name:     "status",
-		Synopsis: "состояние сервера",
+		Synopsis: "состояние проекта",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			s := d.status()
 			fmt.Fprintf(out, "версия:   %s\n", s.Version)
@@ -266,7 +266,7 @@ func (d *Daemon) statusCommand() command.Command {
 func (d *Daemon) versionCommand() command.Command {
 	return command.Command{
 		Name:     "version",
-		Synopsis: "версия сервера",
+		Synopsis: "версия проекта",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			fmt.Fprintln(out, version.Current)
 			return nil
