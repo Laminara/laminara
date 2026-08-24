@@ -30,7 +30,7 @@ jobs:
         run: |
           for page in / /quickstart/ /reference/config/; do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-              -H 'Host: docs.laminara.dev' "http://85.209.9.174$page")
+              "https://docs.laminara.dev$page")
             echo "$page -> $code"
             [ "$code" = "200" ] || exit 1
           done
