@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use keyring::Entry;
 use laminara_core::account::GameSession;
 use laminara_core::state::Account;
+use laminara_core::secrets::blocking;
 use laminara_core::KEYRING_SERVICE as SERVICE;
 use serde::Serialize;
 use zeroize::Zeroizing;
@@ -40,18 +41,20 @@ impl AuthManager {
         uuid: &str,
         refresh: &str,
     ) -> Result<(), String> {
-        Self::entry(endpoint_id, uuid)?
-            .set_password(refresh)
-            .map_err(|e| e.to_string())
+        let entry = Self::entry(endpoint_id, uuid)?;
+        blocking(|| entry.set_password(refresh).map_err(|e| e.to_string()))
     }
 
     pub fn load_refresh(&self, endpoint_id: &str, uuid: &str) -> Option<String> {
-        Self::entry(endpoint_id, uuid).ok()?.get_password().ok()
+        let entry = Self::entry(endpoint_id, uuid).ok()?;
+        blocking(|| entry.get_password().ok())
     }
 
     pub fn clear_refresh(&self, endpoint_id: &str, uuid: &str) {
         if let Ok(entry) = Self::entry(endpoint_id, uuid) {
-            let _ = entry.delete_credential();
+            blocking(|| {
+                let _ = entry.delete_credential();
+            });
         }
     }
 
@@ -66,23 +69,23 @@ impl AuthManager {
         access: &str,
         client: &str,
     ) -> Result<(), String> {
-        Self::game_entry(endpoint_id, uuid)?
-            .set_password(&format!("{access}\n{client}"))
-            .map_err(|e| e.to_string())
+        let entry = Self::game_entry(endpoint_id, uuid)?;
+        let secret = format!("{access}\n{client}");
+        blocking(|| entry.set_password(&secret).map_err(|e| e.to_string()))
     }
 
     pub fn load_game(&self, endpoint_id: &str, uuid: &str) -> Option<(String, String)> {
-        let raw = Self::game_entry(endpoint_id, uuid)
-            .ok()?
-            .get_password()
-            .ok()?;
+        let entry = Self::game_entry(endpoint_id, uuid).ok()?;
+        let raw = blocking(|| entry.get_password().ok())?;
         let (access, client) = raw.split_once('\n')?;
         Some((access.to_string(), client.to_string()))
     }
 
     pub fn clear_game(&self, endpoint_id: &str, uuid: &str) {
         if let Ok(entry) = Self::game_entry(endpoint_id, uuid) {
-            let _ = entry.delete_credential();
+            blocking(|| {
+                let _ = entry.delete_credential();
+            });
         }
     }
 

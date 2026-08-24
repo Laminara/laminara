@@ -53,14 +53,17 @@ fn entry() -> Option<Entry> {
 }
 
 fn read_keyring() -> Option<[u8; 32]> {
-    let stored = entry()?.get_password().ok()?;
+    let stored = crate::secrets::blocking(|| entry()?.get_password().ok())?;
     decode(&stored)
 }
 
 fn write_keyring(bytes: &[u8; 32]) {
-    if let Some(entry) = entry() {
-        let _ = entry.set_password(&hex::encode(bytes));
-    }
+    let encoded = hex::encode(bytes);
+    crate::secrets::blocking(|| {
+        if let Some(entry) = entry() {
+            let _ = entry.set_password(&encoded);
+        }
+    });
 }
 
 fn key_file() -> Option<PathBuf> {

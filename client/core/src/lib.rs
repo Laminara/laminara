@@ -12,6 +12,7 @@ pub mod paths;
 pub mod platform;
 pub mod process;
 pub mod rpc;
+pub mod secrets;
 pub mod slp;
 pub mod state;
 pub mod sync;
