@@ -230,7 +230,7 @@ func classify(name string) (corev1.Platform, corev1.LauncherArtifactKind, bool) 
 		return platformFromName(lower, corev1.Platform_PLATFORM_LINUX), corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_INSTALLER, true
 	case strings.Contains(lower, "mac-os") || strings.Contains(lower, "macos") || strings.Contains(lower, "darwin"):
 		return platformFromName(lower, corev1.Platform_PLATFORM_MAC_OS), corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_RAW_EXECUTABLE, true
-	case strings.Contains(lower, "linux"):
+	case strings.Contains(lower, "linux"), filepath.Ext(lower) == "":
 		return platformFromName(lower, corev1.Platform_PLATFORM_LINUX), corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_RAW_EXECUTABLE, true
 	default:
 		return corev1.Platform_PLATFORM_UNSPECIFIED, corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_UNSPECIFIED, false
