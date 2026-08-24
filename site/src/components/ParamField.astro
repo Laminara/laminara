@@ -1,0 +1,56 @@
+---
+interface Props {
+  path: string;
+  type?: string;
+  required?: boolean;
+  default?: string;
+}
+
+const { path, type, required = false, default: fallback } = Astro.props;
+---
+
+<div class="param">
+  <p class="param-head">
+    <code class="param-name">{path}</code>
+    {type && <span class="param-type">{type}</span>}
+    {required && <span class="param-flag param-required">обязательно</span>}
+    {fallback && <span class="param-flag">по умолчанию <code>{fallback}</code></span>}
+  </p>
+  <div class="param-body"><slot /></div>
+</div>
+
+<style>
+  .param {
+    border-top: 1px solid var(--sl-color-hairline);
+    padding: 0.85rem 0;
+  }
+  .param-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin: 0;
+  }
+  .param-name {
+    font-weight: 600;
+  }
+  .param-type {
+    color: var(--sl-color-text-accent);
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+  }
+  .param-flag {
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-xs);
+  }
+  .param-required {
+    color: var(--sl-color-orange-high);
+  }
+  .param-body :global(p) {
+    margin: 0.35rem 0 0;
+    color: var(--sl-color-gray-2);
+  }
+  .param-body:empty {
+    display: none;
+  }
+</style>

@@ -3,11 +3,13 @@ title: "Установка"
 description: "Запуск сервера в Docker, под systemd или из исходников."
 ---
 
+import { Aside, Steps } from "@astrojs/starlight/components";
+
 Сервер — один статический бинарник. Выберите способ под свою инфраструктуру: Docker для быстрого старта, systemd для железа или VPS, сборка из исходников для разработки.
 
-<Warning>
+<Aside type="caution">
 Сервер работает только на Linux. Он запускает скачанную Java для установщиков Forge и NeoForge, поэтому базовый образ должен быть с glibc — в нашем `Dockerfile` это `debian:12-slim`.
-</Warning>
+</Aside>
 
 ## Установщик
 
@@ -43,25 +45,29 @@ Compose поднимает сам сервер и Redis. Постоянные д
 Для установки на хост есть готовый unit с `Type=notify` — сервер сам сообщает systemd о готовности и об остановке.
 
 <Steps>
-  <Step title="Соберите бинарник">
-    ```sh
-    make build
-    sudo install -m0755 bin/laminara-server /usr/local/bin/laminara-server
-    ```
-  </Step>
-  <Step title="Заведите пользователя и каталоги">
-    ```sh
-    sudo useradd --system --home /var/lib/laminara --shell /usr/sbin/nologin laminara
-    sudo install -d -o laminara -g laminara /var/lib/laminara /etc/laminara
-    sudo install -m0640 -o laminara -g laminara deploy/config.example.json /etc/laminara/config.json
-    ```
-  </Step>
-  <Step title="Поставьте unit и запустите">
-    ```sh
-    sudo install -m0644 deploy/systemd/laminara-server.service /etc/systemd/system/
-    sudo systemctl enable --now laminara-server
-    ```
-  </Step>
+
+1. **Соберите бинарник**
+
+   ```sh
+   make build
+   sudo install -m0755 bin/laminara-server /usr/local/bin/laminara-server
+   ```
+
+2. **Заведите пользователя и каталоги**
+
+   ```sh
+   sudo useradd --system --home /var/lib/laminara --shell /usr/sbin/nologin laminara
+   sudo install -d -o laminara -g laminara /var/lib/laminara /etc/laminara
+   sudo install -m0640 -o laminara -g laminara deploy/config.example.json /etc/laminara/config.json
+   ```
+
+3. **Поставьте unit и запустите**
+
+   ```sh
+   sudo install -m0644 deploy/systemd/laminara-server.service /etc/systemd/system/
+   sudo systemctl enable --now laminara-server
+   ```
+
 </Steps>
 
 Unit ограничивает права: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, запись разрешена только в `/var/lib/laminara` и `/run/laminara`.

@@ -119,6 +119,15 @@ cargo test -p laminara-launcher-core
 Сборка exe под Windows дополнительно требует `cargo install cargo-xwin` и пакеты
 `clang lld llvm`.
 
+Документация — сайт на Astro Starlight, страницы лежат в `docs/`:
+
+```sh
+cd site
+pnpm install
+pnpm dev      # локальный просмотр
+pnpm build    # статика в site/dist
+```
+
 ## Чего пока нет
 
 - Разностных обновлений нет: пока не видно, что они окупят сложность — сборка и так

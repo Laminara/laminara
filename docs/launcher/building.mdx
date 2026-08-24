@@ -3,6 +3,8 @@ title: Сборка лаунчера
 description: Как получить exe и Linux-бинарь под свой проект, в том числе кросс-сборкой с Linux.
 ---
 
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
 Лаунчер принадлежит **одному проекту**: адрес сервера, ключи подписи, соль машинного
 отпечатка и оформление запекаются в файл при сборке. Игрок ничего не настраивает и адрес
 не вводит, а чужой проект через этот файл не откроется. Поэтому «универсального» лаунчера
@@ -10,14 +12,14 @@ description: Как получить exe и Linux-бинарь под свой �
 
 ## Что нужно
 
-<CardGroup cols={2}>
-  <Card title="Всегда" icon="wrench">
-    Node 24 + pnpm, Rust 1.96+ (rustup)
-  </Card>
-  <Card title="Для Windows с Linux" icon="windows">
-    `cargo install cargo-xwin`, пакеты `clang lld llvm`
-  </Card>
-</CardGroup>
+<CardGrid>
+  <Card title="Всегда">
+  Node 24 + pnpm, Rust 1.96+ (rustup)
+</Card>
+  <Card title="Для Windows с Linux">
+  `cargo install cargo-xwin`, пакеты `clang lld llvm`
+</Card>
+</CardGrid>
 
 Windows-сборка с Linux делается **кросс-компиляцией**: `cargo-xwin` сам скачивает заголовки
 и библиотеки Windows SDK (около гигабайта, один раз), линкует `lld`. Виртуальная машина с
@@ -26,35 +28,39 @@ Windows не нужна.
 ## Как собрать
 
 <Steps>
-  <Step title="Заберите конфигурацию с сервера">
-    ```bash
-    laminara-server client-config \
-      --config /etc/laminara/config.json \
-      --endpoint https://launcher.ваш-домен > mygame.client.json
-    ```
-    Внутри — адреса, всё [кольцо ключей](/server/signing), соль
-    [машинного отпечатка](/server/machines) и оформление вместе с картинками.
 
-    <Warning>
-    `--endpoint` — адрес, по которому лаунчер будет ходить **у игрока**. `127.0.0.1` годится
-    только для проверки на самом сервере.
-    </Warning>
-  </Step>
-  <Step title="Соберите">
-    ```bash
-    cd client
-    ./build-launcher.sh ../mygame.client.json --target windows
-    ./build-launcher.sh ../mygame.client.json --target linux
-    ```
-    Готовые файлы — в `client/dist-launcher/`. Имя берётся из оформления: если в конфиге
-    сервера `branding.windowTitle` = «Magic World», получится `Magic World.exe`. Перебить —
-    флагом `--name`.
-  </Step>
-  <Step title="Выложите игрокам">
-    Файл самодостаточный: игрок скачивает и запускает, установка не нужна. Дальше лаунчер
-    [обновляет себя сам](/launcher/updates) — выложите его же командой `launcher publish`,
-    и следующая версия доедет до игроков без их участия.
-  </Step>
+1. **Заберите конфигурацию с сервера**
+
+   ```bash
+   laminara-server client-config \
+     --config /etc/laminara/config.json \
+     --endpoint https://launcher.ваш-домен > mygame.client.json
+   ```
+   Внутри — адреса, всё [кольцо ключей](/server/signing), соль
+   [машинного отпечатка](/server/machines) и оформление вместе с картинками.
+
+   <Aside type="caution">
+   `--endpoint` — адрес, по которому лаунчер будет ходить **у игрока**. `127.0.0.1` годится
+   только для проверки на самом сервере.
+   </Aside>
+
+2. **Соберите**
+
+   ```bash
+   cd client
+   ./build-launcher.sh ../mygame.client.json --target windows
+   ./build-launcher.sh ../mygame.client.json --target linux
+   ```
+   Готовые файлы — в `client/dist-launcher/`. Имя берётся из оформления: если в конфиге
+   сервера `branding.windowTitle` = «Magic World», получится `Magic World.exe`. Перебить —
+   флагом `--name`.
+
+3. **Выложите игрокам**
+
+   Файл самодостаточный: игрок скачивает и запускает, установка не нужна. Дальше лаунчер
+   [обновляет себя сам](/launcher/updates) — выложите его же командой `launcher publish`,
+   и следующая версия доедет до игроков без их участия.
+
 </Steps>
 
 ## Что должно быть на компьютере игрока
@@ -62,11 +68,11 @@ Windows не нужна.
 Ничего, кроме самой Windows 10 или 11. Рантайм Visual C++ вшит в файл, а движок показа
 интерфейса (WebView2) входит в Windows 11 и приезжает в Windows 10 вместе с Edge.
 
-<Note>
+<Aside type="note">
 Файл не подписан сертификатом, поэтому при первом запуске Windows покажет
 предупреждение SmartScreen. Убирается это только покупкой сертификата подписи кода —
 и подписывать надо каждую новую версию.
-</Note>
+</Aside>
 
 ## Когда лаунчер надо пересобрать
 
@@ -81,8 +87,8 @@ Windows не нужна.
 | Сборки, моды, версии | Нет |
 | Новости, доступ к сборкам, баны | Нет |
 
-<Warning>
+<Aside type="caution">
 Пересобрали ради нового ключа — сначала добавьте его в кольцо **доверенных**, выложите
 лаунчер, и только потом начинайте им подписывать. Порядок разобран в
 [ключах подписи](/server/signing).
-</Warning>
+</Aside>

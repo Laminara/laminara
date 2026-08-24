@@ -3,24 +3,18 @@ title: "Laminara"
 description: "Своя платформа-лаунчер для Minecraft: сервер готовит сборки, лаунчер их запускает."
 ---
 
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
 Laminara запускает Minecraft со своими сборками. Сервер собирает готовый клиент любой версии и любого загрузчика, подписывает его и раздаёт. Лаунчер у игрока сверяет подпись, докачивает недостающие файлы и запускает игру. Аккаунты при этом остаются в вашей базе — Laminara обращается к ним через адаптер и никогда не хранит чужие пароли.
 
 Смысл в том, чтобы админ ничего не собирал руками. Он не ходит к Mojang, не запускает установщик Forge, не подбирает версию Java. Всю подготовку сервер делает один раз, а клиент потом лишь синхронизирует файлы по манифесту.
 
-<CardGroup cols={2}>
-  <Card title="Быстрый старт" icon="rocket" href="/quickstart">
-    Поднять сервер и собрать первую сборку за несколько команд.
-  </Card>
-  <Card title="Как устроено" icon="sitemap" href="/architecture">
-    Кто что делает — сервер, лаунчер, манифест — и зачем подпись.
-  </Card>
-  <Card title="Загрузчики" icon="cubes" href="/builds/loaders">
-    Vanilla, Fabric, Quilt, Forge, NeoForge — под любую версию.
-  </Card>
-  <Card title="Вход и скины" icon="user-lock" href="/auth/yggdrasil">
-    Вход через ваши аккаунты, своя авторизация в игре, скины.
-  </Card>
-</CardGroup>
+<CardGrid>
+  <LinkCard title="Быстрый старт" href="/quickstart" description="Поднять сервер и собрать первую сборку за несколько команд." />
+  <LinkCard title="Как устроено" href="/architecture" description="Кто что делает — сервер, лаунчер, манифест — и зачем подпись." />
+  <LinkCard title="Загрузчики" href="/builds/loaders" description="Vanilla, Fabric, Quilt, Forge, NeoForge — под любую версию." />
+  <LinkCard title="Вход и скины" href="/auth/yggdrasil" description="Вход через ваши аккаунты, своя авторизация в игре, скины." />
+</CardGrid>
 
 ## Из чего состоит
 

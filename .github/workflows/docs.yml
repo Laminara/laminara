@@ -1,0 +1,36 @@
+name: Документация
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "site/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Собрать и выложить
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Ключ доступа
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DOCS_SSH_KEY }}" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "${{ secrets.DOCS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Пересобрать на сервере
+        run: ssh -i ~/.ssh/deploy docs@85.209.9.174 true
+      - name: Проверить, что сайт отвечает
+        run: |
+          for page in / /quickstart/ /reference/config/; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              -H 'Host: docs.laminara.dev' "http://85.209.9.174$page")
+            echo "$page -> $code"
+            [ "$code" = "200" ] || exit 1
+          done
