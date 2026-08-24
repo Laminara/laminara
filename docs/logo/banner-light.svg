@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-label="Laminara">
   <defs>
     <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#4F46E5" stop-opacity="0"/>
-      <stop offset="0.18" stop-color="#4F46E5"/>
-      <stop offset="0.5" stop-color="#818CF8"/>
-      <stop offset="0.82" stop-color="#4F46E5"/>
-      <stop offset="1" stop-color="#4F46E5" stop-opacity="0"/>
+      <stop offset="0" stop-color="#c08a2e" stop-opacity="0"/>
+      <stop offset="0.18" stop-color="#c08a2e"/>
+      <stop offset="0.5" stop-color="#f4d089"/>
+      <stop offset="0.82" stop-color="#c08a2e"/>
+      <stop offset="1" stop-color="#c08a2e" stop-opacity="0"/>
     </linearGradient>
   </defs>
   <g fill="none" stroke="url(#flow)" stroke-linecap="round">
