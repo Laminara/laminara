@@ -316,7 +316,11 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	if len(failures) > 0 {
 		fmt.Fprintf(out, "skipped: %s\n", strings.Join(failures, ", "))
 	}
-	fmt.Fprintf(out, "edit shared files in %s, then: publish %s\n", filepath.Join(s.profilesDir, name), name)
+	if prepared.flat {
+		fmt.Fprintf(out, "edit the build in %s, then: publish %s\n", prepared.root, name)
+	} else {
+		fmt.Fprintf(out, "settings live in %s, mods and files in each platform folder, then: publish %s\n", filepath.Join(s.profilesDir, name, manifest.SettingsFileName), name)
+	}
 	return nil
 }
 

@@ -154,6 +154,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if d.moduleLoader != nil {
 		defer d.moduleLoader.Close()
 	}
+	var publicListener net.Listener
+	if d.publicHandler != nil && d.publicAddr != "" {
+		opened, err := net.Listen("tcp", d.publicAddr)
+		if err != nil {
+			return err
+		}
+		publicListener = opened
+		defer publicListener.Close()
+	}
+
 	listener, err := control.Listen()
 	if err != nil {
 		return err
@@ -175,11 +185,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go func() { serveErr <- server.Serve(listener) }()
 
 	var publicServer *http.Server
-	if d.publicHandler != nil && d.publicAddr != "" {
-		publicListener, err := net.Listen("tcp", d.publicAddr)
-		if err != nil {
-			return err
-		}
+	if publicListener != nil {
 		publicServer = &http.Server{Handler: d.publicHandler}
 		go func() { serveErr <- publicServer.Serve(publicListener) }()
 	}
