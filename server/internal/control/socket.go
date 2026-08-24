@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -47,4 +49,15 @@ func Listen() (net.Listener, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+func ReleasePid() {
+	raw, err := os.ReadFile(PidPath())
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(string(raw)) != strconv.Itoa(os.Getpid()) {
+		return
+	}
+	_ = os.Remove(PidPath())
 }

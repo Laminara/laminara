@@ -169,12 +169,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	defer listener.Close()
-	defer os.Remove(control.SocketPath())
 
 	if err := os.WriteFile(control.PidPath(), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 		return err
 	}
-	defer os.Remove(control.PidPath())
+	defer control.ReleasePid()
 
 	service := admin.NewService(d.status, d.bus, d.registry, d.catalog)
 	mux := http.NewServeMux()
