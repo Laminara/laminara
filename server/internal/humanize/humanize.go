@@ -45,11 +45,42 @@ func Duration(d time.Duration) string {
 		return fmt.Sprintf("%d с", int(d.Seconds()))
 	}
 	if d < time.Hour {
+		if int(d.Seconds())%60 == 0 {
+			return fmt.Sprintf("%d мин", int(d.Minutes()))
+		}
 		return fmt.Sprintf("%d мин %02d с", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	if d < 48*time.Hour {
+		if int(d.Minutes())%60 == 0 {
+			return fmt.Sprintf("%d ч", int(d.Hours()))
+		}
 		return fmt.Sprintf("%d ч %02d мин", int(d.Hours()), int(d.Minutes())%60)
 	}
 	days := int(d.Hours()) / 24
 	return Count(days, "день", "дня", "дней")
+}
+
+var months = []string{"января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"}
+
+func When(moment time.Time) string {
+	return whenAt(moment, time.Now())
+}
+
+func whenAt(moment, now time.Time) string {
+	if moment.IsZero() {
+		return "неизвестно когда"
+	}
+	moment = moment.Local()
+	clock := moment.Format("15:04")
+	today := now.Local().Truncate(24 * time.Hour)
+	day := moment.Truncate(24 * time.Hour)
+	switch {
+	case day.Equal(today):
+		return "сегодня в " + clock
+	case day.Equal(today.AddDate(0, 0, -1)):
+		return "вчера в " + clock
+	case moment.Year() == now.Year():
+		return fmt.Sprintf("%d %s в %s", moment.Day(), months[moment.Month()-1], clock)
+	}
+	return fmt.Sprintf("%d %s %d в %s", moment.Day(), months[moment.Month()-1], moment.Year(), clock)
 }

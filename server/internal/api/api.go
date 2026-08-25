@@ -128,15 +128,16 @@ func (s *Service) ListProfiles(ctx context.Context, req *connect.Request[apiv1.L
 			continue
 		}
 		resp.Profiles = append(resp.Profiles, &apiv1.ProfileSummary{
-			Name:          summary.Name,
-			Version:       summary.Version,
-			TotalSize:     summary.TotalSize,
-			ServerAddress: summary.ServerAddress,
-			Loader:        summary.Loader,
-			HasFeatures:   summary.HasFeatures,
-			Platforms:     summary.Platforms,
-			Locked:        !decision.Allowed,
-			LockReason:    decision.Reason,
+			Name:             summary.Name,
+			Version:          summary.Version,
+			MinecraftVersion: summary.Minecraft,
+			TotalSize:        summary.TotalSize,
+			ServerAddress:    summary.ServerAddress,
+			Loader:           summary.Loader,
+			HasFeatures:      summary.HasFeatures,
+			Platforms:        summary.Platforms,
+			Locked:           !decision.Allowed,
+			LockReason:       decision.Reason,
 		})
 	}
 	return connect.NewResponse(resp), nil

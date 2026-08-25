@@ -201,6 +201,7 @@ func pick(list []variant, want corev1.Platform) *variant {
 type Summary struct {
 	Name          string
 	Version       string
+	Minecraft     string
 	TotalSize     uint64
 	ServerAddress string
 	Loader        string
@@ -232,6 +233,7 @@ func (c *Catalog) Summaries(want corev1.Platform) ([]Summary, error) {
 		summaries = append(summaries, Summary{
 			Name:          name,
 			Version:       m.Version,
+			Minecraft:     m.MinecraftVersion,
 			TotalSize:     m.TotalSize,
 			ServerAddress: m.ServerAddress,
 			Loader:        m.Loader,
@@ -240,4 +242,48 @@ func (c *Catalog) Summaries(want corev1.Platform) ([]Summary, error) {
 		})
 	}
 	return summaries, nil
+}
+
+type Variant struct {
+	Platform      corev1.Platform
+	Minecraft     string
+	JavaMajor     uint32
+	Loader        string
+	TotalSize     uint64
+	Files         int
+	ServerAddress string
+	HasFeatures   bool
+	PublishedAt   time.Time
+}
+
+type Detail struct {
+	Name     string
+	Variants []Variant
+}
+
+func (c *Catalog) Details() ([]Detail, error) {
+	snap, err := c.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	details := make([]Detail, 0, len(snap.names))
+	for _, name := range snap.names {
+		detail := Detail{Name: name}
+		for _, v := range snap.builds[name] {
+			m := v.manifest
+			detail.Variants = append(detail.Variants, Variant{
+				Platform:      v.platform,
+				Minecraft:     m.MinecraftVersion,
+				JavaMajor:     m.JavaMajor,
+				Loader:        m.Loader,
+				TotalSize:     m.TotalSize,
+				Files:         len(m.Files),
+				ServerAddress: m.ServerAddress,
+				HasFeatures:   m.Features != nil && len(m.Features.Groups) > 0,
+				PublishedAt:   time.Unix(0, m.GeneratedAtUnixNanos),
+			})
+		}
+		details = append(details, detail)
+	}
+	return details, nil
 }

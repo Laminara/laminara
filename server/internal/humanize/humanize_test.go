@@ -40,11 +40,30 @@ func TestDuration(t *testing.T) {
 		2*time.Hour + 30*time.Minute + 1: "2 ч 30 мин",
 		90 * 24 * time.Hour:              "90 дней",
 		72 * time.Hour:                   "3 дня",
-		24 * time.Hour:                   "24 ч 00 мин",
+		24 * time.Hour:                   "24 ч",
+		10 * time.Minute:                 "10 мин",
 	}
 	for d, want := range cases {
 		if got := Duration(d); got != want {
 			t.Fatalf("Duration(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+func TestWhen(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local)
+	cases := map[time.Time]string{
+		time.Date(2026, 8, 25, 9, 5, 0, 0, time.Local):    "сегодня в 09:05",
+		time.Date(2026, 8, 24, 22, 40, 0, 0, time.Local):  "вчера в 22:40",
+		time.Date(2026, 8, 3, 8, 0, 0, 0, time.Local):     "3 августа в 08:00",
+		time.Date(2025, 12, 31, 23, 59, 0, 0, time.Local): "31 декабря 2025 в 23:59",
+	}
+	for moment, want := range cases {
+		if got := whenAt(moment, now); got != want {
+			t.Fatalf("whenAt(%s) = %q; want %q", moment, got, want)
+		}
+	}
+	if got := whenAt(time.Time{}, now); got != "неизвестно когда" {
+		t.Fatalf("zero time = %q", got)
 	}
 }

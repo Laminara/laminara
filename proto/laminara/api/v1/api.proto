@@ -41,6 +41,7 @@ message ProfileSummary {
   repeated laminara.core.v1.Platform platforms = 7;
   bool locked = 8;
   string lock_reason = 9;
+  string minecraft_version = 10;
 }
 
 message ListProfilesRequest {

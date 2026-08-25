@@ -10,6 +10,8 @@ import (
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/admin"
+	"github.com/laminara/laminara/server/internal/buildview"
+	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/loader"
@@ -26,6 +28,8 @@ type Service struct {
 	cas         *storage.CAS
 	signer      *manifest.Signer
 	profilesDir string
+	published   *catalog.Catalog
+	access      func(build string) string
 	emit        func(topic string, data map[string]string)
 }
 
@@ -37,6 +41,14 @@ func NewService(cas *storage.CAS, signer *manifest.Signer, profilesDir string) *
 		signer:      signer,
 		profilesDir: profilesDir,
 	}
+}
+
+func (s *Service) SetCatalog(published *catalog.Catalog) {
+	s.published = published
+}
+
+func (s *Service) SetAccess(describe func(build string) string) {
+	s.access = describe
 }
 
 func (s *Service) SetEmitter(emit func(topic string, data map[string]string)) {
@@ -68,6 +80,8 @@ func (s *Service) Commands() []command.Command {
 		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "собрать клиент (install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..])", Run: s.prepare},
 		{Name: "publish", Aliases: []string{"release"}, Synopsis: "опубликовать сборку — лаунчеры увидят её (publish <имя>)", Run: s.publish},
 		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "сборки проекта и их состояние", Run: s.builds},
+		{Name: "build", Aliases: []string{"info"}, Synopsis: "всё об одной сборке (build <имя>)", Run: s.buildInfo},
+		{Name: "players", Aliases: []string{"online", "who"}, Synopsis: "кто сейчас в игре на серверах сборок", Run: s.players},
 		{Name: "delete", Aliases: []string{"deletebuild", "remove"}, Synopsis: "удалить сборку (delete <имя>)", Run: s.delete},
 	}
 }
@@ -94,9 +108,16 @@ func (s *Service) builds(_ context.Context, _ []string, out io.Writer) error {
 		return nil
 	}
 	for _, build := range builds {
-		fmt.Fprintf(out, "%-20s %s\n", build.Name, statusWord(build.Status))
+		fmt.Fprintf(out, "%-20s %-26s %s\n", build.Name, buildview.StatusWord(build.Status), buildLine(build))
 	}
 	return nil
+}
+
+func buildLine(build admin.BuildEntry) string {
+	if build.Minecraft == "" {
+		return ""
+	}
+	return fmt.Sprintf("%-8s %-9s %s", build.Minecraft, buildview.LoaderWord(build.Loader), humanize.Bytes(build.SizeBytes))
 }
 
 func (s *Service) manifestsOf(name string) []string {
@@ -126,31 +147,75 @@ func (s *Service) Builds() ([]admin.BuildEntry, error) {
 		}
 		return nil, err
 	}
+	details := s.details()
 	var builds []admin.BuildEntry
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		status := "prepared"
-		if len(s.manifestsOf(entry.Name())) > 0 {
-			status = "published"
+		name := entry.Name()
+		build := admin.BuildEntry{Name: name, Status: "prepared", Prepared: s.layout(name).platforms}
+		if len(s.manifestsOf(name)) > 0 {
+			build.Status = "published"
 		}
-		builds = append(builds, admin.BuildEntry{Name: entry.Name(), Status: status})
+		fillPublished(&build, details[name])
+		if s.access != nil {
+			build.Access = s.access(name)
+		}
+		builds = append(builds, build)
 	}
 	return builds, nil
 }
 
+func (s *Service) details() map[string][]catalog.Variant {
+	if s.published == nil {
+		return nil
+	}
+	list, err := s.published.Details()
+	if err != nil {
+		return nil
+	}
+	out := make(map[string][]catalog.Variant, len(list))
+	for _, detail := range list {
+		out[detail.Name] = detail.Variants
+	}
+	return out
+}
+
+func fillPublished(build *admin.BuildEntry, variants []catalog.Variant) {
+	if len(variants) == 0 {
+		return
+	}
+	build.Status = "published"
+	head := variants[0]
+	build.Minecraft = head.Minecraft
+	build.JavaMajor = head.JavaMajor
+	build.Loader = head.Loader
+	build.SizeBytes = head.TotalSize
+	build.Files = head.Files
+	build.ServerAddress = head.ServerAddress
+	build.HasFeatures = head.HasFeatures
+	for _, variant := range variants {
+		if variant.Platform != corev1.Platform_PLATFORM_UNSPECIFIED {
+			build.Published = append(build.Published, variant.Platform)
+		}
+		if variant.PublishedAt.After(build.PublishedAt) {
+			build.PublishedAt = variant.PublishedAt
+		}
+	}
+}
+
 func (s *Service) delete(_ context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: delete <name>")
+		return fmt.Errorf("напишите имя сборки: delete <имя>")
 	}
 	name := args[0]
 	if !safeName(name) {
-		return fmt.Errorf("invalid build name %q", name)
+		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
 	dir := filepath.Join(s.profilesDir, name)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return fmt.Errorf("no build named %q", name)
+		return fmt.Errorf("сборки «%s» нет — список даёт команда builds", name)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err
@@ -201,7 +266,7 @@ func (s *Service) Versions(ctx context.Context, query string) (admin.VersionList
 
 func (s *Service) loaders(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: loaders <mcVersion>")
+		return fmt.Errorf("напишите версию Minecraft: loaders <версия>")
 	}
 	loaders, err := s.Loaders(ctx, args[0])
 	if err != nil {
@@ -231,11 +296,11 @@ func (s *Service) Loaders(ctx context.Context, mcVersion string) ([]admin.Loader
 
 func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: install <name> <mc> [loader=..] [loaderVersion=..] [platform=..] [java=..]")
+		return fmt.Errorf("напишите имя и версию: install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..]")
 	}
 	name, mcVersion := args[0], args[1]
 	if !safeName(name) {
-		return fmt.Errorf("invalid build name %q", name)
+		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
 	opts := parseKV(args[2:])
 
@@ -254,21 +319,21 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	if loaderName != "" && loaderName != "vanilla" && loaderVersion == "" {
 		l, ok := loader.Get(loaderName)
 		if !ok {
-			return fmt.Errorf("unknown loader %q", loaderName)
+			return fmt.Errorf("загрузчика «%s» нет — какие есть для версии, покажет loaders <версия>", loaderName)
 		}
 		versions, err := l.Versions(ctx, id)
 		if err != nil {
 			return err
 		}
 		if len(versions) == 0 {
-			return fmt.Errorf("loader %q has no versions for %s", loaderName, id)
+			return fmt.Errorf("у загрузчика «%s» нет версий под Minecraft %s", loaderName, id)
 		}
 		loaderVersion = versions[0]
 	}
 
 	layout := s.layout(name)
 	if layout.flat && (len(targets) > 1 || !samePlatformAsFlat(layout, targets[0])) {
-		return fmt.Errorf("build %q uses the old single-platform layout; delete and re-prepare it to target several platforms", name)
+		return fmt.Errorf("сборка «%s» сделана по старой схеме с одной платформой — удалите её и соберите заново, чтобы добавить платформы", name)
 	}
 
 	var failures []string
@@ -284,7 +349,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 		if layout.flat {
 			profileDir = filepath.Join(s.profilesDir, name)
 		}
-		fmt.Fprintf(out, "Собираю «%s»: Minecraft %s, загрузчик %s %s, платформа %s…\n", name, id, orVanilla(loaderName), loaderVersion, key)
+		fmt.Fprintf(out, "Собираю «%s»: Minecraft %s, загрузчик %s %s, платформа %s…\n", name, id, buildview.LoaderWord(loaderName), loaderVersion, key)
 		if _, err := s.preparer.Prepare(ctx, prepare.Options{
 			ProfileDir:    profileDir,
 			VersionURL:    versionURL,
@@ -303,7 +368,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 			if err := manifest.EnsureDefaultSettings(filepath.Join(s.profilesDir, name)); err != nil {
 				return err
 			}
-			if err := manifest.SetLoader(filepath.Join(s.profilesDir, name), orVanilla(loaderName)); err != nil {
+			if err := manifest.SetLoader(filepath.Join(s.profilesDir, name), buildview.LoaderWord(loaderName)); err != nil {
 				return err
 			}
 		}
@@ -311,7 +376,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	}
 	prepared := s.layout(name)
 	if !prepared.exists() {
-		return fmt.Errorf("no platform could be prepared: %s", strings.Join(failures, ", "))
+		return fmt.Errorf("ни одну платформу собрать не вышло: %s", strings.Join(failures, ", "))
 	}
 	s.fire("build.prepared", name)
 	if len(failures) > 0 {
@@ -354,27 +419,27 @@ func parsePlatforms(raw string) ([]corev1.Platform, error) {
 		}
 		p, ok := platform.Parse(part)
 		if !ok {
-			return nil, fmt.Errorf("unknown platform %q", part)
+			return nil, fmt.Errorf("платформы «%s» не существует — возьмите windows-x64, linux, mac-os или all", part)
 		}
 		out = append(out, p)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no platform given")
+		return nil, fmt.Errorf("не указана ни одна платформа")
 	}
 	return out, nil
 }
 
 func (s *Service) publish(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: publish <name>")
+		return fmt.Errorf("напишите имя сборки: publish <имя>")
 	}
 	name := args[0]
 	if !safeName(name) {
-		return fmt.Errorf("invalid build name %q", name)
+		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
 	layout := s.layout(name)
 	if !layout.exists() {
-		return fmt.Errorf("no prepared build named %q", name)
+		return fmt.Errorf("собранной сборки «%s» нет — сначала install", name)
 	}
 
 	variants := layout.platforms
@@ -420,7 +485,7 @@ func (s *Service) versionURL(ctx context.Context, mcVersion string) (string, str
 			return version.URL, version.ID, nil
 		}
 	}
-	return "", "", fmt.Errorf("unknown Minecraft version %q", mcVersion)
+	return "", "", fmt.Errorf("версии Minecraft «%s» нет — список даёт команда versions", mcVersion)
 }
 
 func parseKV(args []string) map[string]string {
@@ -431,24 +496,6 @@ func parseKV(args []string) map[string]string {
 		}
 	}
 	return out
-}
-
-func orVanilla(name string) string {
-	if name == "" {
-		return "vanilla"
-	}
-	return name
-}
-
-func statusWord(status string) string {
-	switch status {
-	case "published":
-		return "опубликована"
-	case "prepared":
-		return "собрана, ждёт публикации"
-	default:
-		return status
-	}
 }
 
 func versionWord(kind string) string {

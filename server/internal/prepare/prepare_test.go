@@ -77,15 +77,15 @@ func TestPrepareAndPublish(t *testing.T) {
 		"assets/indexes/17.json",
 		"assets/objects/" + assetHash[:2] + "/" + assetHash,
 		"runtime/linux/bin/java",
-		prepare.LaunchProfileName,
+		manifest.LaunchProfileName,
 	} {
 		if _, err := os.Stat(filepath.Join(profileDir, rel)); err != nil {
 			t.Fatalf("expected %s: %v", rel, err)
 		}
 	}
 
-	data, _ := os.ReadFile(filepath.Join(profileDir, prepare.LaunchProfileName))
-	var launch prepare.LaunchProfile
+	data, _ := os.ReadFile(filepath.Join(profileDir, manifest.LaunchProfileName))
+	var launch manifest.LaunchProfile
 	if err := json.Unmarshal(data, &launch); err != nil {
 		t.Fatal(err)
 	}

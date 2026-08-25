@@ -104,11 +104,111 @@ message BuildInfo {
   string status = 2;
   repeated laminara.core.v1.Platform prepared = 3;
   repeated laminara.core.v1.Platform published = 4;
+  string minecraft_version = 5;
+  string loader = 6;
+  uint64 size_bytes = 7;
+  uint32 files = 8;
+  string server_address = 9;
+  bool has_features = 10;
+  int64 published_at_unix_nanos = 11;
+  uint32 java_major = 12;
+  string access = 13;
 }
 
 message ListBuildsResponse {
   repeated BuildInfo builds = 1;
 }
+
+message ListPlayersRequest {}
+
+message BuildPlayers {
+  string build = 1;
+  string address = 2;
+  bool reachable = 3;
+  int64 online = 4;
+  int64 max = 5;
+  repeated string names = 6;
+  string version = 7;
+  string error = 8;
+}
+
+message ListPlayersResponse {
+  repeated BuildPlayers builds = 1;
+}
+
+message SettingSection {
+  string key = 1;
+  string title = 2;
+  string hint = 3;
+}
+
+message SettingEntry {
+  string path = 1;
+  string label = 2;
+  string hint = 3;
+  string kind = 4;
+  string value = 5;
+  string default_value = 6;
+  bool is_set = 7;
+  repeated string options = 8;
+  string display = 9;
+}
+
+message SettingCollectionEntry {
+  string path = 1;
+  string title = 2;
+}
+
+message SettingCollection {
+  string path = 1;
+  string title = 2;
+  string hint = 3;
+  bool keyed = 4;
+  string name_label = 5;
+  string name_hint = 6;
+  repeated SettingCollectionEntry entries = 7;
+}
+
+message ListSettingsRequest {
+  string section = 1;
+  string entry = 2;
+}
+
+message ListSettingsResponse {
+  repeated SettingSection sections = 1;
+  repeated SettingEntry entries = 2;
+  repeated SettingCollection collections = 3;
+  string config_path = 4;
+  bool restart_pending = 5;
+}
+
+message SetSettingRequest {
+  string path = 1;
+  string value = 2;
+}
+
+message SetSettingResponse {
+  SettingEntry entry = 1;
+}
+
+message AddSettingEntryRequest {
+  string collection = 1;
+  string name = 2;
+}
+
+message AddSettingEntryResponse {
+  string path = 1;
+}
+
+message RemoveSettingEntryRequest {
+  string path = 1;
+}
+
+message RemoveSettingEntryResponse {}
+
+message RestartRequest {}
+
+message RestartResponse {}
 
 service AdminService {
   rpc Status(StatusRequest) returns (StatusResponse);
@@ -117,4 +217,10 @@ service AdminService {
   rpc ListVersions(ListVersionsRequest) returns (ListVersionsResponse);
   rpc ListLoaders(ListLoadersRequest) returns (ListLoadersResponse);
   rpc ListBuilds(ListBuildsRequest) returns (ListBuildsResponse);
+  rpc ListPlayers(ListPlayersRequest) returns (ListPlayersResponse);
+  rpc ListSettings(ListSettingsRequest) returns (ListSettingsResponse);
+  rpc SetSetting(SetSettingRequest) returns (SetSettingResponse);
+  rpc AddSettingEntry(AddSettingEntryRequest) returns (AddSettingEntryResponse);
+  rpc RemoveSettingEntry(RemoveSettingEntryRequest) returns (RemoveSettingEntryResponse);
+  rpc Restart(RestartRequest) returns (RestartResponse);
 }

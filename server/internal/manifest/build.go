@@ -142,10 +142,14 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		computeAddedSizes(model.Groups, sizeByPath)
 	}
 
+	launch := readLaunchProfile(root)
+
 	return &corev1.Manifest{
 		SchemaVersion:        SchemaVersion,
 		Modpack:              modpack,
 		Version:              version,
+		MinecraftVersion:     launch.VersionID,
+		JavaMajor:            uint32(launch.JavaMajor),
 		GeneratedAtUnixNanos: b.now().UnixNano(),
 		Files:                files,
 		TotalSize:            total,

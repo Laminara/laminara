@@ -96,6 +96,8 @@ message Manifest {
   string loader = 12;
   FeatureModel features = 13;
   Platform platform = 14;
+  string minecraft_version = 15;
+  uint32 java_major = 16;
 }
 
 message MirrorList {

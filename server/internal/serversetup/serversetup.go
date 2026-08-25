@@ -112,6 +112,9 @@ func Build(cfg *config.Config) (*Wired, error) {
 				served.Refresh()
 			}
 		})
+		if wired.Build != nil {
+			wired.Build.SetCatalog(served)
+		}
 	}
 
 	handler, err := buildPublicHandler(cfg, wired, backend)

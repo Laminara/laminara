@@ -21,7 +21,7 @@ import (
 
 const defaultWorkers = 12
 
-const LaunchProfileName = "laminara.profile.json"
+const LaunchProfileName = manifest.LaunchProfileName
 
 type Preparer struct {
 	mojang        *mojang.Client
@@ -60,24 +60,6 @@ type Options struct {
 	LoaderName    string
 	LoaderVersion string
 	JavaComponent string
-}
-
-type LaunchProfile struct {
-	MainClass     string   `json:"mainClass"`
-	JavaComponent string   `json:"javaComponent"`
-	JavaMajor     int      `json:"javaMajor"`
-	OS            string   `json:"os"`
-	Arch          string   `json:"arch"`
-	PlatformKey   string   `json:"platformKey"`
-	JavaBin       string   `json:"javaBin,omitempty"`
-	VersionID     string   `json:"versionId"`
-	AssetIndex    string   `json:"assetIndex"`
-	ClientJar     string   `json:"clientJar"`
-	Classpath     []string `json:"classpath"`
-	Natives       []string `json:"natives"`
-	JvmArgs       []string `json:"jvmArgs,omitempty"`
-	GameArgs      []string `json:"gameArgs,omitempty"`
-	Runtime       string   `json:"runtime"`
 }
 
 func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile, error) {
@@ -268,7 +250,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 		natives = append(natives, native.Path)
 	}
 
-	launch := LaunchProfile{
+	launch := manifest.LaunchProfile{
 		MainClass:     mainClass,
 		JavaComponent: javaComponent,
 		JavaMajor:     profile.JavaMajor,

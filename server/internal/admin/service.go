@@ -30,15 +30,20 @@ type Service struct {
 	bus      *logbus.Bus
 	registry *command.Registry
 	catalog  Catalog
+	settings Settings
 }
 
 func NewService(status StatusFunc, bus *logbus.Bus, registry *command.Registry, catalog Catalog) *Service {
 	return &Service{status: status, bus: bus, registry: registry, catalog: catalog}
 }
 
+func (s *Service) SetSettings(store Settings) {
+	s.settings = store
+}
+
 func (s *Service) ListVersions(ctx context.Context, req *connect.Request[adminv1.ListVersionsRequest]) (*connect.Response[adminv1.ListVersionsResponse], error) {
 	if s.catalog == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("build service not configured"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("сборки не настроены"))
 	}
 	list, err := s.catalog.Versions(ctx, req.Msg.Query)
 	if err != nil {
@@ -53,7 +58,7 @@ func (s *Service) ListVersions(ctx context.Context, req *connect.Request[adminv1
 
 func (s *Service) ListLoaders(ctx context.Context, req *connect.Request[adminv1.ListLoadersRequest]) (*connect.Response[adminv1.ListLoadersResponse], error) {
 	if s.catalog == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("build service not configured"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("сборки не настроены"))
 	}
 	loaders, err := s.catalog.Loaders(ctx, req.Msg.McVersion)
 	if err != nil {
@@ -68,7 +73,7 @@ func (s *Service) ListLoaders(ctx context.Context, req *connect.Request[adminv1.
 
 func (s *Service) ListBuilds(_ context.Context, _ *connect.Request[adminv1.ListBuildsRequest]) (*connect.Response[adminv1.ListBuildsResponse], error) {
 	if s.catalog == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("build service not configured"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("сборки не настроены"))
 	}
 	builds, err := s.catalog.Builds()
 	if err != nil {
@@ -76,7 +81,22 @@ func (s *Service) ListBuilds(_ context.Context, _ *connect.Request[adminv1.ListB
 	}
 	resp := &adminv1.ListBuildsResponse{}
 	for _, entry := range builds {
-		resp.Builds = append(resp.Builds, &adminv1.BuildInfo{Name: entry.Name, Status: entry.Status})
+		resp.Builds = append(resp.Builds, BuildInfoOf(entry))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (s *Service) ListPlayers(ctx context.Context, _ *connect.Request[adminv1.ListPlayersRequest]) (*connect.Response[adminv1.ListPlayersResponse], error) {
+	if s.catalog == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("сборки не настроены"))
+	}
+	list, err := s.catalog.Players(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &adminv1.ListPlayersResponse{}
+	for i := range list {
+		resp.Builds = append(resp.Builds, PlayersInfoOf(&list[i]))
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -214,4 +234,41 @@ func passes(l logbus.Line, minLevel adminv1.LogLevel, source string) bool {
 		return false
 	}
 	return true
+}
+
+func BuildInfoOf(entry BuildEntry) *adminv1.BuildInfo {
+	info := &adminv1.BuildInfo{
+		Name:             entry.Name,
+		Status:           entry.Status,
+		Prepared:         entry.Prepared,
+		Published:        entry.Published,
+		MinecraftVersion: entry.Minecraft,
+		JavaMajor:        entry.JavaMajor,
+		Loader:           entry.Loader,
+		SizeBytes:        entry.SizeBytes,
+		Files:            uint32(entry.Files),
+		ServerAddress:    entry.ServerAddress,
+		Access:           entry.Access,
+		HasFeatures:      entry.HasFeatures,
+	}
+	if !entry.PublishedAt.IsZero() {
+		info.PublishedAtUnixNanos = entry.PublishedAt.UnixNano()
+	}
+	return info
+}
+
+func PlayersInfoOf(entry *BuildPlayers) *adminv1.BuildPlayers {
+	if entry == nil {
+		return nil
+	}
+	return &adminv1.BuildPlayers{
+		Build:     entry.Build,
+		Address:   entry.Address,
+		Reachable: entry.Reachable,
+		Online:    entry.Online,
+		Max:       entry.Max,
+		Names:     entry.Names,
+		Version:   entry.Version,
+		Error:     entry.Error,
+	}
 }
