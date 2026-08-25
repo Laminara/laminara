@@ -19,6 +19,8 @@ pub const REPORT_SCHEMA_VERSION: u32 = 1;
 
 const COLLECT_BUDGET: Duration = Duration::from_secs(3);
 
+const KEY_BUDGET: Duration = Duration::from_secs(10);
+
 const DIGEST_BYTES: usize = 16;
 
 const CANONICAL_DOMAIN: &[u8] = b"laminara.machine.v1\x00";
@@ -67,9 +69,13 @@ impl MachineFacts {
             None => (Vec::new(), vec![CollectorFlag::Weak]),
         };
 
-        let key = tokio::task::spawn_blocking(PlatformKey::load_or_create)
-            .await
-            .ok();
+        let key = tokio::time::timeout(
+            KEY_BUDGET,
+            tokio::task::spawn_blocking(PlatformKey::load_or_create),
+        )
+        .await
+        .ok()
+        .and_then(|joined| joined.ok());
 
         let mut signals: Vec<Signal> = measurements
             .iter()
@@ -296,9 +302,10 @@ mod tests {
         let report = MachineFacts::collect(&salt)
             .await
             .report(vec![1, 2, 3, 4], "0.1.0-test");
+        let ceiling = COLLECT_BUDGET + KEY_BUDGET + Duration::from_secs(2);
         assert!(
-            started.elapsed() < COLLECT_BUDGET * 2,
-            "collection ran over budget: {:?}",
+            started.elapsed() < ceiling,
+            "collecting machine facts is bounded by {ceiling:?}, took {:?}",
             started.elapsed()
         );
 
