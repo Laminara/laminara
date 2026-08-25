@@ -5,6 +5,13 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://docs.laminara.dev/"><b>Документация</b></a> ·
+  <a href="https://docs.laminara.dev/quickstart/">Быстрый старт</a> ·
+  <a href="https://docs.laminara.dev/architecture/">Как устроено</a> ·
+  <a href="https://docs.laminara.dev/server/install/">Установка сервера</a>
+</p>
+
 Laminara — лаунчер Minecraft и сервер, который готовит для него сборки.
 
 Сервер собирает клиент нужной версии с нужным загрузчиком, подписывает его и раздаёт. Лаунчер
@@ -67,7 +74,7 @@ laminara-server status
 ```
 
 Установщик расспросит про хранилище, аккаунты и домен и соберёт конфиг сам. Дальше —
-[быстрый старт](docs/quickstart.mdx): подготовить сборку и опубликовать её.
+[быстрый старт](https://docs.laminara.dev/quickstart/): подготовить сборку и опубликовать её.
 
 Лаунчер собирается под конкретный проект: адрес сервера, ключи и оформление запекаются
 в файл.
@@ -82,12 +89,12 @@ cd client
 ```
 
 Лаунчер под Windows собирается кросс-компиляцией с Linux — виртуальная машина не нужна.
-Подробности и требования: [сборка лаунчера](docs/launcher/building.mdx).
+Подробности и требования: [сборка лаунчера](https://docs.laminara.dev/launcher/building/).
 
 ## Из чего состоит
 
-Подробности — в [документации](docs/), общая картина — на странице
-[«Как устроено»](docs/architecture.mdx).
+Подробности — в [документации](https://docs.laminara.dev/), общая картина — на странице
+[«Как устроено»](https://docs.laminara.dev/architecture/).
 
 | Каталог | Что внутри |
 | --- | --- |
@@ -123,7 +130,8 @@ cargo test -p laminara-launcher-core
 Сборка exe под Windows дополнительно требует `cargo install cargo-xwin` и пакеты
 `clang lld llvm`.
 
-Документация — сайт на Astro Starlight, страницы лежат в `docs/`:
+Документация — [docs.laminara.dev](https://docs.laminara.dev/), сайт на Astro Starlight,
+страницы лежат в `docs/`:
 
 ```sh
 cd site
