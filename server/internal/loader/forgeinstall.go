@@ -35,6 +35,13 @@ func runForgeInstaller(ctx context.Context, req InstallRequest, installerURL, ca
 		GameArgs:  launch.GameArgs,
 		ClientJar: "libraries/" + launch.ClientJar,
 	}
+	if launch.ClientJar == "" {
+		relative, err := filepath.Rel(req.ProfileDir, req.MinecraftJar)
+		if err != nil {
+			return nil, err
+		}
+		result.ClientJar = filepath.ToSlash(relative)
+	}
 	for _, library := range launch.Libraries {
 		result.Libraries = append(result.Libraries, "libraries/"+library)
 	}

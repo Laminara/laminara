@@ -35,6 +35,9 @@ type LaunchInfo struct {
 }
 
 func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, error) {
+	if i.legacy != nil {
+		return i.legacyInstall(ctx, req)
+	}
 	if err := i.extractEmbeddedMaven(req.LibrariesDir); err != nil {
 		return nil, err
 	}
@@ -75,6 +78,9 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 		MainClass: i.version.MainClass,
 		JVMArgs:   i.version.Arguments.JVM,
 		GameArgs:  i.version.Arguments.Game,
+	}
+	if len(launch.GameArgs) == 0 {
+		launch.GameArgs = tweakArgs(i.version.MinecraftArguments)
 	}
 	for _, library := range i.Libraries() {
 		path, err := libraryPath(library)

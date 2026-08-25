@@ -53,13 +53,15 @@ type versionProfile struct {
 		JVM  []string `json:"jvm"`
 		Game []string `json:"game"`
 	} `json:"arguments"`
-	Libraries []Library `json:"libraries"`
+	MinecraftArguments string    `json:"minecraftArguments"`
+	Libraries          []Library `json:"libraries"`
 }
 
 type Installer struct {
 	jarPath string
 	profile installProfile
 	version versionProfile
+	legacy  *legacyProfile
 }
 
 func Open(jarPath string) (*Installer, error) {
@@ -71,9 +73,21 @@ func Open(jarPath string) (*Installer, error) {
 
 	var install Installer
 	install.jarPath = jarPath
-	if err := readZipJSON(&reader.Reader, "install_profile.json", &install.profile); err != nil {
+
+	raw, err := readZipFile(&reader.Reader, "install_profile.json")
+	if err != nil {
 		return nil, err
 	}
+	if err := json.Unmarshal(raw, &install.profile); err != nil {
+		return nil, err
+	}
+
+	var legacy legacyProfile
+	if err := json.Unmarshal(raw, &legacy); err == nil && legacy.VersionInfo.MainClass != "" {
+		install.legacy = &legacy
+		return &install, nil
+	}
+
 	versionPath := strings.TrimPrefix(install.profile.JSON, "/")
 	if versionPath == "" {
 		versionPath = "version.json"
@@ -84,9 +98,23 @@ func Open(jarPath string) (*Installer, error) {
 	return &install, nil
 }
 
-func (i *Installer) MinecraftVersion() string { return i.profile.Minecraft }
-func (i *Installer) MainClass() string        { return i.version.MainClass }
-func (i *Installer) InheritsFrom() string     { return i.version.InheritsFrom }
+func (i *Installer) Legacy() bool { return i.legacy != nil }
+
+func (i *Installer) MinecraftVersion() string {
+	if i.legacy != nil {
+		return i.legacy.Install.Minecraft
+	}
+	return i.profile.Minecraft
+}
+
+func (i *Installer) MainClass() string {
+	if i.legacy != nil {
+		return i.legacy.VersionInfo.MainClass
+	}
+	return i.version.MainClass
+}
+
+func (i *Installer) InheritsFrom() string { return i.version.InheritsFrom }
 
 func (i *Installer) Libraries() []Library {
 	libraries := make([]Library, 0, len(i.profile.Libraries)+len(i.version.Libraries))
@@ -96,20 +124,24 @@ func (i *Installer) Libraries() []Library {
 }
 
 func readZipJSON(reader *zip.Reader, name string, target any) error {
+	data, err := readZipFile(reader, name)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
+func readZipFile(reader *zip.Reader, name string) ([]byte, error) {
 	for _, file := range reader.File {
 		if file.Name != name {
 			continue
 		}
 		rc, err := file.Open()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer rc.Close()
-		data, err := io.ReadAll(rc)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(data, target)
+		return io.ReadAll(rc)
 	}
-	return fmt.Errorf("forgeinstaller: %s not found in installer", name)
+	return nil, fmt.Errorf("forgeinstaller: %s not found in installer", name)
 }
