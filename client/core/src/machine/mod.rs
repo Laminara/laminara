@@ -169,7 +169,7 @@ pub fn canonical(report: &MachineReport) -> Vec<u8> {
     out
 }
 
-fn os_version() -> String {
+pub(crate) fn os_version() -> String {
     #[cfg(target_os = "linux")]
     {
         if let Ok(text) = std::fs::read_to_string("/etc/os-release") {

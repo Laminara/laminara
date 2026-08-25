@@ -1011,3 +1011,19 @@ pub struct UpdateProgress {
     bytes_done: u64,
     bytes_total: u64,
 }
+
+#[tauri::command]
+pub async fn report_crash(
+    state: State<'_, AppState>,
+    build: String,
+    build_version: String,
+    loader: String,
+    exit_code: i32,
+    log: String,
+) -> Result<String, String> {
+    state
+        .core
+        .report_crash(build, build_version, loader, exit_code, log)
+        .await
+        .map_err(|err| err.to_string())
+}

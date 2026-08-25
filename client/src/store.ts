@@ -30,7 +30,9 @@ interface LauncherState {
   modal: ActiveModal;
   menuOpen: boolean;
   gameLog: string[];
-  crash: { code: number; log: string[] } | null;
+  crash: { code: number; log: string[]; build: string; loader: string; version: string; full: string[] } | null;
+  crashSending: boolean;
+  crashSent: string | null;
   stoppedByUser: boolean;
   update: LauncherUpdate | null;
   updateProgress: { done: number; total: number } | null;
@@ -41,6 +43,7 @@ interface LauncherState {
   closeMenu: () => void;
   markOutdated: (name: string) => void;
   dismissCrash: () => void;
+  sendCrash: () => Promise<void>;
   dismissError: () => void;
   refreshNews: () => Promise<void>;
   checkUpdate: () => Promise<void>;
@@ -74,12 +77,34 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   menuOpen: false,
   gameLog: [],
   crash: null,
+  crashSending: false,
+  crashSent: null,
   stoppedByUser: false,
   update: null,
   updateProgress: null,
   updateDismissed: false,
 
-  dismissCrash: () => set({ crash: null }),
+  dismissCrash: () => set({ crash: null, crashSent: null }),
+
+  sendCrash: async () => {
+    const crash = get().crash;
+    if (!crash || get().crashSending) return;
+    set({ crashSending: true });
+    try {
+      const message = await ipc.reportCrash({
+        build: crash.build,
+        buildVersion: crash.version,
+        loader: crash.loader,
+        exitCode: crash.code,
+        log: crash.full.join("\n"),
+      });
+      set({ crashSent: message });
+    } catch (err) {
+      set({ crashSent: String(err) });
+    } finally {
+      set({ crashSending: false });
+    }
+  },
   dismissError: () => set({ error: null }),
   dismissUpdate: () => set({ updateDismissed: true }),
   openModal: (modal) => {
@@ -156,7 +181,21 @@ export const useLauncher = create<LauncherState>((set, get) => ({
         set({ stoppedByUser: false });
         if (get().phase === "running") set({ phase: "home" });
         if (code === 0 || stoppedByUser) return;
-        setTimeout(() => set({ crash: { code, log: get().gameLog.slice(-CRASH_LOG_LINES) } }), CRASH_LOG_SETTLE_MS);
+        setTimeout(() => {
+          const state = get();
+          const build = state.builds.find((item) => item.name === state.selected);
+          set({
+            crash: {
+              code,
+              log: state.gameLog.slice(-CRASH_LOG_LINES),
+              full: state.gameLog,
+              build: state.selected ?? "",
+              loader: build?.loader ?? "",
+              version: build?.minecraft ?? "",
+            },
+            crashSent: null,
+          });
+        }, CRASH_LOG_SETTLE_MS);
       });
     }
 
@@ -204,7 +243,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ error: block.reason });
       return;
     }
-    set({ phase: "syncing", sync: null, error: null, crash: null, gameLog: [], stoppedByUser: false });
+    set({ phase: "syncing", sync: null, error: null, crash: null, crashSent: null, gameLog: [], stoppedByUser: false });
     try {
       const rate = newRateMeter();
       await ipc.syncProfile(name, (event: SyncEvent) => {

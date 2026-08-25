@@ -1,4 +1,4 @@
-import { Warning } from "@phosphor-icons/react";
+import { PaperPlaneTilt, Warning } from "@phosphor-icons/react";
 import { useLauncher } from "@/store";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/Button";
 export function CrashModal() {
   const crash = useLauncher((state) => state.crash);
   const dismiss = useLauncher((state) => state.dismissCrash);
+  const send = useLauncher((state) => state.sendCrash);
+  const sending = useLauncher((state) => state.crashSending);
+  const sent = useLauncher((state) => state.crashSent);
   if (!crash) return null;
 
   return (
@@ -20,9 +23,15 @@ export function CrashModal() {
           {crash.log.length > 0 ? crash.log.join("\n") : "Журнал пуст."}
         </pre>
 
+        {sent && <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">{sent}</div>}
+
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard?.writeText(crash.log.join("\n"))}>
             Копировать
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => void send()} disabled={sending || sent !== null}>
+            <PaperPlaneTilt size={16} />
+            {sending ? "Отправляю" : "Отправить разработчикам"}
           </Button>
           <Button onClick={dismiss} className="px-6">
             Закрыть

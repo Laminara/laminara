@@ -88,6 +88,25 @@ message CheckUpdateResponse {
   bytes signature = 2;
 }
 
+message CrashReport {
+  string build = 1;
+  string build_version = 2;
+  string loader = 3;
+  int32 exit_code = 4;
+  string log = 5;
+  map<string, string> details = 6;
+  int64 happened_at_unix_nanos = 7;
+}
+
+message ReportCrashRequest {
+  CrashReport crash = 1;
+}
+
+message ReportCrashResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
 service LauncherService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc Refresh(RefreshRequest) returns (RefreshResponse);
@@ -97,4 +116,5 @@ service LauncherService {
   rpc GetNews(GetNewsRequest) returns (GetNewsResponse);
   rpc GetChallenge(GetChallengeRequest) returns (GetChallengeResponse);
   rpc ReportMachine(ReportMachineRequest) returns (ReportMachineResponse);
+  rpc ReportCrash(ReportCrashRequest) returns (ReportCrashResponse);
 }

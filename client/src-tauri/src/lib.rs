@@ -173,6 +173,7 @@ pub fn run() {
             commands::open_external,
             commands::check_update,
             commands::apply_update,
+            commands::report_crash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Laminara");

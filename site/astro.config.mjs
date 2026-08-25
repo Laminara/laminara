@@ -37,7 +37,7 @@ export default defineConfig({
         { label: "Знакомство", items: ["index", "quickstart", "console", "architecture"] },
         { label: "Сервер", items: ["server/install", "server/configuration", "server/production", "server/updates", "server/maintenance", "server/signing", "server/machines"] },
         { label: "Сборки", items: ["builds/preparing", "builds/loaders", "builds/publishing", "builds/settings", "builds/features", "builds/access"] },
-        { label: "Лаунчер", items: ["launcher", "launcher/building", "launcher/updates", "launcher/news"] },
+        { label: "Лаунчер", items: ["launcher", "launcher/building", "launcher/updates", "launcher/news", "launcher/crashes"] },
         { label: "Вход игроков", items: ["auth/adapters", "auth/yggdrasil"] },
         { label: "Хранилище", items: ["storage"] },
         { label: "Модули", items: ["modules"] },

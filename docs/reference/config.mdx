@@ -147,3 +147,11 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="maxAge" type="duration">Сколько хранить нарезанные файлы. По умолчанию `720h`.</ParamField>
 
 Подробнее — [Обслуживание](/server/maintenance).
+
+## crashReports
+
+<ParamField path="enabled" type="boolean">Принимать отчёты о падениях из лаунчера. По умолчанию `false`.</ParamField>
+<ParamField path="maxPerHour" type="number">Сколько отчётов принимать от одного игрока в час. По умолчанию `20`.</ParamField>
+<ParamField path="sinks" type="object">Куда отправлять: `{ "имя": { "type": "discord|telegram|http|file", "config": { … } } }`. Отчёт уходит во все адреса сразу.</ParamField>
+
+Подробнее — [Отчёты о падениях](/launcher/crashes).

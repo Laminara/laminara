@@ -5,6 +5,7 @@ import (
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/auth/hash"
 	_ "github.com/laminara/laminara/server/internal/auth/providers"
+	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/selfupdate"
@@ -298,6 +299,42 @@ var schema = []Section{
 			{Key: "logoPath", Label: "Логотип", Kind: KindText, Hint: "PNG или SVG рядом с сервером — уедет в лаунчер картинкой."},
 			{Key: "heroMediaPath", Label: "Фон окна", Kind: KindText, Hint: "Картинка или видео. Видео тяжелее и заметно греет слабые машины."},
 			{Key: "siteUrl", Label: "Сайт проекта", Kind: KindText},
+		},
+	},
+	{
+		Key:   "crashReports",
+		Title: "Отчёты о падениях",
+		Hint:  "Игрок нажимает кнопку в окне падения, и журнал игры уходит вам.",
+		Fields: []Field{
+			{Key: "enabled", Label: "Принимать отчёты", Kind: KindBool, Default: "false"},
+			{Key: "maxPerHour", Label: "Отчётов от игрока в час", Kind: KindInt, Default: "20", Hint: "Защита от того, кто зажал кнопку."},
+		},
+		Collections: []Collection{
+			{
+				Key: "sinks", Title: "Куда отправлять", Keyed: true,
+				NameLabel: "Имя адреса", NameHint: "Коротко и латиницей, только для вас.",
+				Hint: "Отчёт уходит во все адреса сразу. Журнал игры прикладывается файлом.",
+				Fields: []Field{
+					{Key: "type", Label: "Куда", Kind: KindChoice, Options: crash.SinkNames},
+					{Key: "config", Label: "Настройки адреса", VariantOf: "type", Variants: map[string][]Field{
+						"discord": {
+							{Key: "url", Label: "Адрес вебхука", Kind: KindSecret},
+							{Key: "username", Label: "Имя отправителя", Kind: KindText, Hint: "Пусто — как настроено в самом вебхуке."},
+						},
+						"telegram": {
+							{Key: "token", Label: "Токен бота", Kind: KindSecret},
+							{Key: "chatId", Label: "Чат", Kind: KindText, Hint: "Идентификатор чата или канала, например -1001234567890."},
+						},
+						"http": {
+							{Key: "url", Label: "Адрес", Kind: KindText, Hint: "Отчёт уедет как JSON."},
+							{Key: "headers", Label: "Заголовки запроса", Kind: KindPairs, Hint: "Через запятую: Authorization=Bearer …"},
+						},
+						"file": {
+							{Key: "dir", Label: "Папка", Kind: KindText, Hint: "Каждый отчёт — отдельный файл."},
+						},
+					}},
+				},
+			},
 		},
 	},
 	{

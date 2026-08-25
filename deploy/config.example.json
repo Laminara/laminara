@@ -126,5 +126,10 @@
     "maxSizeMB": 20,
     "keep": 5,
     "maxAge": "720h"
+  },
+  "crashReports": {
+    "enabled": false,
+    "maxPerHour": 20,
+    "sinks": {}
   }
 }

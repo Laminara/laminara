@@ -150,6 +150,7 @@ var collectionsEditedElsewhere = map[string]bool{
 	"yggdrasil.skinConfig": true,
 	"hwid.store.config":    true,
 	"news.source.config":   true,
+	"crashReports.sinks":   true,
 }
 
 func TestSchemaCoversEveryConfigField(t *testing.T) {

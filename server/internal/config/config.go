@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/laminara/laminara/server/internal/access"
+	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
@@ -26,6 +27,7 @@ type Config struct {
 	News      *news.Config      `json:"news"`
 	Update    *UpdateConfig     `json:"update"`
 	Log       *LogConfig        `json:"log"`
+	Crashes   *crash.Config     `json:"crashReports"`
 }
 
 type BrandingConfig struct {

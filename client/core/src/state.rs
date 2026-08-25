@@ -145,6 +145,45 @@ impl Core {
         Ok(())
     }
 
+    pub async fn report_crash(
+        &self,
+        build: String,
+        build_version: String,
+        loader: String,
+        exit_code: i32,
+        log: String,
+    ) -> Result<String, CoreError> {
+        let mut details = std::collections::HashMap::new();
+        details.insert("launcher".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        details.insert(
+            "platform".to_string(),
+            crate::platform::current().as_str_name().to_string(),
+        );
+        details.insert("os".to_string(), crate::machine::os_version());
+
+        let happened_at_unix_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos() as i64)
+            .unwrap_or_default();
+
+        let response = self
+            .pool
+            .report_crash(crate::proto::api::v1::CrashReport {
+                build,
+                build_version,
+                loader,
+                exit_code,
+                log,
+                details,
+                happened_at_unix_nanos,
+            })
+            .await?;
+        if !response.accepted {
+            return Err(CoreError::Launch(response.message));
+        }
+        Ok(response.message)
+    }
+
     pub async fn refresh(&self, refresh: &str) -> Result<Tokens, CoreError> {
         let tokens = self.pool.refresh(refresh.to_string()).await?;
         self.transport.set_access_token(Some(tokens.access.clone()));

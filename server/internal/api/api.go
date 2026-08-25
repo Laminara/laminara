@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/catalog"
+	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/news"
@@ -30,6 +32,8 @@ type Service struct {
 	machines *hwid.Gate
 	limits   *ratelimit.Guard
 	news     *news.Service
+	crashes  *crash.Service
+	log      *slog.Logger
 	tokens   *tokenCache
 }
 
@@ -41,6 +45,8 @@ type Options struct {
 	Machines *hwid.Gate
 	Limits   *ratelimit.Guard
 	News     *news.Service
+	Crashes  *crash.Service
+	Log      *slog.Logger
 }
 
 func NewService(opts Options) *Service {
@@ -52,6 +58,8 @@ func NewService(opts Options) *Service {
 		machines: opts.Machines,
 		limits:   opts.Limits,
 		news:     opts.News,
+		crashes:  opts.Crashes,
+		log:      opts.Log,
 		tokens:   newTokenCache(),
 	}
 }

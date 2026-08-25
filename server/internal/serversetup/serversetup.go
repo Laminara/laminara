@@ -2,6 +2,7 @@ package serversetup
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/laminara/laminara/server/internal/buildsvc"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/events"
 	"github.com/laminara/laminara/server/internal/health"
 	"github.com/laminara/laminara/server/internal/hwid"
@@ -36,6 +38,7 @@ type Wired struct {
 	Signing       *signing.Keyring
 	Limits        *ratelimit.Guard
 	News          *news.Service
+	Crashes       *crash.Service
 	PublicHandler http.Handler
 	PublicAddr    string
 	Events        *events.Bus
@@ -108,6 +111,12 @@ func Build(cfg *config.Config) (*Wired, error) {
 		return nil, err
 	}
 	wired.News = announcements
+
+	crashes, err := crash.New(cfg.Crashes)
+	if err != nil {
+		return nil, err
+	}
+	wired.Crashes = crashes
 	if cfg.Build != nil && cfg.Build.ProfilesDir != "" {
 		wired.Catalog = catalog.New(cfg.Build.ProfilesDir)
 		served := wired.Catalog
@@ -150,6 +159,8 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 			Machines: wired.Machines,
 			Limits:   wired.Limits,
 			News:     wired.News,
+			Crashes:  wired.Crashes,
+			Log:      slog.Default(),
 		})
 		launcher = api.Handler(service, backend, xAccel)
 	}

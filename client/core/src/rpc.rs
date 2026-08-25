@@ -3,8 +3,10 @@ use crate::proto::api::v1::{
     CheckUpdateRequest, CheckUpdateResponse, GetChallengeRequest, GetChallengeResponse,
     GetManifestRequest, GetManifestResponse, GetNewsRequest, GetNewsResponse, ListProfilesRequest,
     ListProfilesResponse, LoginRequest, LoginResponse, MachineReport, NewsItem, ProfileSummary,
-    RefreshRequest, RefreshResponse, ReportMachineRequest, ReportMachineResponse, Tokens,
+    RefreshRequest, RefreshResponse, ReportCrashRequest, ReportCrashResponse, ReportMachineRequest,
+    ReportMachineResponse, Tokens,
 };
+use crate::proto::api::v1::CrashReport;
 use crate::transport::Transport;
 
 const SERVICE: &str = "laminara.api.v1.LauncherService";
@@ -47,6 +49,16 @@ impl<'a> LauncherClient<'a> {
                 self.base_url,
                 &format!("{SERVICE}/GetChallenge"),
                 &GetChallengeRequest {},
+            )
+            .await
+    }
+
+    pub async fn report_crash(&self, crash: CrashReport) -> Result<ReportCrashResponse, RpcError> {
+        self.transport
+            .unary(
+                self.base_url,
+                &format!("{SERVICE}/ReportCrash"),
+                &ReportCrashRequest { crash: Some(crash) },
             )
             .await
     }
