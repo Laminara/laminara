@@ -18,6 +18,8 @@ import ParamField from "@site/components/ParamField.astro";
 | `logs [-f] [--level ..] [--source ..] [--backscroll N]` | Поток логов. `-f` — следить дальше, `--backscroll` — сколько строк истории показать сразу. |
 | `exec "<команда>"` | Выполняет одну команду сервера и выходит. Код возврата пробрасывается — удобно для скриптов. |
 | `hash [--algo argon2id] [пароль]` | Хеширует пароль для файла аккаунтов (читает stdin, если аргумент не задан). |
+| `client-config --config <путь> --endpoint <адрес>` | Печатает конфигурацию, которую запекают в лаунчер: адреса, кольцо ключей подписи, соль отпечатка, оформление. |
+| `nginx-config --config <путь> --domain <домен проекта> [--no-tls]` | Печатает конфиг nginx под этот сервер: порт слушателя и путь к хранилищу берутся из конфига. `--no-tls` — один блок на `:80` для первого запуска, пока certbot не выписал сертификат. |
 
 `console`, `status`, `logs` и `exec` подключаются к работающему демону через Unix-сокет.
 
@@ -45,6 +47,16 @@ import ParamField from "@site/components/ParamField.astro";
   Список собранных и опубликованных клиентов с их статусом.
 </ParamField>
 
+<ParamField path="build <имя>">
+  Всё об одной сборке: версия Minecraft и загрузчик, Java, размер, платформы, дата публикации,
+  адрес сервера с онлайном и правила доступа. Алиас: `info`.
+</ParamField>
+
+<ParamField path="players">
+  Кто сейчас в игре на серверах сборок: онлайн, вместимость и имена. Адрес берётся из
+  `serverAddress` сборки. Алиасы: `online`, `who`.
+</ParamField>
+
 <ParamField path="delete <имя>">
   Удаляет сборку (папку профиля и опубликованный манифест). Алиасы: `deletebuild`, `remove`.
 </ParamField>
@@ -67,6 +79,19 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="signing keys · signing new <путь>">
   Показывает кольцо подписи и создаёт следующий ключ. Порядок смены —
   [Ключ подписи](/server/signing).
+</ParamField>
+
+<ParamField path="settings · settings <раздел> · settings <путь> [значение]">
+  Настройки проекта: без аргументов — разделы, с разделом — его поля и списки, с путём —
+  одна настройка с подсказкой и вариантами. `settings <путь> <значение>` меняет и сразу
+  записывает файл настроек, `settings clear <путь>` возвращает значение по умолчанию,
+  `settings add <список> [имя]` и `settings remove <путь>` правят списки (правила доступа,
+  списки допущенных, настройки модулей). Алиас: `config`.
+</ParamField>
+
+<ParamField path="restart">
+  Перезапускает проект на месте — с новыми настройками. Процесс остаётся тем же, systemd и
+  docker перезапуск не замечают, консоль подключается сама.
 </ParamField>
 
 <ParamField path="status · version · help">
