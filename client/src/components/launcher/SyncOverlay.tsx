@@ -1,6 +1,6 @@
 import { X } from "@phosphor-icons/react";
 import { useLauncher } from "@/store";
-import { formatBytes, plural } from "@/lib/format";
+import { formatBytes, formatLeft, formatSpeed, plural } from "@/lib/format";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 
 const stageLabels: Record<string, string> = {
@@ -40,6 +40,14 @@ export function SyncOverlay() {
               : ""}
           </span>
         </div>
+
+        {sync && (sync.bytesPerSecond || sync.secondsLeft) && (
+          <div className="mt-1 flex items-center gap-2 text-xs text-mute">
+            {sync.bytesPerSecond ? <span className="tabular-nums">{formatSpeed(sync.bytesPerSecond)}</span> : null}
+            {sync.bytesPerSecond && sync.secondsLeft ? <span>·</span> : null}
+            {sync.secondsLeft ? <span>осталось {formatLeft(sync.secondsLeft)}</span> : null}
+          </div>
+        )}
 
         {sync?.currentPath && <div className="mt-2 truncate text-xs text-mute">{sync.currentPath}</div>}
       </div>

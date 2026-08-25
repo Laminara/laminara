@@ -42,7 +42,7 @@ pub struct AccountDto {
 #[serde(rename_all = "camelCase")]
 pub struct BuildDto {
     name: String,
-    version: String,
+    minecraft: Option<String>,
     loader: Option<String>,
     size_bytes: u64,
     install: String,
@@ -422,7 +422,11 @@ pub async fn list_builds(state: State<'_, AppState>) -> Result<Vec<BuildDto>, St
                 .exists();
             BuildDto {
                 name: profile.name,
-                version: profile.version,
+                minecraft: if profile.minecraft_version.trim().is_empty() {
+                    None
+                } else {
+                    Some(profile.minecraft_version)
+                },
                 loader: if profile.loader.trim().is_empty() {
                     None
                 } else {

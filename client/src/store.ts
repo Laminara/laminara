@@ -206,11 +206,12 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     }
     set({ phase: "syncing", sync: null, error: null, crash: null, gameLog: [], stoppedByUser: false });
     try {
+      const rate = newRateMeter();
       await ipc.syncProfile(name, (event: SyncEvent) => {
         if (event.event === "started") {
           set({ sync: { stage: "planning", filesDone: 0, filesTotal: event.data.filesTotal, bytesDone: 0, bytesTotal: event.data.bytesTotal } });
         } else if (event.event === "progress") {
-          set({ sync: { ...event.data } });
+          set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
         }
       });
       set({ builds: await ipc.listBuilds() });
@@ -239,4 +240,24 @@ function pickBuild(builds: Build[]): string | null {
 
 export function useSelectedBuild(): Build | null {
   return useLauncher((state) => state.builds.find((build) => build.name === state.selected) ?? null);
+}
+
+function newRateMeter() {
+  let lastBytes = 0;
+  let lastAt = Date.now();
+  let speed = 0;
+  return (bytesDone: number, bytesTotal: number) => {
+    const now = Date.now();
+    const seconds = (now - lastAt) / 1000;
+    const gained = bytesDone - lastBytes;
+    if (seconds >= 0.35 && gained >= 0) {
+      const sample = gained / seconds;
+      speed = speed === 0 ? sample : speed * 0.7 + sample * 0.3;
+      lastBytes = bytesDone;
+      lastAt = now;
+    }
+    if (speed <= 0) return {};
+    const left = Math.max(0, bytesTotal - bytesDone);
+    return { bytesPerSecond: speed, secondsLeft: left / speed };
+  };
 }

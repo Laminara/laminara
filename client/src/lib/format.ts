@@ -28,3 +28,15 @@ export function formatNewsDate(unixNanos: number): string {
   if (!unixNanos) return "";
   return new Date(unixNanos / 1_000_000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 }
+
+export function formatSpeed(bytesPerSecond: number): string {
+  return `${formatBytes(bytesPerSecond)}/с`;
+}
+
+export function formatLeft(seconds: number): string {
+  if (seconds < 60) return `меньше минуты`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} ${plural(minutes, "минута", "минуты", "минут")}`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} ${plural(hours, "час", "часа", "часов")} ${minutes % 60} ${plural(minutes % 60, "минута", "минуты", "минут")}`;
+}

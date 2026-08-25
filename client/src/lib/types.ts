@@ -26,7 +26,7 @@ export interface AuthStatus {
 
 export interface Build {
   name: string;
-  version: string;
+  minecraft?: string;
   loader?: Loader;
   sizeBytes: number;
   install: InstallState;
@@ -122,6 +122,8 @@ export interface SyncState {
   bytesDone: number;
   bytesTotal: number;
   currentPath?: string;
+  bytesPerSecond?: number;
+  secondsLeft?: number;
 }
 
 export type SyncEvent =

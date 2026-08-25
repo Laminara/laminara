@@ -20,7 +20,10 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-mute">{build.loader ? loaderLabels[build.loader] : "Сборка"}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-mute">
+          {build.loader ? loaderLabels[build.loader] : "Сборка"}
+          {build.minecraft && <span className="text-dim"> · {build.minecraft}</span>}
+        </span>
         {block ? (
           <span className="rounded-md bg-surface-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mute">{block.badge}</span>
         ) : selected ? (

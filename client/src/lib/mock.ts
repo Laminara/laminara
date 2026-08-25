@@ -23,11 +23,11 @@ export const mockPlayerCounts: Record<string, ServerPlayers> = {
 };
 
 export const mockBuilds: Build[] = [
-  { name: "Anarchy Universe", version: "1.21.1", loader: "neoforge", sizeBytes: 2_460_000_000, install: "installed", hasFeatures: true, progress: 1 },
-  { name: "Automation Factory", version: "1.21.1", loader: "forge", sizeBytes: 3_120_000_000, install: "outdated", progress: 0.62 },
-  { name: "RPG Ascendancy", version: "1.20.1", loader: "fabric", sizeBytes: 1_780_000_000, install: "missing", progress: 0 },
-  { name: "Industrial Galaxy", version: "1.21.1", loader: "neoforge", sizeBytes: 2_980_000_000, install: "missing", progress: 0 },
-  { name: "Pixelmon Odyssey", version: "1.20.4", loader: "forge", sizeBytes: 4_010_000_000, install: "installed", progress: 1 },
+  { name: "Anarchy Universe", minecraft: "1.21.1", loader: "neoforge", sizeBytes: 2_460_000_000, install: "installed", hasFeatures: true, progress: 1 },
+  { name: "Automation Factory", minecraft: "1.21.1", loader: "forge", sizeBytes: 3_120_000_000, install: "outdated", progress: 0.62 },
+  { name: "RPG Ascendancy", minecraft: "1.20.1", loader: "fabric", sizeBytes: 1_780_000_000, install: "missing", progress: 0 },
+  { name: "Industrial Galaxy", minecraft: "1.21.1", loader: "neoforge", sizeBytes: 2_980_000_000, install: "missing", progress: 0 },
+  { name: "Pixelmon Odyssey", minecraft: "1.20.4", loader: "forge", sizeBytes: 4_010_000_000, install: "installed", progress: 1 },
 ];
 
 export function mockFeatures(): BuildFeatures {
