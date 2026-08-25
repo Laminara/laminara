@@ -15,7 +15,7 @@ import (
 func stopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "stop the running server",
+		Short: "остановить сервер",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			data, err := os.ReadFile(control.PidPath())

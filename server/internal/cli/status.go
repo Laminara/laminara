@@ -16,7 +16,7 @@ func statusCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "show server status",
+		Short: "состояние сервера",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			resp, err := adminClient().Status(cmd.Context(), connect.NewRequest(&adminv1.StatusRequest{}))
@@ -39,6 +39,6 @@ func statusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "вывести JSON")
 	return cmd
 }

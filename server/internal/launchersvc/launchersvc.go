@@ -134,7 +134,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 	dir := filepath.Join(s.dir, version)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", dir, err)
+		return fmt.Errorf("не читается папка %s: %w", dir, err)
 	}
 
 	release := &corev1.LauncherRelease{
@@ -155,7 +155,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 		key, _ := platform.Key(target)
 		slot := key + "/" + kindName(kind)
 		if seen[slot] {
-			return fmt.Errorf("two artifacts claim %s", slot)
+			return fmt.Errorf("на место %s претендуют два файла", slot)
 		}
 		seen[slot] = true
 
@@ -174,10 +174,10 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 			Object:   ref,
 			FileName: entry.Name(),
 		})
-		fmt.Fprintf(out, "  %-14s %-22s %s (%d bytes)\n", key, kindName(kind), entry.Name(), ref.Size)
+		fmt.Fprintf(out, "  %-14s %-22s %s (%s)\n", key, kindName(kind), entry.Name(), humanize.Bytes(uint64(ref.Size)))
 	}
 	if len(release.Artifacts) == 0 {
-		return fmt.Errorf("no recognised launcher artifacts in %s", dir)
+		return fmt.Errorf("в папке %s нет ни одного понятного файла лаунчера", dir)
 	}
 	sort.Slice(release.Artifacts, func(i, j int) bool {
 		if release.Artifacts[i].Platform != release.Artifacts[j].Platform {
@@ -199,7 +199,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 	if s.emit != nil {
 		s.emit("launcher.published", map[string]string{"version": version})
 	}
-	fmt.Fprintf(out, "published launcher %s\n", version)
+	fmt.Fprintf(out, "Лаунчер %s опубликован — старые версии обновятся сами\n", version)
 	return nil
 }
 

@@ -15,8 +15,8 @@ import (
 
 func execCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec [command...]",
-		Short: "run a single server command and exit",
+		Use:   "exec [команда…]",
+		Short: "выполнить одну команду сервера и выйти",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code, err := runExec(cmd.Context(), adminClient(), strings.Join(args, " "))

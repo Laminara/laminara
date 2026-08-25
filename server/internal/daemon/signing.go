@@ -16,7 +16,7 @@ func signingCommand(ring *signing.Keyring) command.Command {
 		Synopsis: "ключи подписи (signing keys | signing new <путь>)",
 		Run: func(_ context.Context, args []string, out io.Writer) error {
 			if ring == nil {
-				return errors.New("no signing key is configured")
+				return errors.New("ключ подписи не настроен — задайте build.signingKeyPath")
 			}
 			if len(args) == 0 {
 				args = []string{"keys"}

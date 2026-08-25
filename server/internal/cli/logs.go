@@ -16,7 +16,7 @@ func logsCmd() *cobra.Command {
 	var backscroll uint32
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "stream server logs",
+		Short: "смотреть логи сервера",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stream, err := adminClient().StreamLogs(cmd.Context(), connect.NewRequest(&adminv1.StreamLogsRequest{
@@ -35,9 +35,9 @@ func logsCmd() *cobra.Command {
 			return stream.Err()
 		},
 	}
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep streaming new lines")
-	cmd.Flags().StringVar(&level, "level", "", "minimum level (debug|info|warn|error)")
-	cmd.Flags().StringVar(&source, "source", "", "filter by source")
-	cmd.Flags().Uint32Var(&backscroll, "backscroll", 200, "number of past lines to show")
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "не выходить, показывать новые строки")
+	cmd.Flags().StringVar(&level, "level", "", "с какого уровня показывать (debug|info|warn|error)")
+	cmd.Flags().StringVar(&source, "source", "", "только строки этого источника")
+	cmd.Flags().Uint32Var(&backscroll, "backscroll", 200, "сколько прошлых строк показать")
 	return cmd
 }

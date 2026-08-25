@@ -51,7 +51,7 @@ func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) err
 	}
 	c, ok := r.commands[fields[0]]
 	if !ok {
-		return fmt.Errorf("unknown command %q (try \"help\")", fields[0])
+		return fmt.Errorf("команды «%s» нет — весь список даёт help", fields[0])
 	}
 	return c.Run(ctx, fields[1:], out)
 }

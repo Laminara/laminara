@@ -14,8 +14,8 @@ import (
 func hashCmd() *cobra.Command {
 	var algo string
 	cmd := &cobra.Command{
-		Use:   "hash [password]",
-		Short: "hash a password for a user store (reads stdin if no argument)",
+		Use:   "hash [пароль]",
+		Short: "посчитать хеш пароля для хранилища аккаунтов (без аргумента читает ввод)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var password string
@@ -36,6 +36,6 @@ func hashCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&algo, "algo", "argon2id", "hash scheme (argon2id, bcrypt, sha256, sha512, md5, plain)")
+	cmd.Flags().StringVar(&algo, "algo", "argon2id", "схема хеширования (argon2id, bcrypt, sha256, sha512, md5, plain)")
 	return cmd
 }

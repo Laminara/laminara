@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/signing"
 )
@@ -50,10 +51,10 @@ func inlineAsset(path string) (string, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("branding asset %s: %w", path, err)
+		return "", fmt.Errorf("картинка оформления %s: %w", path, err)
 	}
 	if len(data) > maxInlineAsset {
-		return "", fmt.Errorf("branding asset %s is %d bytes; keep it under %d", path, len(data), maxInlineAsset)
+		return "", fmt.Errorf("картинка %s весит %s — оставьте под %s", path, humanize.Bytes(uint64(len(data))), humanize.Bytes(uint64(maxInlineAsset)))
 	}
 	return "data:" + mimeOf(path) + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
@@ -118,7 +119,7 @@ func clientConfigCmd() *cobra.Command {
 	var endpoints []string
 	cmd := &cobra.Command{
 		Use:   "client-config",
-		Short: "emit the launcher client config (endpoints + signing public key) to embed at build time",
+		Short: "напечатать конфигурацию, которую запекают в лаунчер: адреса, ключи подписи, оформление",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(configPath)
@@ -126,7 +127,7 @@ func clientConfigCmd() *cobra.Command {
 				return err
 			}
 			if cfg.Build == nil || cfg.Build.SigningKeyPath == "" {
-				return fmt.Errorf("config has no build.signingKeyPath")
+				return fmt.Errorf("в конфиге нет build.signingKeyPath — без ключа подписи лаунчер собрать нельзя")
 			}
 			ring, err := signing.NewKeyring(cfg.Build.SigningKeyPath, cfg.Build.TrustedSigningKeys)
 			if err != nil {
@@ -148,10 +149,10 @@ func clientConfigCmd() *cobra.Command {
 			}
 			if len(endpoints) == 0 {
 				if cfg.API == nil || cfg.API.Addr == "" {
-					return fmt.Errorf("no --endpoint given and config has no api.addr")
+					return fmt.Errorf("не указан --endpoint, и в конфиге нет api.addr")
 				}
 				endpoints = []string{"http://" + cfg.API.Addr}
-				fmt.Fprintln(os.Stderr, "warning: no --endpoint given; using api.addr, which is likely NOT the public URL players reach")
+				fmt.Fprintln(os.Stderr, "Внимание: адрес не указан — беру api.addr, а это почти наверняка не тот адрес, по которому придут игроки. Укажите --endpoint")
 			}
 			for _, endpoint := range endpoints {
 				out.Endpoints = append(out.Endpoints, clientEndpoint{ID: endpointID(endpoint), BaseURL: endpoint})
@@ -164,8 +165,8 @@ func clientConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to the server config JSON")
-	cmd.Flags().StringArrayVar(&endpoints, "endpoint", nil, "public base URL players reach (repeatable, ordered by preference)")
+	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
+	cmd.Flags().StringArrayVar(&endpoints, "endpoint", nil, "публичный адрес, по которому придут игроки (можно несколько раз, по порядку предпочтения)")
 	_ = cmd.MarkFlagRequired("config")
 	return cmd
 }

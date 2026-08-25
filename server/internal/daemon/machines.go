@@ -21,20 +21,20 @@ func machinesCommand(gate *hwid.Gate) command.Command {
 		Synopsis: "компьютеры игроков (machines <игрок> | machines show <id> | machines trust <id> [off] | machines prune)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
-				return errors.New("machine recognition is off (set hwid.mode)")
+				return errors.New("распознавание компьютеров выключено — включите его в разделе hwid.mode")
 			}
 			if len(args) == 0 {
-				return errors.New("usage: machines <player> | machines show <machineId> | machines trust <machineId> [off] | machines prune")
+				return errors.New("machines <игрок> | machines show <id> | machines trust <id> [off] | machines prune")
 			}
 			switch args[0] {
 			case "show":
 				if len(args) < 2 {
-					return errors.New("usage: machines show <machineId>")
+					return errors.New("напишите id компьютера: machines show <id>")
 				}
 				return showMachine(ctx, gate, args[1], out)
 			case "trust":
 				if len(args) < 2 {
-					return errors.New("usage: machines trust <machineId> [off]")
+					return errors.New("напишите id компьютера: machines trust <id> [off]")
 				}
 				trusted := len(args) < 3 || !strings.EqualFold(args[2], "off")
 				if err := gate.Store().SetTrusted(ctx, args[1], trusted); err != nil {
@@ -71,7 +71,7 @@ func listPlayerMachines(ctx context.Context, gate *hwid.Gate, player string, out
 	}
 	for _, machine := range machines {
 		fmt.Fprintf(out, "%s  кластер %s  последний вход %s%s\n",
-			machine.ID, short(machine.ClusterID), machine.LastSeen.Format(time.RFC3339), trustedSuffix(machine.Trusted))
+			machine.ID, short(machine.ClusterID), humanize.When(machine.LastSeen), trustedSuffix(machine.Trusted))
 		if len(machine.Flags) > 0 {
 			fmt.Fprintf(out, "  особенности: %s\n", flagWords(machine.Flags))
 		}
@@ -90,7 +90,7 @@ func showMachine(ctx context.Context, gate *hwid.Gate, machineID string, out io.
 	fmt.Fprintf(out, "компьютер: %s%s\n", machine.ID, trustedSuffix(machine.Trusted))
 	fmt.Fprintf(out, "кластер:   %s\n", machine.ClusterID)
 	fmt.Fprintf(out, "платформа: %s\n", machine.Platform)
-	fmt.Fprintf(out, "виден:     с %s по %s\n", machine.FirstSeen.Format(time.RFC3339), machine.LastSeen.Format(time.RFC3339))
+	fmt.Fprintf(out, "первый вход: %s\nпоследний:   %s\n", humanize.When(machine.FirstSeen), humanize.When(machine.LastSeen))
 	if len(machine.Flags) > 0 {
 		fmt.Fprintf(out, "особенности: %s\n", flagWords(machine.Flags))
 	}
@@ -101,7 +101,7 @@ func showMachine(ctx context.Context, gate *hwid.Gate, machineID string, out io.
 	}
 	fmt.Fprintln(out, "аккаунты:")
 	for _, account := range accounts {
-		fmt.Fprintf(out, "  %-20s %s\n", account.Username, account.LastSeen.Format(time.RFC3339))
+		fmt.Fprintf(out, "  %-20s %s\n", account.Username, humanize.When(account.LastSeen))
 	}
 
 	siblings, err := gate.Store().MachinesOfCluster(ctx, machine.ClusterID)
@@ -120,10 +120,10 @@ func banCommand(gate *hwid.Gate) command.Command {
 		Synopsis: "забанить игрока (ban <игрок> [причина…] [--account|--machine <id>|--cluster <id>] [--days N|--permanent] [--yes])",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
-				return errors.New("machine recognition is off (set hwid.mode)")
+				return errors.New("распознавание компьютеров выключено — включите его в разделе hwid.mode")
 			}
 			if len(args) == 0 {
-				return errors.New("usage: ban <player> [reason...] [--account|--machine <id>|--cluster <id>] [--days N|--permanent] [--yes]")
+				return errors.New("напишите игрока: ban <игрок> [причина…] [--account|--machine <id>|--cluster <id>] [--days N|--permanent] [--yes]")
 			}
 			request, reason, err := parseBanArgs(args[1:])
 			if err != nil {
@@ -140,7 +140,7 @@ func banCommand(gate *hwid.Gate) command.Command {
 
 			outcome, err := gate.Ban(ctx, request)
 			if errors.Is(err, hwid.ErrNothingToBan) && request.Scope == apiv1.BanScope_BAN_SCOPE_UNSPECIFIED {
-				return errors.New("no machine has been seen for this player; use --account to ban the account")
+				return errors.New("компьютер этого игрока ещё не видели — забаньте аккаунт ключом --account")
 			}
 			if err != nil {
 				return err
@@ -157,13 +157,13 @@ func banCommand(gate *hwid.Gate) command.Command {
 			if outcome.Ban.ExpiresAt.IsZero() {
 				fmt.Fprintln(out, "истекает: никогда")
 			} else {
-				fmt.Fprintf(out, "истекает: %s\n", outcome.Ban.ExpiresAt.Format(time.RFC3339))
+				fmt.Fprintf(out, "истекает: %s\n", humanize.When(outcome.Ban.ExpiresAt))
 			}
 			if outcome.Machines > 1 {
 				fmt.Fprintf(out, "под баном компьютеров: %d, аккаунтов: %d\n", outcome.Machines, len(outcome.Accounts))
 			}
 			if gate.Mode() != hwid.ModeEnforce {
-				fmt.Fprintf(out, "Внимание: распознавание компьютеров в режиме %q — бан записан, но не применяется\n", gate.Mode())
+				fmt.Fprintf(out, "Внимание: распознавание компьютеров в режиме «%s» — бан записан, но не применяется\n", modeWord(gate.Mode()))
 			}
 			return nil
 		},
@@ -179,19 +179,19 @@ func parseBanArgs(args []string) (hwid.BanRequest, string, error) {
 			request.Scope = apiv1.BanScope_BAN_SCOPE_ACCOUNT
 		case "--machine":
 			if index+1 >= len(args) {
-				return request, "", errors.New("--machine needs a machine id")
+				return request, "", errors.New("после --machine нужен id компьютера")
 			}
 			index++
 			request.MachineID = args[index]
 		case "--cluster":
 			if index+1 >= len(args) {
-				return request, "", errors.New("--cluster needs a cluster id")
+				return request, "", errors.New("после --cluster нужен id кластера")
 			}
 			index++
 			request.ClusterID = args[index]
 		case "--days":
 			if index+1 >= len(args) {
-				return request, "", errors.New("--days needs a number")
+				return request, "", errors.New("после --days нужно число дней")
 			}
 			index++
 			days, err := strconv.Atoi(args[index])
@@ -216,7 +216,7 @@ func bansCommand(gate *hwid.Gate) command.Command {
 		Synopsis: "баны (bans [--all] | bans <код> | bans lift <код>)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if !gate.Enabled() {
-				return errors.New("machine recognition is off (set hwid.mode)")
+				return errors.New("распознавание компьютеров выключено — включите его в разделе hwid.mode")
 			}
 			switch {
 			case len(args) == 0 || args[0] == "--all":
@@ -234,7 +234,7 @@ func bansCommand(gate *hwid.Gate) command.Command {
 				return nil
 			case args[0] == "lift":
 				if len(args) < 2 {
-					return errors.New("usage: bans lift <reference>")
+					return errors.New("напишите код бана: bans lift <код>")
 				}
 				if err := gate.Unban(ctx, strings.ToUpper(args[1])); err != nil {
 					return err
@@ -261,11 +261,11 @@ func showBan(ctx context.Context, gate *hwid.Gate, reference string, out io.Writ
 	fmt.Fprintf(out, "кого:      %s\n", ban.Target)
 	fmt.Fprintf(out, "причина:   %s\n", ban.Reason)
 	fmt.Fprintf(out, "выдал:     %s\n", ban.By)
-	fmt.Fprintf(out, "выдан:     %s\n", ban.CreatedAt.Format(time.RFC3339))
+	fmt.Fprintf(out, "выдан:     %s\n", humanize.When(ban.CreatedAt))
 	if ban.ExpiresAt.IsZero() {
 		fmt.Fprintln(out, "истекает:  никогда")
 	} else {
-		fmt.Fprintf(out, "истекает:  %s\n", ban.ExpiresAt.Format(time.RFC3339))
+		fmt.Fprintf(out, "истекает:  %s\n", humanize.When(ban.ExpiresAt))
 	}
 	fmt.Fprintf(out, "действует: %s\n", yesNo(ban.Active(time.Now())))
 	return nil
@@ -297,7 +297,7 @@ func hwidCommand(gate *hwid.Gate) command.Command {
 
 func trustedSuffix(trusted bool) string {
 	if trusted {
-		return "  [trusted]"
+		return "  [доверенный]"
 	}
 	return ""
 }
