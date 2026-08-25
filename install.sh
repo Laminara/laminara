@@ -92,17 +92,28 @@ main() {
   local server="$bin_dir/laminara-server"
   install_binary "$server"
 
-  # --- публичный адрес ---
-  local api_addr domain
-  ask domain "Домен сервера (для ссылок в доке, необязательно):" ""
-  ask api_addr "Адрес публичного слушателя:" "0.0.0.0:8099"
+  # --- как игроки приходят ---
+  local front domain="" email="" api_addr endpoint
+  choose "Как лаунчер будет ходить на проект?" "По домену через nginx, с сертификатом Let's Encrypt" "Напрямую по адресу и порту"
+  if [ "$CHOICE" = 1 ]; then
+    front=nginx
+    while [ -z "$domain" ]; do ask domain "  Домен проекта — по нему лаунчер ходит на сервер (например launcher.example.com):" ""; done
+    ask email "  Почта для Let's Encrypt:" ""
+    api_addr="127.0.0.1:8099"
+    endpoint="https://$domain"
+  else
+    front=direct
+    ask api_addr "Адрес публичного слушателя:" "0.0.0.0:8099"
+    ask domain "Адрес проекта — по нему лаунчер ходит на сервер (IP или домен):" "$(hostname -I 2>/dev/null | awk '{print $1}')"
+    endpoint="http://${domain}:${api_addr##*:}"
+  fi
 
   # --- хранилище ---
   local storage_block xaccel=""
-  choose "Где хранить файлы сборок?" "Локальный диск (просто, для одного сервера)" "S3-совместимое (Garage/SeaweedFS/B2/облако)"
+  choose "Где хранить файлы сборок?" "Локальный диск (просто, когда сервер один)" "S3-совместимое (Garage/SeaweedFS/B2/облако)"
   if [ "$CHOICE" = 1 ]; then
     storage_block=$(printf '{ "backend": "fs", "config": { "root": "%s/objects", "xaccelPrefix": "/internal-objects/" } }' "$data_dir")
-    xaccel=', "xAccel": true'
+    [ "$front" = nginx ] && xaccel=', "xAccel": true'
   else
     local s3_endpoint s3_bucket s3_region s3_key s3_secret
     ask s3_endpoint "  Endpoint (например s3.eu-central-1.amazonaws.com):" ""
@@ -210,9 +221,70 @@ EOF
       say; say "Запуск: ${bold}$server start --config $config${reset}" ;;
   esac
 
+  [ "$front" = nginx ] && setup_nginx "$server" "$config" "$domain" "$email"
+
   head "Готово ✓"
-  say "Публичный слушатель: ${bold}${api_addr}${reset}"
-  say "Первая сборка:       ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
+  say "Адрес проекта:      ${bold}${endpoint}${reset}"
+  say "Первая сборка:      ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
+  say "Лаунчер для игроков:"
+  say "  ${bold}$server client-config --config $config --endpoint $endpoint > laminara.client.json${reset}"
+  note "  дальше — ./build-launcher.sh laminara.client.json из репозитория (нужны Rust и pnpm)"
+}
+
+install_package() {
+  local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+  if command -v apt-get >/dev/null; then
+    $sudo apt-get update -qq && $sudo apt-get install -y "$@"
+  elif command -v dnf >/dev/null; then
+    $sudo dnf install -y "$@"
+  elif command -v pacman >/dev/null; then
+    $sudo pacman -Sy --noconfirm "$@"
+  elif command -v zypper >/dev/null; then
+    $sudo zypper install -y "$@"
+  else
+    return 1
+  fi
+}
+
+setup_nginx() {
+  local server=$1 config=$2 domain=$3 email=$4
+  local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+  head "nginx и сертификат"
+
+  command -v nginx >/dev/null || install_package nginx || {
+    note "не смог поставить nginx — конфиг напечатан ниже, поставьте руками"
+    "$server" nginx-config --config "$config" --domain "$domain"
+    return
+  }
+
+  local site link
+  if [ -d /etc/nginx/sites-available ]; then
+    site=/etc/nginx/sites-available/laminara.conf
+    link=/etc/nginx/sites-enabled/laminara.conf
+  else
+    site=/etc/nginx/conf.d/laminara.conf
+    link=""
+  fi
+  "$server" nginx-config --config "$config" --domain "$domain" --no-tls | $sudo tee "$site" >/dev/null
+  [ -n "$link" ] && $sudo ln -sf "$site" "$link"
+  [ -e /etc/nginx/sites-enabled/default ] && $sudo rm -f /etc/nginx/sites-enabled/default
+  $sudo nginx -t || die "nginx не принял конфиг $site"
+  $sudo systemctl reload nginx 2>/dev/null || $sudo nginx -s reload
+  note "  сайт: $site"
+
+  if ! command -v certbot >/dev/null; then
+    install_package certbot python3-certbot-nginx || {
+      note "не смог поставить certbot — сервер работает по HTTP, сертификат получите сами"
+      return
+    }
+  fi
+  local certbot_args=(--nginx -d "$domain" --agree-tos --non-interactive --redirect)
+  if [ -n "$email" ]; then certbot_args+=(-m "$email"); else certbot_args+=(--register-unsafely-without-email); fi
+  if $sudo certbot "${certbot_args[@]}"; then
+    note "  сертификат получен, обновляется сам"
+  else
+    note "не вышло получить сертификат — проверьте, что домен $domain смотрит на этот сервер, и повторите: sudo certbot --nginx -d $domain"
+  fi
 }
 
 setup_systemd() {

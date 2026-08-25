@@ -14,7 +14,6 @@ nginx.
 | `Dockerfile` | Многоступенчатая сборка в `debian:12-slim`. Именно glibc, а не distroless: скачанная Java должна запускать процессоры установщика Forge и NeoForge. |
 | `docker-compose.yml` | Сервер и Redis; Postgres и своё S3 закомментированы до того момента, когда понадобятся. |
 | `systemd/laminara-server.service` | Юнит `Type=notify` — демон сам сообщает systemd о готовности. |
-| `nginx/laminara.conf` | TLS-прокси и раздача файлов через `X-Accel-Redirect`. |
 | `config.example.json` | Конфиг со всеми разделами. |
 
 ## Docker
@@ -39,7 +38,18 @@ sudo systemctl enable --now laminara-server
 
 ## nginx и TLS
 
-Замените домен в `nginx/laminara.conf`, получите сертификат certbot'ом и перезагрузите nginx.
+Конфиг печатает сам сервер — он знает и порт слушателя, и путь к хранилищу:
+
+```sh
+laminara-server nginx-config --config /etc/laminara/config.json --domain launcher.example.com --no-tls \
+  | sudo tee /etc/nginx/sites-available/laminara.conf
+sudo ln -sf /etc/nginx/sites-available/laminara.conf /etc/nginx/sites-enabled/laminara.conf
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d launcher.example.com
+```
+
+`--no-tls` печатает один блок на `:80` — сертификата ещё нет; TLS в этот блок добавит certbot.
+Без ключа команда сразу печатает вариант с `:443` и путями к сертификатам Let's Encrypt.
 
 Локация `/internal-objects/` должна оставаться `internal` и указывать `alias` на корень
 файлового хранилища: сервер отвечает заголовком `X-Accel-Redirect` (включается
@@ -70,8 +80,8 @@ Minecraft и загрузчиков подхватываются сами, пе�
 
 ```sh
 laminara-server client-config --config /etc/laminara/config.json \
-  --endpoint https://eu.play.example.com \
-  --endpoint https://us.play.example.com > laminara.client.json
+  --endpoint https://eu.launcher.example.com \
+  --endpoint https://us.launcher.example.com > laminara.client.json
 
 cd client
 ./build-launcher.sh ../laminara.client.json --target windows
