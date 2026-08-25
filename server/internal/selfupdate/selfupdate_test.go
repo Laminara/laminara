@@ -157,3 +157,28 @@ func TestInstallSwapsAndKeepsThePreviousBinary(t *testing.T) {
 		t.Fatalf("previous = %q, want the replaced binary", previous)
 	}
 }
+
+func TestLongReleaseNotesAreTrimmed(t *testing.T) {
+	notes := strings.TrimSpace(strings.Repeat("- строка\n", 40))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"tag_name":"v2.0.0","body":%q,"html_url":"https://example.test/r","assets":[{"name":%q,"browser_download_url":"x"}]}`,
+			notes, selfupdate.AssetName())
+	}))
+	t.Cleanup(server.Close)
+
+	var out strings.Builder
+	err := selfupdate.Run(context.Background(), &selfupdate.Checker{Repo: "owner/repo", API: server.URL}, "1.0.0", true, "restart", &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed := out.String()
+	if strings.Count(printed, "- строка") > 8 {
+		t.Fatalf("release notes are printed whole:\n%s", printed)
+	}
+	if !strings.Contains(printed, "…и ещё 32 строки") {
+		t.Fatalf("the trimmed tail must count the rest in Russian:\n%s", printed)
+	}
+	if !strings.Contains(printed, "https://example.test/r") {
+		t.Fatal("the trimmed notes must link to the release page")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,12 +24,14 @@ const (
 	DefaultRepo     = "MrLeonardosMi/Laminara"
 	DefaultInterval = 24 * time.Hour
 	checksumsAsset  = "checksums.txt"
+	askTimeout      = 30 * time.Second
 )
 
 type Release struct {
 	Version     string
 	Tag         string
 	Notes       string
+	URL         string
 	PublishedAt time.Time
 	assetName   string
 	assetURL    string
@@ -52,7 +55,19 @@ func (c *Checker) client() *http.Client {
 	if c.Client != nil {
 		return c.Client
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: askTimeout}
+}
+
+func (c *Checker) downloadClient() *http.Client {
+	if c.Client != nil {
+		return c.Client
+	}
+	return &http.Client{Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: askTimeout}).DialContext,
+		TLSHandshakeTimeout:   askTimeout,
+		ResponseHeaderTimeout: askTimeout,
+	}}
 }
 
 func (c *Checker) api() string {
@@ -90,6 +105,7 @@ func (c *Checker) Latest(ctx context.Context) (*Release, error) {
 	var payload struct {
 		TagName     string    `json:"tag_name"`
 		Body        string    `json:"body"`
+		HTMLURL     string    `json:"html_url"`
 		Draft       bool      `json:"draft"`
 		Prerelease  bool      `json:"prerelease"`
 		PublishedAt time.Time `json:"published_at"`
@@ -106,6 +122,7 @@ func (c *Checker) Latest(ctx context.Context) (*Release, error) {
 		Version:     strings.TrimPrefix(payload.TagName, "v"),
 		Tag:         payload.TagName,
 		Notes:       strings.TrimSpace(payload.Body),
+		URL:         payload.HTMLURL,
 		PublishedAt: payload.PublishedAt,
 		assetName:   AssetName(),
 	}
@@ -184,7 +201,7 @@ func (c *Checker) fetch(ctx context.Context, url string, into io.Writer) error {
 	if err != nil {
 		return err
 	}
-	response, err := c.client().Do(request)
+	response, err := c.downloadClient().Do(request)
 	if err != nil {
 		return err
 	}

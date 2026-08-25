@@ -6,7 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/laminara/laminara/server/internal/humanize"
 )
+
+const notesLines = 8
 
 func (c *Checker) Apply(ctx context.Context, release *Release) error {
 	binary, err := BinaryPath()
@@ -38,8 +43,12 @@ func Run(ctx context.Context, checker *Checker, current string, checkOnly bool, 
 	}
 
 	fmt.Fprintf(out, "Есть версия %s, установлена %s\n", release.Version, current)
-	if release.Notes != "" {
-		fmt.Fprintf(out, "\n%s\n\n", release.Notes)
+	if notes := shorten(release.Notes); notes != "" {
+		fmt.Fprintf(out, "\n%s\n", notes)
+		if release.URL != "" {
+			fmt.Fprintf(out, "Целиком: %s\n", release.URL)
+		}
+		fmt.Fprintln(out)
 	}
 	if checkOnly {
 		return nil
@@ -50,4 +59,14 @@ func Run(ctx context.Context, checker *Checker, current string, checkOnly bool, 
 	}
 	fmt.Fprintf(out, "Версия %s записана. Она заработает после перезапуска: %s\n", release.Version, restartHint)
 	return nil
+}
+
+func shorten(notes string) string {
+	lines := strings.Split(strings.TrimSpace(notes), "\n")
+	if len(lines) <= notesLines {
+		return strings.Join(lines, "\n")
+	}
+	kept := append([]string{}, lines[:notesLines]...)
+	kept = append(kept, "…и ещё "+humanize.Count(len(lines)-notesLines, "строка", "строки", "строк"))
+	return strings.Join(kept, "\n")
 }

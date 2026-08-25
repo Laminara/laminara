@@ -67,7 +67,7 @@ jobs:
           mkdir -p release
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-X github.com/laminara/laminara/server/internal/version.Current=$VERSION" \
+              -ldflags "-s -w -X github.com/laminara/laminara/server/internal/version.Current=$VERSION" \
               -o "release/laminara-server-linux-$arch" ./server/cmd/laminara-server
           done
           cd release && sha256sum laminara-server-* > checksums.txt && cat checksums.txt

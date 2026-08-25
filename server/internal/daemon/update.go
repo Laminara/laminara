@@ -11,7 +11,11 @@ import (
 	"github.com/laminara/laminara/server/internal/version"
 )
 
-const firstCheckDelay = time.Minute
+const (
+	firstCheckDelay = time.Minute
+	askTimeout      = time.Minute
+	installTimeout  = 30 * time.Minute
+)
 
 func (d *Daemon) checker() *selfupdate.Checker {
 	return &selfupdate.Checker{Repo: d.update.RepoOr(selfupdate.DefaultRepo)}
@@ -53,7 +57,9 @@ func (d *Daemon) watchUpdates(ctx context.Context) {
 
 func (d *Daemon) lookForUpdate(ctx context.Context) {
 	checker := d.checker()
-	release, err := checker.Latest(ctx)
+	askCtx, cancelAsk := context.WithTimeout(ctx, askTimeout)
+	release, err := checker.Latest(askCtx)
+	cancelAsk()
 	if err != nil {
 		d.log.Debug("проверить обновление не удалось", "source", "update", "ошибка", err)
 		return
@@ -72,7 +78,9 @@ func (d *Daemon) lookForUpdate(ctx context.Context) {
 		return
 	}
 
-	if err := checker.Apply(ctx, release); err != nil {
+	installCtx, cancelInstall := context.WithTimeout(ctx, installTimeout)
+	defer cancelInstall()
+	if err := checker.Apply(installCtx, release); err != nil {
 		d.log.Error("обновление не установлено", "source", "update", "версия", release.Version, "ошибка", err)
 		return
 	}
