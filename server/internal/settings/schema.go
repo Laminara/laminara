@@ -301,6 +301,17 @@ var schema = []Section{
 		},
 	},
 	{
+		Key:   "log",
+		Title: "Журнал сервера",
+		Hint:  "Логи всегда идут в консоль. Файл нужен там, где их некому подхватить — journald и docker ведут свой журнал сами.",
+		Fields: []Field{
+			{Key: "file", Label: "Файл журнала", Kind: KindText, Hint: "Пусто — журнал только в консоли."},
+			{Key: "maxSizeMB", Label: "Резать после, МБ", Kind: KindInt, Default: "20"},
+			{Key: "keep", Label: "Хранить файлов", Kind: KindInt, Default: "5"},
+			{Key: "maxAge", Label: "Хранить не дольше", Kind: KindDuration, Default: "720h"},
+		},
+	},
+	{
 		Key:   "update",
 		Title: "Обновление сервера",
 		Hint:  "Новые версии сервер берёт из релизов на GitHub.",

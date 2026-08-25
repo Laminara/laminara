@@ -1,6 +1,7 @@
 package serversetup
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/events"
+	"github.com/laminara/laminara/server/internal/health"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -38,6 +40,8 @@ type Wired struct {
 	PublicAddr    string
 	Events        *events.Bus
 }
+
+const healthProbeKey = "healthz/probe"
 
 func Build(cfg *config.Config) (*Wired, error) {
 	wired := &Wired{Events: events.NewBus()}
@@ -150,8 +154,14 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 		launcher = api.Handler(service, backend, xAccel)
 	}
 
+	mux := http.NewServeMux()
+	healthChecks(wired, backend).Mount(mux)
+	if launcher != nil {
+		mux.Handle("/", launcher)
+	}
+
 	if cfg.Yggdrasil == nil || !cfg.Yggdrasil.Enabled || authService == nil {
-		return launcher, nil
+		return mux, nil
 	}
 
 	skinProvider, err := skin.Build(cfg.Yggdrasil.SkinProvider, cfg.Yggdrasil.SkinConfig)
@@ -167,10 +177,30 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 		return nil, err
 	}
 
-	mux := http.NewServeMux()
 	mux.Handle("/yggdrasil/", http.StripPrefix("/yggdrasil", yggServer.Handler()))
-	if launcher != nil {
-		mux.Handle("/", launcher)
-	}
 	return mux, nil
+}
+
+func healthChecks(wired *Wired, backend storage.Backend) *health.Handler {
+	var checks []health.Check
+	if backend != nil {
+		checks = append(checks, health.Check{
+			Name: "storage",
+			Probe: func(ctx context.Context) error {
+				_, _, err := backend.Stat(ctx, healthProbeKey)
+				return err
+			},
+		})
+	}
+	if wired.Catalog != nil {
+		served := wired.Catalog
+		checks = append(checks, health.Check{
+			Name: "catalog",
+			Probe: func(context.Context) error {
+				_, err := served.List()
+				return err
+			},
+		})
+	}
+	return health.New(checks...)
 }

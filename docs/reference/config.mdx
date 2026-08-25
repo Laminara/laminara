@@ -138,3 +138,12 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="interval" type="duration">Как часто смотреть релизы. По умолчанию `24h`.</ParamField>
 
 Подробнее — [Обновление сервера](/server/updates).
+
+## log
+
+<ParamField path="file" type="string">Файл журнала. Пусто — журнал только в консоли, а её ведёт systemd или docker.</ParamField>
+<ParamField path="maxSizeMB" type="number">После какого размера файл режется. По умолчанию `20`.</ParamField>
+<ParamField path="keep" type="number">Сколько нарезанных файлов хранить. По умолчанию `5`.</ParamField>
+<ParamField path="maxAge" type="duration">Сколько хранить нарезанные файлы. По умолчанию `720h`.</ParamField>
+
+Подробнее — [Обслуживание](/server/maintenance).

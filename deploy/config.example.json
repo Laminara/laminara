@@ -120,5 +120,11 @@
     "install": false,
     "repo": "MrLeonardosMi/Laminara",
     "interval": "24h"
+  },
+  "log": {
+    "file": "",
+    "maxSizeMB": 20,
+    "keep": 5,
+    "maxAge": "720h"
   }
 }

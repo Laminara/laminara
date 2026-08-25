@@ -37,6 +37,7 @@ func startCmd() *cobra.Command {
 				opts.Machines = wired.Machines
 				opts.Signing = wired.Signing
 				opts.Update = cfg.Update
+				opts.Log = cfg.Log
 				if cfg.Modules != nil {
 					opts.ModulesDir = cfg.Modules.Dir
 					if len(cfg.Modules.Config) > 0 {

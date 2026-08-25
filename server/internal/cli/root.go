@@ -53,6 +53,9 @@ func Root() *cobra.Command {
 		nginxConfigCmd(),
 		updateCmd(),
 		versionCmd(),
+		doctorCmd(),
+		backupCmd(),
+		restoreCmd(),
 	)
 	speakRussian(root)
 	return root

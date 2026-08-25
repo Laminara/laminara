@@ -35,7 +35,7 @@ export default defineConfig({
       customCss: ["./src/styles/docs.css"],
       sidebar: [
         { label: "Знакомство", items: ["index", "quickstart", "console", "architecture"] },
-        { label: "Сервер", items: ["server/install", "server/configuration", "server/production", "server/updates", "server/signing", "server/machines"] },
+        { label: "Сервер", items: ["server/install", "server/configuration", "server/production", "server/updates", "server/maintenance", "server/signing", "server/machines"] },
         { label: "Сборки", items: ["builds/preparing", "builds/loaders", "builds/publishing", "builds/settings", "builds/features", "builds/access"] },
         { label: "Лаунчер", items: ["launcher", "launcher/building", "launcher/updates", "launcher/news"] },
         { label: "Вход игроков", items: ["auth/adapters", "auth/yggdrasil"] },

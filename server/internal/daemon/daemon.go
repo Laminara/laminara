@@ -63,6 +63,7 @@ type Daemon struct {
 	publicAddr    string
 	catalog       admin.Catalog
 	update        *config.UpdateConfig
+	logFile       io.Closer
 }
 
 type Options struct {
@@ -80,13 +81,15 @@ type Options struct {
 	Events        *events.Bus
 	ConfigPath    string
 	Update        *config.UpdateConfig
+	Log           *config.LogConfig
 }
 
 func New(opts Options) *Daemon {
 	bus := logbus.NewBus(4096)
 	level := new(slog.LevelVar)
 	level.Set(slog.LevelInfo)
-	log := slog.New(logbus.NewHandler(os.Stdout, level, bus))
+	sink, file := logSink(opts.Log)
+	log := slog.New(logbus.NewHandler(sink, level, bus))
 	slog.SetDefault(log)
 
 	registry := command.NewRegistry()
@@ -102,6 +105,7 @@ func New(opts Options) *Daemon {
 		publicHandler: opts.PublicHandler,
 		publicAddr:    opts.PublicAddr,
 		update:        opts.Update,
+		logFile:       file,
 	}
 	registry.Register(d.statusCommand())
 	registry.Register(d.versionCommand())
@@ -204,6 +208,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	defer control.ReleasePid()
+	if d.logFile != nil {
+		defer d.logFile.Close()
+	}
 
 	service := admin.NewService(d.status, d.bus, d.registry, d.catalog)
 	if d.settings != nil {

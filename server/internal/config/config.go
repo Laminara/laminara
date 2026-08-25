@@ -25,6 +25,7 @@ type Config struct {
 	RateLimit *ratelimit.Config `json:"rateLimit"`
 	News      *news.Config      `json:"news"`
 	Update    *UpdateConfig     `json:"update"`
+	Log       *LogConfig        `json:"log"`
 }
 
 type BrandingConfig struct {
@@ -37,6 +38,13 @@ type BrandingConfig struct {
 	LogoPath        string `json:"logoPath"`
 	HeroMediaPath   string `json:"heroMediaPath"`
 	SiteURL         string `json:"siteUrl"`
+}
+
+type LogConfig struct {
+	File      string   `json:"file"`
+	MaxSizeMB int      `json:"maxSizeMB"`
+	Keep      int      `json:"keep"`
+	MaxAge    Duration `json:"maxAge"`
 }
 
 type UpdateConfig struct {
