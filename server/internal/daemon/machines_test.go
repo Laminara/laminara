@@ -69,7 +69,7 @@ func TestMachinesFindsAPlayerWhoseSubjectIsNotTheNickname(t *testing.T) {
 
 	for _, typed := range []string{"Strah", "strah", "STRAH"} {
 		output := run(t, machinesCommand(gate), typed)
-		if strings.Contains(output, "no machine seen") {
+		if strings.Contains(output, "ещё не было ни одного входа") {
 			t.Fatalf("machines %s found nothing: %s", typed, output)
 		}
 	}
@@ -81,7 +81,7 @@ func TestConsoleAccountBanRefusesTheNextLogin(t *testing.T) {
 	report := seenMachine(t, gate, identity, 40)
 
 	output := run(t, banCommand(gate), "Strah", "cheating", "--account")
-	if !strings.Contains(output, "banned") {
+	if !strings.Contains(output, "Забанен") {
 		t.Fatalf("ban did not report success: %s", output)
 	}
 

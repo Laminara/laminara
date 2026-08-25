@@ -212,12 +212,12 @@ func hasFlag(flags []apiv1.CollectorFlag, want apiv1.CollectorFlag) bool {
 func ScopeWord(scope apiv1.BanScope) string {
 	switch scope {
 	case apiv1.BanScope_BAN_SCOPE_ACCOUNT:
-		return "account"
+		return "аккаунт"
 	case apiv1.BanScope_BAN_SCOPE_MACHINE:
-		return "machine"
+		return "компьютер"
 	case apiv1.BanScope_BAN_SCOPE_CLUSTER:
-		return "cluster"
+		return "кластер"
 	default:
-		return "unknown"
+		return "неизвестно"
 	}
 }

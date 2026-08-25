@@ -13,6 +13,7 @@ import (
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/platform"
 	"github.com/laminara/laminara/server/internal/storage"
@@ -49,20 +50,20 @@ func (s *Service) Commands() []command.Command {
 
 func (s *Service) run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: launcher versions|publish <version>|status")
+		return fmt.Errorf("как пользоваться: launcher versions | launcher publish <версия> | launcher status")
 	}
 	switch args[0] {
 	case "versions":
 		return s.versions(out)
 	case "publish":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: launcher publish <version>")
+			return fmt.Errorf("как пользоваться: launcher publish <версия>")
 		}
 		return s.publish(ctx, args[1], out)
 	case "status":
 		return s.status(out)
 	default:
-		return fmt.Errorf("unknown launcher subcommand %q", args[0])
+		return fmt.Errorf("не знаю подкоманду launcher %q", args[0])
 	}
 }
 
@@ -70,7 +71,7 @@ func (s *Service) versions(out io.Writer) error {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(out, "no launcher directory yet: %s\n", s.dir)
+			fmt.Fprintf(out, "Папки с лаунчерами пока нет: %s\n", s.dir)
 			return nil
 		}
 		return err
@@ -81,11 +82,11 @@ func (s *Service) versions(out io.Writer) error {
 			continue
 		}
 		artifacts, _ := os.ReadDir(filepath.Join(s.dir, entry.Name()))
-		fmt.Fprintf(out, "%-12s %d artifact(s)\n", entry.Name(), len(artifacts))
+		fmt.Fprintf(out, "%-12s %s\n", entry.Name(), humanize.Count(len(artifacts), "файл", "файла", "файлов"))
 		found = true
 	}
 	if !found {
-		fmt.Fprintf(out, "no versions in %s — create %s/<version>/ and drop the built launchers there\n", s.dir, s.dir)
+		fmt.Fprintf(out, "В %s пока пусто — создайте папку %s/<версия>/ и положите туда собранные лаунчеры\n", s.dir, s.dir)
 	}
 	return nil
 }
@@ -96,17 +97,17 @@ func (s *Service) status(out io.Writer) error {
 		return err
 	}
 	if len(release) == 0 {
-		fmt.Fprintln(out, "no launcher release published")
+		fmt.Fprintln(out, "Ни одна версия лаунчера не опубликована.")
 		return nil
 	}
 	decoded, err := Decode(release)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "published %s (%d artifacts)\n", decoded.Version, len(decoded.Artifacts))
+	fmt.Fprintf(out, "Опубликована версия %s, файлов: %d\n", decoded.Version, len(decoded.Artifacts))
 	for _, artifact := range decoded.Artifacts {
 		key, _ := platform.Key(artifact.Platform)
-		fmt.Fprintf(out, "  %-14s %-22s %s\n", key, kindName(artifact.Kind), artifact.FileName)
+		fmt.Fprintf(out, "  %-14s %-24s %s\n", key, kindWord(artifact.Kind), artifact.FileName)
 	}
 	return nil
 }
@@ -114,7 +115,7 @@ func (s *Service) status(out io.Writer) error {
 func (s *Service) publish(ctx context.Context, version string, out io.Writer) error {
 	version = strings.TrimSpace(strings.TrimPrefix(version, "v"))
 	if !validVersion(version) {
-		return fmt.Errorf("version %q is not a semantic version like 1.2.3", version)
+		return fmt.Errorf("версия %q не похожа на номер вида 1.2.3", version)
 	}
 	current, _, err := NewReleases(s.dir).Current()
 	if err != nil {
@@ -126,7 +127,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 			return err
 		}
 		if compareVersions(version, decoded.Version) <= 0 {
-			return fmt.Errorf("version %s must be greater than the published %s", version, decoded.Version)
+			return fmt.Errorf("версия %s должна быть больше уже опубликованной %s", version, decoded.Version)
 		}
 	}
 
@@ -148,7 +149,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 		}
 		target, kind, ok := classify(entry.Name())
 		if !ok {
-			fmt.Fprintf(out, "skipping %s (unrecognised artifact name)\n", entry.Name())
+			fmt.Fprintf(out, "Пропускаю %s — не понимаю, для какой системы этот файл\n", entry.Name())
 			continue
 		}
 		key, _ := platform.Key(target)
@@ -304,4 +305,19 @@ func compareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+func kindWord(kind corev1.LauncherArtifactKind) string {
+	switch kind {
+	case corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_RAW_EXECUTABLE:
+		return "готовый файл"
+	case corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_INSTALLER:
+		return "установщик"
+	case corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_APP_IMAGE:
+		return "AppImage"
+	case corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_APP_BUNDLE_TAR_GZ:
+		return "пакет для macOS"
+	default:
+		return kindName(kind)
+	}
 }

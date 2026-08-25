@@ -11,6 +11,7 @@ import (
 
 	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
 )
 
@@ -39,14 +40,14 @@ func machinesCommand(gate *hwid.Gate) command.Command {
 				if err := gate.Store().SetTrusted(ctx, args[1], trusted); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "machine %s trusted: %t\n", args[1], trusted)
+				fmt.Fprintf(out, "Компьютер %s: доверенный — %s\n", args[1], yesNo(trusted))
 				return nil
 			case "prune":
 				removed, err := gate.Prune(ctx)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "pruned %d idle machines\n", removed)
+				fmt.Fprintf(out, "Забыто неактивных компьютеров: %d\n", removed)
 				return nil
 			default:
 				return listPlayerMachines(ctx, gate, args[0], out)
@@ -65,14 +66,14 @@ func listPlayerMachines(ctx context.Context, gate *hwid.Gate, player string, out
 		return err
 	}
 	if len(machines) == 0 {
-		fmt.Fprintf(out, "no machine seen for %s\n", player)
+		fmt.Fprintf(out, "У игрока %s ещё не было ни одного входа\n", player)
 		return nil
 	}
 	for _, machine := range machines {
-		fmt.Fprintf(out, "%s  cluster %s  last seen %s%s\n",
+		fmt.Fprintf(out, "%s  кластер %s  последний вход %s%s\n",
 			machine.ID, short(machine.ClusterID), machine.LastSeen.Format(time.RFC3339), trustedSuffix(machine.Trusted))
 		if len(machine.Flags) > 0 {
-			fmt.Fprintf(out, "  flags: %s\n", strings.Join(machine.Flags, ", "))
+			fmt.Fprintf(out, "  особенности: %s\n", flagWords(machine.Flags))
 		}
 	}
 	return nil
@@ -84,21 +85,21 @@ func showMachine(ctx context.Context, gate *hwid.Gate, machineID string, out io.
 		return err
 	}
 	if machine == nil {
-		return fmt.Errorf("no machine %s", machineID)
+		return fmt.Errorf("компьютера %s нет в списке", machineID)
 	}
-	fmt.Fprintf(out, "machine:  %s%s\n", machine.ID, trustedSuffix(machine.Trusted))
-	fmt.Fprintf(out, "cluster:  %s\n", machine.ClusterID)
-	fmt.Fprintf(out, "platform: %s\n", machine.Platform)
-	fmt.Fprintf(out, "seen:     %s .. %s\n", machine.FirstSeen.Format(time.RFC3339), machine.LastSeen.Format(time.RFC3339))
+	fmt.Fprintf(out, "компьютер: %s%s\n", machine.ID, trustedSuffix(machine.Trusted))
+	fmt.Fprintf(out, "кластер:   %s\n", machine.ClusterID)
+	fmt.Fprintf(out, "платформа: %s\n", machine.Platform)
+	fmt.Fprintf(out, "виден:     с %s по %s\n", machine.FirstSeen.Format(time.RFC3339), machine.LastSeen.Format(time.RFC3339))
 	if len(machine.Flags) > 0 {
-		fmt.Fprintf(out, "flags:    %s\n", strings.Join(machine.Flags, ", "))
+		fmt.Fprintf(out, "особенности: %s\n", flagWords(machine.Flags))
 	}
 
 	accounts, err := gate.Store().AccountsOfMachine(ctx, machine.ID)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "accounts:")
+	fmt.Fprintln(out, "аккаунты:")
 	for _, account := range accounts {
 		fmt.Fprintf(out, "  %-20s %s\n", account.Username, account.LastSeen.Format(time.RFC3339))
 	}
@@ -108,7 +109,7 @@ func showMachine(ctx context.Context, gate *hwid.Gate, machineID string, out io.
 		return err
 	}
 	if len(siblings) > 1 {
-		fmt.Fprintf(out, "cluster holds %d machines\n", len(siblings))
+		fmt.Fprintf(out, "в кластере компьютеров: %d\n", len(siblings))
 	}
 	return nil
 }
@@ -145,24 +146,24 @@ func banCommand(gate *hwid.Gate) command.Command {
 				return err
 			}
 			if outcome.NeedsConfirmation {
-				fmt.Fprintf(out, "this %s ban would also stop %d accounts:\n", hwid.ScopeWord(outcome.Scope), len(outcome.Accounts))
+				fmt.Fprintf(out, "Такой бан (%s) заденет ещё %d аккаунтов:\n", hwid.ScopeWord(outcome.Scope), len(outcome.Accounts))
 				for _, account := range outcome.Accounts {
 					fmt.Fprintf(out, "  %s\n", account.Username)
 				}
-				fmt.Fprintln(out, "re-run with --yes to apply it, or use --account to ban only this player")
+				fmt.Fprintln(out, "Повторите с --yes, чтобы применить, или с --account, чтобы забанить только этого игрока.")
 				return nil
 			}
-			fmt.Fprintf(out, "banned %s [%s] reference %s\n", outcome.Ban.Target, hwid.ScopeWord(outcome.Scope), outcome.Ban.Reference)
+			fmt.Fprintf(out, "Забанен %s (%s), код обращения %s\n", outcome.Ban.Target, hwid.ScopeWord(outcome.Scope), outcome.Ban.Reference)
 			if outcome.Ban.ExpiresAt.IsZero() {
-				fmt.Fprintln(out, "expires: never")
+				fmt.Fprintln(out, "истекает: никогда")
 			} else {
-				fmt.Fprintf(out, "expires: %s\n", outcome.Ban.ExpiresAt.Format(time.RFC3339))
+				fmt.Fprintf(out, "истекает: %s\n", outcome.Ban.ExpiresAt.Format(time.RFC3339))
 			}
 			if outcome.Machines > 1 {
-				fmt.Fprintf(out, "covers %d machines and %d accounts\n", outcome.Machines, len(outcome.Accounts))
+				fmt.Fprintf(out, "под баном компьютеров: %d, аккаунтов: %d\n", outcome.Machines, len(outcome.Accounts))
 			}
 			if gate.Mode() != hwid.ModeEnforce {
-				fmt.Fprintf(out, "note: hwid.mode is %q, so this ban is recorded but not enforced\n", gate.Mode())
+				fmt.Fprintf(out, "Внимание: распознавание компьютеров в режиме %q — бан записан, но не применяется\n", gate.Mode())
 			}
 			return nil
 		},
@@ -195,7 +196,7 @@ func parseBanArgs(args []string) (hwid.BanRequest, string, error) {
 			index++
 			days, err := strconv.Atoi(args[index])
 			if err != nil || days <= 0 {
-				return request, "", fmt.Errorf("--days wants a positive number, got %q", args[index])
+				return request, "", fmt.Errorf("--days ждёт положительное число, а получил %q", args[index])
 			}
 			request.TTL = time.Duration(days) * 24 * time.Hour
 		case "--permanent":
@@ -224,7 +225,7 @@ func bansCommand(gate *hwid.Gate) command.Command {
 					return err
 				}
 				if len(bans) == 0 {
-					fmt.Fprintln(out, "no bans")
+					fmt.Fprintln(out, "Банов нет.")
 					return nil
 				}
 				for _, ban := range bans {
@@ -238,7 +239,7 @@ func bansCommand(gate *hwid.Gate) command.Command {
 				if err := gate.Unban(ctx, strings.ToUpper(args[1])); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "lifted %s\n", strings.ToUpper(args[1]))
+				fmt.Fprintf(out, "Бан %s снят\n", strings.ToUpper(args[1]))
 				return nil
 			default:
 				return showBan(ctx, gate, strings.ToUpper(args[0]), out)
@@ -253,20 +254,20 @@ func showBan(ctx context.Context, gate *hwid.Gate, reference string, out io.Writ
 		return err
 	}
 	if ban == nil {
-		return fmt.Errorf("no ban with reference %s", reference)
+		return fmt.Errorf("бана с кодом %s нет", reference)
 	}
-	fmt.Fprintf(out, "reference: %s\n", ban.Reference)
-	fmt.Fprintf(out, "scope:     %s\n", hwid.ScopeWord(ban.Scope))
-	fmt.Fprintf(out, "target:    %s\n", ban.Target)
-	fmt.Fprintf(out, "reason:    %s\n", ban.Reason)
-	fmt.Fprintf(out, "by:        %s\n", ban.By)
-	fmt.Fprintf(out, "created:   %s\n", ban.CreatedAt.Format(time.RFC3339))
+	fmt.Fprintf(out, "код:       %s\n", ban.Reference)
+	fmt.Fprintf(out, "область:   %s\n", hwid.ScopeWord(ban.Scope))
+	fmt.Fprintf(out, "кого:      %s\n", ban.Target)
+	fmt.Fprintf(out, "причина:   %s\n", ban.Reason)
+	fmt.Fprintf(out, "выдал:     %s\n", ban.By)
+	fmt.Fprintf(out, "выдан:     %s\n", ban.CreatedAt.Format(time.RFC3339))
 	if ban.ExpiresAt.IsZero() {
-		fmt.Fprintln(out, "expires:   never")
+		fmt.Fprintln(out, "истекает:  никогда")
 	} else {
-		fmt.Fprintf(out, "expires:   %s\n", ban.ExpiresAt.Format(time.RFC3339))
+		fmt.Fprintf(out, "истекает:  %s\n", ban.ExpiresAt.Format(time.RFC3339))
 	}
-	fmt.Fprintf(out, "active:    %t\n", ban.Active(time.Now()))
+	fmt.Fprintf(out, "действует: %s\n", yesNo(ban.Active(time.Now())))
 	return nil
 }
 
@@ -276,19 +277,19 @@ func hwidCommand(gate *hwid.Gate) command.Command {
 		Synopsis: "как настроено распознавание компьютеров",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			if !gate.Enabled() {
-				fmt.Fprintln(out, "mode: off")
+				fmt.Fprintln(out, "распознавание компьютеров выключено")
 				return nil
 			}
 			cfg := gate.Config()
-			fmt.Fprintf(out, "mode:            %s\n", cfg.Mode)
-			fmt.Fprintf(out, "store:           %s\n", cfg.Store.Backend)
-			fmt.Fprintf(out, "match:           score >= %d and >= %d kinds; cluster at %d\n", cfg.MinScore, cfg.MinKinds, cfg.ClusterScore)
-			fmt.Fprintf(out, "fan-out demote:  digests on more than %d machines\n", cfg.FanOutLimit)
-			fmt.Fprintf(out, "virtual machine: %s\n", cfg.VMPolicy)
-			fmt.Fprintf(out, "hardware ban:    expires after %s\n", cfg.HardwareBanTTL.Duration())
-			fmt.Fprintf(out, "require report:  %t\n", cfg.RequireReport)
-			fmt.Fprintf(out, "require launcher for in-game login: %t\n", cfg.RequireLauncher)
-			fmt.Fprintf(out, "require hardware-backed key:        %t\n", cfg.RequireHardwareKey)
+			fmt.Fprintf(out, "режим:            %s\n", modeWord(cfg.Mode))
+			fmt.Fprintf(out, "хранилище:        %s\n", cfg.Store.Backend)
+			fmt.Fprintf(out, "совпадение:       вес от %d и не меньше %d признаков; кластер от %d\n", cfg.MinScore, cfg.MinKinds, cfg.ClusterScore)
+			fmt.Fprintf(out, "обесценивание:    признак встречается больше чем на %d компьютерах\n", cfg.FanOutLimit)
+			fmt.Fprintf(out, "виртуальные машины: %s\n", vmWord(cfg.VMPolicy))
+			fmt.Fprintf(out, "бан по железу:    истекает через %s\n", humanize.Duration(cfg.HardwareBanTTL.Duration()))
+			fmt.Fprintf(out, "требовать отчёт:  %s\n", yesNo(cfg.RequireReport))
+			fmt.Fprintf(out, "вход в игру только через лаунчер: %s\n", yesNo(cfg.RequireLauncher))
+			fmt.Fprintf(out, "требовать аппаратный ключ:        %s\n", yesNo(cfg.RequireHardwareKey))
 			return nil
 		},
 	}
@@ -306,4 +307,64 @@ func short(value string) string {
 		return value[:36]
 	}
 	return value
+}
+
+func flagWords(flags []string) string {
+	words := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		words = append(words, flagWord(flag))
+	}
+	return strings.Join(words, ", ")
+}
+
+func flagWord(flag string) string {
+	switch flag {
+	case "COLLECTOR_FLAG_VIRTUAL_MACHINE":
+		return "виртуальная машина"
+	case "COLLECTOR_FLAG_ELEVATED":
+		return "запуск с правами администратора"
+	case "COLLECTOR_FLAG_PLATFORM_KEY_FALLBACK":
+		return "ключ хранится без TPM"
+	case "COLLECTOR_FLAG_SMBIOS_UNREADABLE":
+		return "не читается SMBIOS"
+	case "COLLECTOR_FLAG_CONTAINER":
+		return "запуск в контейнере"
+	case "COLLECTOR_FLAG_WEAK":
+		return "мало признаков — узнать машину трудно"
+	default:
+		return flag
+	}
+}
+
+func modeWord(mode hwid.Mode) string {
+	switch mode {
+	case "enforce":
+		return "enforce — машины узнаются, баны применяются"
+	case "observe":
+		return "observe — машины узнаются, но баны не применяются"
+	case "off":
+		return "off — распознавание выключено"
+	default:
+		return string(mode)
+	}
+}
+
+func vmWord(policy hwid.VMPolicy) string {
+	switch policy {
+	case "flag":
+		return "flag — отмечать, но пускать"
+	case "block":
+		return "block — не пускать"
+	case "allow":
+		return "allow — считать обычной машиной"
+	default:
+		return string(policy)
+	}
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "да"
+	}
+	return "нет"
 }

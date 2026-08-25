@@ -47,5 +47,9 @@ func Duration(d time.Duration) string {
 	if d < time.Hour {
 		return fmt.Sprintf("%d мин %02d с", int(d.Minutes()), int(d.Seconds())%60)
 	}
-	return fmt.Sprintf("%d ч %02d мин", int(d.Hours()), int(d.Minutes())%60)
+	if d < 48*time.Hour {
+		return fmt.Sprintf("%d ч %02d мин", int(d.Hours()), int(d.Minutes())%60)
+	}
+	days := int(d.Hours()) / 24
+	return Count(days, "день", "дня", "дней")
 }

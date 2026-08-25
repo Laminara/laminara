@@ -24,34 +24,34 @@ func signingCommand(ring *signing.Keyring) command.Command {
 			switch args[0] {
 			case "keys":
 				trusted := ring.TrustedHex()
-				fmt.Fprintf(out, "active:  %s\n", ring.ActiveHex())
+				fmt.Fprintf(out, "рабочий:   %s\n", ring.ActiveHex())
 				for _, key := range trusted[1:] {
-					fmt.Fprintf(out, "trusted: %s\n", key)
+					fmt.Fprintf(out, "доверенный: %s\n", key)
 				}
 				if len(trusted) == 1 {
-					fmt.Fprintln(out, "\nOnly one key is trusted. Launchers built now can never move to another")
-					fmt.Fprintln(out, "key: run \"signing new <path>\" before you ever need to rotate.")
+					fmt.Fprintln(out, "\nДоверенный ключ только один. Лаунчеры, собранные сейчас, никогда не примут другой")
+					fmt.Fprintln(out, "ключ — заведите запасной заранее: signing new <путь>")
 				}
 				return nil
 			case "new":
 				if len(args) < 2 {
-					return errors.New("usage: signing new <path>")
+					return errors.New("как пользоваться: signing new <путь>")
 				}
 				key, err := signing.Generate(args[1])
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "wrote %s\npublic: %s\n\n", args[1], signing.PublicKeyHex(key))
-				fmt.Fprintln(out, "Rotate in this order, or launchers in the field will stop trusting you:")
-				fmt.Fprintf(out, "  1. add %q to build.trustedSigningKeys and restart\n", args[1])
-				fmt.Fprintln(out, "  2. laminara-server client-config ... > laminara.client.json, rebuild the launcher")
-				fmt.Fprintln(out, "  3. launcher publish <version>  (still signed by the current key, so everyone accepts it)")
-				fmt.Fprintln(out, "  4. wait until players are on that release")
-				fmt.Fprintln(out, "  5. make it build.signingKeyPath, move the old key to trustedSigningKeys, restart")
-				fmt.Fprintln(out, "  6. much later, drop the old key and rebuild once more")
+				fmt.Fprintf(out, "Ключ записан: %s\nоткрытая часть: %s\n\n", args[1], signing.PublicKeyHex(key))
+				fmt.Fprintln(out, "Меняйте ключ строго в этом порядке, иначе лаунчеры у игроков перестанут вам верить:")
+				fmt.Fprintf(out, "  1. добавьте %q в build.trustedSigningKeys и перезапустите проект\n", args[1])
+				fmt.Fprintln(out, "  2. соберите новую конфигурацию: laminara-server client-config … > laminara.client.json, пересоберите лаунчер")
+				fmt.Fprintln(out, "  3. launcher publish <версия> — она подписана ещё нынешним ключом, её примут все")
+				fmt.Fprintln(out, "  4. дождитесь, пока игроки обновятся на эту версию")
+				fmt.Fprintln(out, "  5. сделайте новый ключ рабочим (build.signingKeyPath), старый перенесите в trustedSigningKeys, перезапустите")
+				fmt.Fprintln(out, "  6. много позже уберите старый ключ и пересоберите лаунчер ещё раз")
 				return nil
 			default:
-				return fmt.Errorf("unknown signing subcommand %q", args[0])
+				return fmt.Errorf("не знаю подкоманду signing %q", args[0])
 			}
 		},
 	}
