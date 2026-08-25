@@ -12,6 +12,7 @@ import (
 	"github.com/muesli/termenv"
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
+	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 )
 
 func TestDeleteConfirm(t *testing.T) {
@@ -20,7 +21,7 @@ func TestDeleteConfirm(t *testing.T) {
 	updated, _ := base.Update(tea.WindowSizeMsg{Width: 96, Height: 22})
 	m := updated.(Model)
 
-	m.confirmDelete = "Survival"
+	m.confirm = deleteConfirm("Survival", m.icons)
 	if !strings.Contains(m.View(), "удалить сборку") {
 		t.Fatal("confirm prompt must render when a delete is pending")
 	}
@@ -29,14 +30,14 @@ func TestDeleteConfirm(t *testing.T) {
 
 	cancel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m = cancel.(Model)
-	if m.confirmDelete != "" {
+	if !m.confirm.empty() {
 		t.Fatal("any non-yes key must cancel the delete")
 	}
 
-	m.confirmDelete = "Survival"
+	m.confirm = deleteConfirm("Survival", m.icons)
 	confirmed, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	m = confirmed.(Model)
-	if m.confirmDelete != "" {
+	if !m.confirm.empty() {
 		t.Fatal("y must clear the pending delete")
 	}
 	if cmd == nil {
@@ -149,6 +150,84 @@ func TestComplete(t *testing.T) {
 		got, ok := complete(c.typed, commands)
 		if ok != c.wantOk || (ok && got != c.want) {
 			t.Fatalf("complete(%q) = %q,%v; want %q,%v", c.typed, got, ok, c.want, c.wantOk)
+		}
+	}
+}
+
+func TestPlayersScreen(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	base := Model{icons: unicodeIcons(), styles: newStyles(), logCh: make(chan string, 1), input: textinput.New()}
+	updated, _ := base.Update(tea.WindowSizeMsg{Width: 96, Height: 26})
+	m := updated.(Model)
+	entered, _ := m.enterPlayers()
+	m = entered.(Model)
+	m.fillPlayers(playersMsg{list: []*adminv1.BuildPlayers{
+		{Build: "Creative"},
+		{Build: "Modded", Address: "play.example.com:25565", Reachable: true, Online: 3, Max: 60, Names: []string{"neo", "trinity", "morpheus"}},
+		{Build: "Skyblock", Address: "sky.example.com:25565", Error: "connection refused"},
+	}})
+	view := m.View()
+	if !strings.Contains(view, "trinity") || !strings.Contains(view, "сервер не отвечает") {
+		t.Fatal("players screen must list names and unreachable servers")
+	}
+	fmt.Println("\n========== КТО В ИГРЕ ==========")
+	fmt.Println(view)
+
+	down, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = down.(Model)
+	banned, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = banned.(Model)
+	if m.confirm.command != "ban trinity" {
+		t.Fatalf("Enter must offer to ban the selected player, got %q", m.confirm.command)
+	}
+}
+
+func TestBuildCard(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	base := Model{icons: unicodeIcons(), styles: newStyles(), logCh: make(chan string, 1), input: textinput.New()}
+	updated, _ := base.Update(tea.WindowSizeMsg{Width: 96, Height: 26})
+	m := updated.(Model)
+	m.state = stateCard
+	m.card = cardState{
+		menu: newMenu(""),
+		build: &adminv1.BuildInfo{
+			Name:                 "Modded",
+			Status:               "published",
+			MinecraftVersion:     "1.21.1",
+			JavaMajor:            21,
+			Loader:               "fabric",
+			SizeBytes:            1019 << 20,
+			Files:                4083,
+			ServerAddress:        "play.example.com:25565",
+			HasFeatures:          true,
+			Published:            []corev1.Platform{corev1.Platform_PLATFORM_WINDOWS_X64, corev1.Platform_PLATFORM_LINUX},
+			PublishedAtUnixNanos: time.Now().Add(-30 * time.Hour).UnixNano(),
+		},
+		players: &adminv1.BuildPlayers{Build: "Modded", Address: "play.example.com:25565", Reachable: true, Online: 3, Max: 60},
+	}
+	m.card.menu.resize(m.width, m.contentHeight()-4)
+	m.fillCard()
+	view := m.View()
+	for _, want := range []string{"Modded", "1.21.1", "fabric", "windows-x64, linux", "3 игрока из 60"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("card must show %q", want)
+		}
+	}
+	fmt.Println("\n========== КАРТОЧКА СБОРКИ ==========")
+	fmt.Println(view)
+}
+
+func TestBarKeepsRightSide(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	left := []string{"i собрать", "b сборки", "l игроки", "u обновить", "p опубликовать", "d удалить"}
+	right := []string{"/ команда", "? справка", "q выход"}
+	for _, width := range []int{40, 60, 80, 114, 200} {
+		bar := fitBar(left, right, width)
+		if !strings.Contains(bar, "q выход") {
+			t.Fatalf("width %d dropped the right side: %q", width, bar)
+		}
+		if lipgloss.Width(bar) > width && width >= lipgloss.Width(strings.Join(right, "   ")) {
+			t.Fatalf("width %d overflowed: %d", width, lipgloss.Width(bar))
 		}
 	}
 }

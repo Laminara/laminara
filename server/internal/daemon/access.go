@@ -24,7 +24,7 @@ func accessCommand(controller *access.Controller, builds func() ([]string, error
 				return printRules(controller, builds, out)
 			case "check":
 				if len(args) < 3 {
-					return errors.New("usage: access check <build> <username> [uuid]")
+					return errors.New("напишите сборку и игрока: access check <сборка> <игрок> [uuid]")
 				}
 				uuid := ""
 				if len(args) > 3 {
@@ -32,9 +32,9 @@ func accessCommand(controller *access.Controller, builds func() ([]string, error
 				}
 				subject := access.Subject{Username: args[2], UUID: uuid, Subject: args[2]}
 				decision := controller.Decide(ctx, args[1], subject)
-				verdict := "denied"
+				verdict := "не пускаем"
 				if decision.Allowed {
-					verdict = "allowed"
+					verdict = "пускаем"
 				}
 				fmt.Fprintf(out, "%s: %s\n", args[1], verdict)
 				if !decision.Allowed {
@@ -76,17 +76,22 @@ func printRules(controller *access.Controller, builds func() ([]string, error), 
 	if err != nil {
 		return err
 	}
-	anonymous := access.Subject{}
 	fmt.Fprintln(out, "\nсборки:")
 	for _, name := range names {
-		decision := controller.Decide(context.Background(), name, anonymous)
-		state := "открыта всем"
-		if !decision.Allowed {
-			state = "по списку, " + visibilityWord(decision.Hidden)
-		}
-		fmt.Fprintf(out, "  %-28s %s\n", name, state)
+		fmt.Fprintf(out, "  %-28s %s\n", name, accessState(controller, name))
 	}
 	return nil
+}
+
+func accessState(controller *access.Controller, build string) string {
+	if controller == nil {
+		return ""
+	}
+	decision := controller.Decide(context.Background(), build, access.Subject{})
+	if decision.Allowed {
+		return "открыта всем"
+	}
+	return "по списку, " + visibilityWord(decision.Hidden)
 }
 
 func guardWord(guarded bool) string {

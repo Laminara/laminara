@@ -15,6 +15,7 @@ import (
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
+	"github.com/laminara/laminara/server/internal/buildview"
 	"github.com/laminara/laminara/server/internal/humanize"
 )
 
@@ -24,8 +25,29 @@ const (
 	stateMain uiState = iota
 	stateWizard
 	stateBuildPick
+	statePlayers
+	stateCard
+	stateSettings
 	stateHelp
 )
+
+type confirmPrompt struct {
+	question string
+	verb     string
+	command  string
+	icon     string
+}
+
+func (c confirmPrompt) empty() bool { return c.command == "" }
+
+func deleteConfirm(name string, set iconSet) confirmPrompt {
+	return confirmPrompt{
+		question: "удалить сборку «" + name + "»?",
+		verb:     "удалять",
+		command:  "delete " + name,
+		icon:     set.remove,
+	}
+}
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -53,6 +75,22 @@ type statusMsg struct {
 	err       error
 }
 type buildsMsg struct{ builds []*adminv1.BuildInfo }
+type playersMsg struct {
+	list []*adminv1.BuildPlayers
+	err  error
+}
+type playersTickMsg struct{}
+type settingsMsg struct {
+	page *adminv1.ListSettingsResponse
+	err  error
+}
+type settingsSavedMsg struct {
+	path      string
+	err       error
+	added     bool
+	removed   bool
+	restarted bool
+}
 type execDoneMsg struct {
 	line     string
 	exitCode int32
@@ -77,12 +115,18 @@ type Model struct {
 	picker       picker
 	pickerAction string
 
-	input         textinput.Model
-	commandMode   bool
-	confirmDelete string
-	commands      []string
-	history       []string
-	historyAt     int
+	input       textinput.Model
+	commandMode bool
+	confirm     confirmPrompt
+	commands    []string
+	history     []string
+	historyAt   int
+
+	help     menu
+	builds   []*adminv1.BuildInfo
+	players  playersState
+	card     cardState
+	settings settingsState
 
 	status    statusMsg
 	running   bool
@@ -115,7 +159,6 @@ func Run(ctx context.Context, client adminv1connect.AdminServiceClient, nerd boo
 		input:  input,
 		bar:    bprogress.New(bprogress.WithSolidFill("#ecc275"), bprogress.WithoutPercentage(), bprogress.WithFillCharacters('█', '░')),
 	}
-	model.greet()
 	_, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	return err
 }
@@ -124,17 +167,14 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(waitForLog(m.logCh), waitForProgress(m.progCh), fetchStatus(m.ctx, m.client), statusTick(), fetchCommands(m.ctx, m.client))
 }
 
-func (m *Model) greet() {
-	m.appendLog(m.styles.selected.Render("Консоль Laminara"))
-	m.appendLog(m.styles.dim.Render("Проект работает сам по себе — консоль лишь показывает его и передаёт команды."))
-	m.appendLog(m.styles.dim.Render("Соберите клиент клавишей ") + m.styles.key.Render("i") + m.styles.dim.Render(", посмотрите сборки — ") + m.styles.key.Render("b") + m.styles.dim.Render(", справка — ") + m.styles.key.Render("?"))
-	m.appendLog("")
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.settings.menu.resize(msg.Width, m.contentHeight()-4)
+		m.players.menu.resize(msg.Width, m.contentHeight()-4)
+		m.card.menu.resize(msg.Width, m.contentHeight()-4)
+		m.help.resize(msg.Width, m.contentHeight()-4)
 		m.viewport = viewport.New(msg.Width, m.contentHeight())
 		m.viewport.SetContent(strings.Join(m.logs, "\n"))
 		m.viewport.GotoBottom()
@@ -176,6 +216,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case buildsMsg:
 		return m.onBuilds(msg)
+	case playersMsg:
+		m.fillPlayers(msg)
+		if m.card.build != nil {
+			m.card.players = pickPlayers(msg.list, m.card.build.Name)
+			m.fillCard()
+		}
+		return m, nil
+	case playersTickMsg:
+		if m.state != statePlayers {
+			return m, nil
+		}
+		return m, tea.Batch(fetchPlayers(m.ctx, m.client), playersTick())
+	case settingsMsg:
+		if msg.err != nil {
+			m.settings.menu.problem = errorText(msg.err)
+			return m, nil
+		}
+		m.fillSettings(msg.page)
+		return m, nil
+	case settingsSavedMsg:
+		return m.onSettingsSaved(msg)
 	}
 
 	switch m.state {
@@ -183,6 +244,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateWizard(msg)
 	case stateBuildPick:
 		return m.updateBuildPick(msg)
+	case statePlayers:
+		return m.updatePlayers(msg)
+	case stateCard:
+		return m.updateCard(msg)
+	case stateSettings:
+		return m.updateSettings(msg)
 	case stateHelp:
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
@@ -219,15 +286,16 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	}
-	if m.confirmDelete != "" {
+	if !m.confirm.empty() {
 		switch key.String() {
 		case "y", "Y", "д", "Д":
-			name := m.confirmDelete
-			m.confirmDelete = ""
-			return m.startCommand("delete " + name)
+			line := m.confirm.command
+			m.confirm = confirmPrompt{}
+			return m.startCommand(line)
 		default:
-			m.confirmDelete = ""
-			m.appendLog(m.styles.dim.Render("удаление отменено"))
+			verb := m.confirm.verb
+			m.confirm = confirmPrompt{}
+			m.appendLog(m.styles.dim.Render("не стал " + verb))
 			return m, nil
 		}
 	}
@@ -281,6 +349,9 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "?":
 		m.state = stateHelp
+		m.help = newMenu("Клавиши консоли")
+		m.help.resize(m.width, m.contentHeight()-4)
+		m.fillHelp()
 		return m, nil
 	case "/", ":":
 		m.commandMode = true
@@ -291,8 +362,12 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateWizard
 		return m, cmd
 	case "b":
-		m.pickerAction = "list"
+		m.pickerAction = "card"
 		return m, fetchBuilds(m.ctx, m.client)
+	case "l":
+		return m.enterPlayers()
+	case "s":
+		return m.enterSettings()
 	case "p":
 		m.pickerAction = "publish"
 		return m, fetchBuilds(m.ctx, m.client)
@@ -335,10 +410,16 @@ func (m Model) updateBuildPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	name := selected.value
 	m.state = stateMain
 	switch m.pickerAction {
+	case "card":
+		m.card = cardState{menu: newMenu(""), build: findBuild(m.builds, name), players: pickPlayers(m.players.list, name)}
+		m.card.menu.resize(m.width, m.contentHeight()-4)
+		m.fillCard()
+		m.state = stateCard
+		return m, fetchPlayers(m.ctx, m.client)
 	case "publish":
 		return m.startCommand("publish " + name)
 	case "delete":
-		m.confirmDelete = name
+		m.confirm = deleteConfirm(name, m.icons)
 		return m, nil
 	case "update":
 		wiz, cmd := newWizard(m.ctx, m.client, m.icons, m.styles, name)
@@ -350,22 +431,7 @@ func (m Model) updateBuildPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) onBuilds(msg buildsMsg) (tea.Model, tea.Cmd) {
-	if m.pickerAction == "list" {
-		if len(msg.builds) == 0 {
-			m.appendLog(m.styles.dim.Render("Сборок пока нет — соберите первую клавишей ") + m.styles.key.Render("i"))
-			return m, nil
-		}
-		width := 0
-		for _, build := range msg.builds {
-			width = max(width, lipgloss.Width(build.Name))
-		}
-		m.appendLog(m.styles.dim.Render("Сборки проекта:"))
-		for _, build := range msg.builds {
-			name := m.styles.keyLabel.Render(build.Name + strings.Repeat(" ", width-lipgloss.Width(build.Name)))
-			m.appendLog("  " + m.styles.faint.Render(m.icons.builds) + " " + name + "   " + statusLabel(build.Status, m.styles))
-		}
-		return m, nil
-	}
+	m.builds = msg.builds
 	if len(msg.builds) == 0 {
 		m.appendLog(m.styles.dim.Render("Сборок пока нет — соберите первую клавишей ") + m.styles.key.Render("i"))
 		m.state = stateMain
@@ -373,10 +439,12 @@ func (m Model) onBuilds(msg buildsMsg) (tea.Model, tea.Cmd) {
 	}
 	items := make([]pickItem, 0, len(msg.builds))
 	for _, build := range msg.builds {
-		items = append(items, pickItem{label: build.Name, value: build.Name, hint: statusHint(build.Status)})
+		items = append(items, pickItem{label: build.Name, value: build.Name, hint: buildview.StatusWord(build.Status)})
 	}
 	title := "Какую сборку опубликовать?"
 	switch m.pickerAction {
+	case "card":
+		title = "Какая сборка интересует?"
 	case "update":
 		title = "Какую сборку пересобрать?"
 	case "delete":
@@ -419,6 +487,12 @@ func (m Model) View() string {
 	case stateBuildPick:
 		box := m.styles.wizardBox.Render(m.picker.View())
 		sections = append(sections, lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, box))
+	case statePlayers:
+		sections = append(sections, m.playersView())
+	case stateSettings:
+		sections = append(sections, m.settingsView())
+	case stateCard:
+		sections = append(sections, m.cardView())
 	case stateHelp:
 		sections = append(sections, m.helpView())
 	default:
@@ -432,7 +506,7 @@ func (m Model) View() string {
 	if m.running {
 		sections = append(sections, m.progressView())
 	}
-	if m.state == stateMain || m.state == stateHelp {
+	if m.state == stateMain || m.state == stateHelp || !m.confirm.empty() {
 		sections = append(sections, m.styles.rule.Render(strings.Repeat("─", max(0, m.width))), m.inputView())
 	}
 	sections = append(sections, m.barView())
@@ -440,9 +514,9 @@ func (m Model) View() string {
 }
 
 func (m Model) inputView() string {
-	if m.confirmDelete != "" {
-		prompt := m.styles.selected.Render(m.icons.remove + " удалить сборку «" + m.confirmDelete + "»?  ")
-		choice := m.styles.key.Render("y") + " " + m.styles.keyLabel.Render("удалить") + "    " + m.styles.dim.Render("любая другая — отмена")
+	if !m.confirm.empty() {
+		prompt := m.styles.selected.Render(m.confirm.icon + " " + m.confirm.question + "  ")
+		choice := m.styles.key.Render("y") + " " + m.styles.keyLabel.Render(m.confirm.verb) + "    " + m.styles.dim.Render("любая другая — отмена")
 		return m.styles.bar.Render(prompt + choice)
 	}
 	if m.commandMode {
@@ -483,39 +557,41 @@ func (m Model) summaryView() string {
 	return m.styles.summary.Render(strings.Join(parts, m.styles.faint.Render("   ")))
 }
 
-func (m Model) helpView() string {
-	line := func(key, what string) string {
-		return m.styles.key.Render(key) + "  " + m.styles.keyLabel.Render(what)
+var helpKeys = [][2]string{
+	{"i", "собрать клиент — мастер спросит версию и загрузчик"},
+	{"b", "карточка сборки — всё о ней на одном экране"},
+	{"l", "кто сейчас в игре — список игроков по сборкам"},
+	{"s", "настройки проекта — правятся прямо здесь"},
+	{"u", "пересобрать сборку под новую версию"},
+	{"p", "опубликовать сборку — лаунчеры увидят обновление"},
+	{"d", "удалить сборку из проекта"},
+	{"/", "ввести команду вручную — Tab дополняет, ↑↓ повторяют прошлые"},
+	{"↑↓", "прокрутить ленту логов"},
+	{"?", "эта справка"},
+	{"q", "выйти из консоли — проект продолжит работать"},
+}
+
+func (m *Model) fillHelp() {
+	items := make([]menuItem, 0, len(helpKeys)+2)
+	for _, pair := range helpKeys {
+		items = append(items, menuItem{id: "key:" + pair[0], label: pair[0], value: pair[1], static: true})
 	}
-	body := strings.Join([]string{
-		m.styles.selected.Render("Клавиши"),
-		line("i", "собрать клиент — мастер спросит версию и загрузчик"),
-		line("b", "показать сборки и их состояние"),
-		line("u", "пересобрать сборку под новую версию"),
-		line("p", "опубликовать сборку — лаунчеры увидят обновление"),
-		line("d", "удалить сборку из проекта"),
-		line("/", "ввести команду вручную — Tab дополняет, ↑↓ повторяют прошлые"),
-		line("↑↓", "прокрутить ленту логов"),
-		line("?", "эта справка"),
-		line("q", "выйти из консоли — проект продолжит работать"),
-		"",
-		m.styles.selected.Render("Команды"),
-		m.styles.dim.Render("help — весь список; status, builds, versions, loaders,"),
-		m.styles.dim.Render("install, publish, delete, auth, access, hwid, machines, bans"),
-		"",
-		m.styles.faint.Render("Esc или ? — закрыть"),
-	}, "\n")
-	return lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, m.styles.wizardBox.Render(body))
+	items = append(items,
+		menuItem{id: "gap", static: true},
+		menuItem{id: "commands", label: "Команды", value: "help — весь список; status, builds, build, players, settings, restart,", static: true, tone: toneMuted},
+		menuItem{id: "commands2", label: "", value: "versions, loaders, install, publish, delete, auth, access, hwid, bans", static: true, tone: toneMuted},
+	)
+	m.help.title = "Клавиши консоли"
+	m.help.subtitle = "Esc или ? — закрыть"
+	m.help.setItems(items)
+}
+
+func (m Model) helpView() string {
+	return m.centered(m.help.View(m.styles, m.icons))
 }
 
 func (m Model) emptyHint() string {
-	lines := []string{
-		m.styles.dim.Render("Здесь пойдут события проекта."),
-		"",
-		m.styles.keyLabel.Render("Начните с ") + m.styles.key.Render("i") + m.styles.keyLabel.Render(" — консоль соберёт клиент и проведёт по шагам,"),
-		m.styles.keyLabel.Render("или нажмите ") + m.styles.key.Render("?") + m.styles.keyLabel.Render(" — короткая справка."),
-	}
-	return lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, strings.Join(lines, "\n"))
+	return lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, m.styles.faint.Render("Здесь пойдут события проекта."))
 }
 
 func (m Model) progressView() string {
@@ -551,6 +627,17 @@ func (m Model) barView() string {
 			item("Enter", "принять"),
 			item("Esc", "назад"),
 		}, "   "))
+	case stateSettings:
+		return m.settingsBar()
+	case statePlayers:
+		return m.playersBar()
+	case stateCard:
+		return m.styles.bar.Render(strings.Join([]string{
+			item("p", "опубликовать"),
+			item("u", "пересобрать"),
+			item("d", "удалить"),
+			item("Esc", "назад"),
+		}, "   "))
 	case stateHelp:
 		return m.styles.bar.Render(item("Esc", "закрыть справку"))
 	}
@@ -562,23 +649,50 @@ func (m Model) barView() string {
 			item("Esc", "отменить"),
 		}, "   "))
 	}
-	left := strings.Join([]string{
+	left := []string{
 		item("i", "собрать"),
 		item("b", "сборки"),
+		item("l", "игроки"),
+		item("s", "настройки"),
 		item("u", "обновить"),
 		item("p", "опубликовать"),
 		item("d", "удалить"),
-	}, "   ")
-	right := strings.Join([]string{
+	}
+	right := []string{
 		item("/", "команда"),
 		item("?", "справка"),
 		item("q", "выход"),
-	}, "   ")
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
-	if gap < 2 {
-		return m.styles.bar.Render(left)
 	}
-	return m.styles.bar.Render(left + strings.Repeat(" ", gap) + right)
+	return m.styles.bar.Render(fitBar(left, right, m.width-4))
+}
+
+func fitBar(left, right []string, width int) string {
+	const gutter = "   "
+	tail := strings.Join(right, gutter)
+	for len(left) > 0 {
+		head := strings.Join(left, gutter)
+		gap := width - lipgloss.Width(head) - lipgloss.Width(tail)
+		if gap >= 2 {
+			return head + strings.Repeat(" ", gap) + tail
+		}
+		left = left[:len(left)-1]
+	}
+	return tail
+}
+
+func (m Model) centered(body string) string {
+	return lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, m.styles.wizardBox.Render(body))
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	for _, prefix := range []string{"invalid_argument: ", "unknown: ", "internal: ", "unimplemented: "} {
+		text = strings.TrimPrefix(text, prefix)
+	}
+	return text
 }
 
 func fmtDur(d time.Duration) string {
@@ -620,13 +734,28 @@ func waitForProgress(ch chan progressMsg) tea.Cmd {
 }
 
 func streamLogs(ctx context.Context, client adminv1connect.AdminServiceClient, logCh chan string, st styles) {
-	stream, err := client.StreamLogs(ctx, connect.NewRequest(&adminv1.StreamLogsRequest{Backscroll: 200, Follow: true}))
-	if err != nil {
-		logCh <- "logs: " + err.Error()
-		return
-	}
-	for stream.Receive() {
-		logCh <- formatLog(stream.Msg().Line, st)
+	backscroll := uint32(200)
+	lost := false
+	for ctx.Err() == nil {
+		stream, err := client.StreamLogs(ctx, connect.NewRequest(&adminv1.StreamLogsRequest{Backscroll: backscroll, Follow: true}))
+		if err == nil {
+			if lost {
+				logCh <- st.good.Render("проект снова на связи")
+				lost = false
+			}
+			for stream.Receive() {
+				logCh <- formatLog(stream.Msg().Line, st)
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if !lost {
+			logCh <- st.faint.Render("связь с проектом прервалась — жду, пока он поднимется…")
+			lost = true
+		}
+		backscroll = 0
+		time.Sleep(time.Second)
 	}
 }
 
@@ -719,25 +848,15 @@ func commandResultLine(line string, code int32, took time.Duration, st styles) s
 	return st.bad.Render("✕ ") + st.keyLabel.Render(fmt.Sprintf("%s — код %d", line, code)) + spent
 }
 
-func statusHint(status string) string {
-	switch status {
-	case "published":
-		return "опубликована"
-	case "prepared":
-		return "не опубликована"
-	default:
-		return status
-	}
-}
-
 func statusLabel(status string, st styles) string {
+	word := buildview.StatusWord(status)
 	switch status {
 	case "published":
-		return st.good.Render("опубликована")
+		return st.good.Render(word)
 	case "prepared":
-		return st.warn.Render("собрана, ждёт публикации")
+		return st.warn.Render(word)
 	default:
-		return st.dim.Render(status)
+		return st.dim.Render(word)
 	}
 }
 

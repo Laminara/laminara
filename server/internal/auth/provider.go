@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 var (
@@ -22,6 +23,15 @@ var providerFactories = map[string]ProviderFactory{}
 
 func RegisterProvider(name string, factory ProviderFactory) {
 	providerFactories[name] = factory
+}
+
+func ProviderNames() []string {
+	names := make([]string, 0, len(providerFactories))
+	for name := range providerFactories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func BuildProvider(name string, config json.RawMessage) (Provider, error) {

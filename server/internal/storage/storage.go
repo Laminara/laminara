@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 )
 
@@ -36,6 +37,15 @@ var backendFactories = map[string]BackendFactory{}
 
 func RegisterBackend(name string, factory BackendFactory) {
 	backendFactories[name] = factory
+}
+
+func BackendNames() []string {
+	names := make([]string, 0, len(backendFactories))
+	for name := range backendFactories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func BuildBackend(name string, config json.RawMessage) (Backend, error) {

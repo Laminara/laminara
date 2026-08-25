@@ -12,10 +12,11 @@ func startCmd() *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "run the server in the foreground (use systemd or docker to daemonize)",
+		Short: "запустить сервер в переднем плане (в фон его уводят systemd или docker)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var opts daemon.Options
+			opts.ConfigPath = configPath
 			if configPath != "" {
 				cfg, err := config.Load(configPath)
 				if err != nil {
@@ -45,9 +46,14 @@ func startCmd() *cobra.Command {
 					}
 				}
 			}
-			return daemon.New(opts).Run(cmd.Context())
+			server := daemon.New(opts)
+			err := server.Run(cmd.Context())
+			if server.Restarting() {
+				return relaunch()
+			}
+			return err
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to a JSON config file")
+	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
 	return cmd
 }

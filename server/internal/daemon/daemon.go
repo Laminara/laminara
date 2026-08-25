@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
@@ -40,11 +42,16 @@ import (
 
 const (
 	shutdownTimeout = 10 * time.Second
+	restartTimeout  = 2 * time.Second
 	maxCommandLine  = 64 << 10
 )
 
 type Daemon struct {
 	startedAt     time.Time
+	settings      *settingsStore
+	quit          chan struct{}
+	quitOnce      sync.Once
+	restarting    atomic.Bool
 	level         *slog.LevelVar
 	bus           *logbus.Bus
 	registry      *command.Registry
@@ -69,6 +76,7 @@ type Options struct {
 	ModulesDir    string
 	ModulesConfig map[string][]byte
 	Events        *events.Bus
+	ConfigPath    string
 }
 
 func New(opts Options) *Daemon {
@@ -83,6 +91,7 @@ func New(opts Options) *Daemon {
 
 	d := &Daemon{
 		startedAt:     time.Now(),
+		quit:          make(chan struct{}),
 		level:         level,
 		bus:           bus,
 		registry:      registry,
@@ -92,6 +101,17 @@ func New(opts Options) *Daemon {
 	}
 	registry.Register(d.statusCommand())
 	registry.Register(d.versionCommand())
+	if opts.ConfigPath != "" {
+		d.settings = &settingsStore{
+			path:    opts.ConfigPath,
+			restart: d.RequestRestart,
+			changed: func(path string) {
+				log.Info("настройка изменена", "source", "settings", "что", path)
+			},
+		}
+		registry.Register(settingsCommand(d.settings))
+		registry.Register(restartCommand(d.settings))
+	}
 	if opts.Auth != nil {
 		registry.Register(authCommand(opts.Auth))
 	}
@@ -114,6 +134,10 @@ func New(opts Options) *Daemon {
 	}
 	if opts.Build != nil {
 		d.catalog = opts.Build
+		if opts.Access != nil {
+			controller := opts.Access
+			opts.Build.SetAccess(func(build string) string { return accessState(controller, build) })
+		}
 		for _, buildCommand := range opts.Build.Commands() {
 			registry.Register(buildCommand)
 		}
@@ -177,6 +201,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer control.ReleasePid()
 
 	service := admin.NewService(d.status, d.bus, d.registry, d.catalog)
+	if d.settings != nil {
+		service.SetSettings(d.settings)
+	}
 	mux := http.NewServeMux()
 	mux.Handle(adminv1connect.NewAdminServiceHandler(service))
 	server := &http.Server{Handler: mux}
@@ -200,22 +227,46 @@ func (d *Daemon) Run(ctx context.Context) error {
 	)
 	_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
 
-	select {
-	case <-ctx.Done():
-		d.log.Info("shutting down", "source", "daemon")
+	stop := func(reason string, grace time.Duration) error {
+		d.log.Info(reason, "source", "daemon")
 		_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
 		if publicServer != nil {
 			_ = publicServer.Shutdown(shutdownCtx)
+			_ = publicServer.Close()
 		}
-		return server.Shutdown(shutdownCtx)
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			_ = server.Close()
+		}
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return stop("shutting down", shutdownTimeout)
+	case <-d.quit:
+		if err := stop("перезапускаюсь с новыми настройками", restartTimeout); err != nil {
+			d.log.Info("закрыл открытые подключения", "source", "daemon")
+		}
+		return nil
 	case err := <-serveErr:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
+}
+
+func (d *Daemon) RequestRestart() error {
+	d.restarting.Store(true)
+	d.quitOnce.Do(func() { close(d.quit) })
+	return nil
+}
+
+func (d *Daemon) Restarting() bool {
+	return d.restarting.Load()
 }
 
 func (d *Daemon) readCommands(ctx context.Context) {
@@ -280,31 +331,31 @@ func authCommand(service *auth.Service) command.Command {
 		Synopsis: "проверить вход игроков (auth test <логин> <пароль> | auth validate <токен>)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if len(args) == 0 {
-				return errors.New("usage: auth test <username> <password> | auth validate <token>")
+				return errors.New("auth test <игрок> <пароль> | auth validate <токен>")
 			}
 			switch args[0] {
 			case "test":
 				if len(args) < 3 {
-					return errors.New("usage: auth test <username> <password>")
+					return errors.New("напишите игрока и пароль: auth test <игрок> <пароль>")
 				}
 				tokens, err := service.Login(ctx, args[1], args[2])
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "ok\naccess:  %s\nrefresh: %s\n", tokens.Access, tokens.Refresh)
+				fmt.Fprintf(out, "пароль подошёл\nдоступ:    %s\nобновление: %s\n", tokens.Access, tokens.Refresh)
 				return nil
 			case "validate":
 				if len(args) < 2 {
-					return errors.New("usage: auth validate <accessToken>")
+					return errors.New("напишите токен: auth validate <токен>")
 				}
 				identity, err := service.ValidateAccess(ctx, args[1])
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "username: %s\nuuid:     %s\n", identity.Username, identity.UUID)
+				fmt.Fprintf(out, "игрок: %s\nuuid:  %s\n", identity.Username, identity.UUID)
 				return nil
 			default:
-				return fmt.Errorf("unknown auth subcommand %q", args[0])
+				return fmt.Errorf("у auth нет действия «%s» — есть test и validate", args[0])
 			}
 		},
 	}
