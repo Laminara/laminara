@@ -24,6 +24,7 @@ type Config struct {
 	HWID      *hwid.Config      `json:"hwid"`
 	RateLimit *ratelimit.Config `json:"rateLimit"`
 	News      *news.Config      `json:"news"`
+	Update    *UpdateConfig     `json:"update"`
 }
 
 type BrandingConfig struct {
@@ -36,6 +37,38 @@ type BrandingConfig struct {
 	LogoPath        string `json:"logoPath"`
 	HeroMediaPath   string `json:"heroMediaPath"`
 	SiteURL         string `json:"siteUrl"`
+}
+
+type UpdateConfig struct {
+	Check    *bool    `json:"check"`
+	Install  bool     `json:"install"`
+	Repo     string   `json:"repo"`
+	Interval Duration `json:"interval"`
+}
+
+func (u *UpdateConfig) Checks() bool {
+	if u == nil || u.Check == nil {
+		return true
+	}
+	return *u.Check
+}
+
+func (u *UpdateConfig) Installs() bool {
+	return u != nil && u.Install
+}
+
+func (u *UpdateConfig) RepoOr(fallback string) string {
+	if u == nil || u.Repo == "" {
+		return fallback
+	}
+	return u.Repo
+}
+
+func (u *UpdateConfig) IntervalOr(fallback time.Duration) time.Duration {
+	if u == nil || u.Interval.Duration() <= 0 {
+		return fallback
+	}
+	return u.Interval.Duration()
 }
 
 type LauncherConfig struct {

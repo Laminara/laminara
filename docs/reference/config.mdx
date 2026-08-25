@@ -129,3 +129,12 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="limit" type="number">Сколько записей отдавать лаунчеру. По умолчанию `20`.</ParamField>
 
 Подробнее — [Новости](/launcher/news).
+
+## update
+
+<ParamField path="check" type="boolean">Смотреть релизы на GitHub раз в `interval` и писать в лог, когда выходит версия свежее. По умолчанию `true`.</ParamField>
+<ParamField path="install" type="boolean">Ставить новую версию самому и перезапускаться. По умолчанию `false`.</ParamField>
+<ParamField path="repo" type="string">Репозиторий релизов в виде «владелец/имя». По умолчанию `MrLeonardosMi/Laminara`.</ParamField>
+<ParamField path="interval" type="duration">Как часто смотреть релизы. По умолчанию `24h`.</ParamField>
+
+Подробнее — [Обновление сервера](/server/updates).

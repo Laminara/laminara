@@ -27,6 +27,7 @@ import (
 	"github.com/laminara/laminara/server/internal/buildsvc"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/control"
 	"github.com/laminara/laminara/server/internal/events"
 	"github.com/laminara/laminara/server/internal/humanize"
@@ -61,6 +62,7 @@ type Daemon struct {
 	publicHandler http.Handler
 	publicAddr    string
 	catalog       admin.Catalog
+	update        *config.UpdateConfig
 }
 
 type Options struct {
@@ -77,6 +79,7 @@ type Options struct {
 	ModulesConfig map[string][]byte
 	Events        *events.Bus
 	ConfigPath    string
+	Update        *config.UpdateConfig
 }
 
 func New(opts Options) *Daemon {
@@ -98,9 +101,11 @@ func New(opts Options) *Daemon {
 		log:           log,
 		publicHandler: opts.PublicHandler,
 		publicAddr:    opts.PublicAddr,
+		update:        opts.Update,
 	}
 	registry.Register(d.statusCommand())
 	registry.Register(d.versionCommand())
+	registry.Register(d.updateCommand())
 	if opts.ConfigPath != "" {
 		d.settings = &settingsStore{
 			path:    opts.ConfigPath,
@@ -218,6 +223,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	go d.readCommands(ctx)
+	go d.watchUpdates(ctx)
 
 	d.log.Info("laminara-server started",
 		"source", "daemon",

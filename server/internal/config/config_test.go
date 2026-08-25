@@ -37,3 +37,19 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("backend = %q", cfg.Auth.Sessions.Backend)
 	}
 }
+
+func TestShippedExampleLoads(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "..", "..", "deploy", "config.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Update.Checks() {
+		t.Fatal("example config must leave update checking on")
+	}
+	if cfg.Update.Installs() {
+		t.Fatal("example config must not install updates unattended")
+	}
+	if cfg.Update.IntervalOr(0) != 24*time.Hour {
+		t.Fatalf("interval = %s, want 24h", cfg.Update.IntervalOr(0))
+	}
+}

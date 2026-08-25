@@ -51,6 +51,8 @@ func Root() *cobra.Command {
 		hashCmd(),
 		clientConfigCmd(),
 		nginxConfigCmd(),
+		updateCmd(),
+		versionCmd(),
 	)
 	speakRussian(root)
 	return root

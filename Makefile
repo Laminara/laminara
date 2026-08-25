@@ -1,5 +1,8 @@
 .PHONY: generate lint tidy build test run clean
 
+VERSION := $(shell cat VERSION)
+LDFLAGS := -X github.com/laminara/laminara/server/internal/version.Current=$(VERSION)
+
 generate:
 	buf generate
 
@@ -12,7 +15,7 @@ tidy:
 
 build: generate
 	go build ./...
-	go build -trimpath -o bin/laminara-server ./server/cmd/laminara-server
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/laminara-server ./server/cmd/laminara-server
 
 test: generate
 	go test ./...

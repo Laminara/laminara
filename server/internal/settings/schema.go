@@ -7,6 +7,7 @@ import (
 	_ "github.com/laminara/laminara/server/internal/auth/providers"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
+	"github.com/laminara/laminara/server/internal/selfupdate"
 	"github.com/laminara/laminara/server/internal/skin"
 	"github.com/laminara/laminara/server/internal/storage"
 )
@@ -297,6 +298,17 @@ var schema = []Section{
 			{Key: "logoPath", Label: "Логотип", Kind: KindText, Hint: "PNG или SVG рядом с сервером — уедет в лаунчер картинкой."},
 			{Key: "heroMediaPath", Label: "Фон окна", Kind: KindText, Hint: "Картинка или видео. Видео тяжелее и заметно греет слабые машины."},
 			{Key: "siteUrl", Label: "Сайт проекта", Kind: KindText},
+		},
+	},
+	{
+		Key:   "update",
+		Title: "Обновление сервера",
+		Hint:  "Новые версии сервер берёт из релизов на GitHub.",
+		Fields: []Field{
+			{Key: "check", Label: "Проверять обновления", Kind: KindBool, Default: "true", Hint: "Раз в сутки сервер смотрит релизы и пишет в лог, если вышла версия свежее."},
+			{Key: "install", Label: "Ставить самому", Kind: KindBool, Default: "false", Hint: "Сервер скачает новую версию и перезапустится сам. Игроков при этом выкинет из игры."},
+			{Key: "repo", Label: "Откуда брать", Kind: KindText, Default: selfupdate.DefaultRepo, Hint: "Репозиторий на GitHub в виде «владелец/имя»."},
+			{Key: "interval", Label: "Как часто смотреть", Kind: KindDuration, Default: "24h"},
 		},
 	},
 	{

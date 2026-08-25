@@ -1,0 +1,125 @@
+name: Релиз
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Версия
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      publish: ${{ steps.read.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Прочитать версию
+        id: read
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ -z "$version" ]; then
+            echo "файл VERSION пуст" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "Версия $version уже выпущена, релиз пропущен"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Готовим релиз v$version"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Сборка
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - run: make generate
+
+      - name: Собрать под linux
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p release
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-X github.com/laminara/laminara/server/internal/version.Current=$VERSION" \
+              -o "release/laminara-server-linux-$arch" ./server/cmd/laminara-server
+          done
+          cd release && sha256sum laminara-server-* > checksums.txt && cat checksums.txt
+
+      - name: Проверить, что бинарь называет свою версию
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          got=$(./release/laminara-server-linux-amd64 version)
+          echo "версия в бинаре: $got"
+          [ "$got" = "$VERSION" ] || exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    name: Публикация
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+
+      - name: Собрать список изменений
+        id: changelog
+        run: |
+          previous=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            range="$previous..HEAD"
+          else
+            range="HEAD"
+          fi
+          {
+            echo 'body<<CHANGELOG_EOF'
+            git log --no-merges --pretty='- %s' "$range"
+            echo CHANGELOG_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: Laminara v${{ needs.version.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: release/*
+          draft: false
+          prerelease: false

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${LAMINARA_REPO:-laminara/laminara}"
+REPO="${LAMINARA_REPO:-MrLeonardosMi/Laminara}"
 BINARY_OVERRIDE="${LAMINARA_BINARY:-}"
 
 bold=$'\e[1m'; dim=$'\e[2m'; accent=$'\e[38;5;99m'; ok=$'\e[38;5;42m'; warn=$'\e[38;5;214m'; reset=$'\e[0m'

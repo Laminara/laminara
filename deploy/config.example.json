@@ -114,5 +114,11 @@
         "path": "/var/lib/laminara/news.json"
       }
     }
+  },
+  "update": {
+    "check": true,
+    "install": false,
+    "repo": "MrLeonardosMi/Laminara",
+    "interval": "24h"
   }
 }
