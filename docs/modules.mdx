@@ -60,11 +60,11 @@ func main() {
 ## Конфигурация
 
 Чтобы модуль принимал настройки, реализуйте необязательный интерфейс
-`Configure(config []byte) error` — сервер передаст блок конфигурации (сырой JSON)
-до чтения `Info`:
+`Configure(ctx context.Context, config []byte) error` — сервер передаст блок конфигурации
+(сырой JSON) до чтения `Info`. Понадобится импорт `encoding/json`:
 
 ```go
-func (g *greeter) Configure(config []byte) error {
+func (g *greeter) Configure(_ context.Context, config []byte) error {
 	var settings struct {
 		Greeting string `json:"greeting"`
 	}
@@ -81,15 +81,14 @@ func (g *greeter) Configure(config []byte) error {
 ## События
 
 Модуль может реагировать на события сервера — реализуйте `Events()` (список топиков)
-и `OnEvent`:
+и `OnEvent(ctx, topic, data)`:
 
 ```go
 func (g *greeter) Events() []string {
 	return []string{"build.published"}
 }
 
-func (g *greeter) OnEvent(topic string, data map[string]string) error {
-	// например, отправить уведомление в Discord
+func (g *greeter) OnEvent(_ context.Context, topic string, data map[string]string) error {
 	fmt.Printf("%s: сборка %s\n", topic, data["name"])
 	return nil
 }
@@ -134,4 +133,5 @@ $ laminara-server status --json   # modulesLoaded увеличится
 ```
 
 Команда модуля видна и в `help`, и в интерактивной консоли (наберите `/`, затем
-имя команды). Подробности устройства — в ADR-0011.
+имя команды). Устройство обмена — go-plugin: сервер запускает бинарь и говорит с ним
+по gRPC, контракт лежит в `proto/`.

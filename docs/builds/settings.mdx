@@ -19,7 +19,7 @@ import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
 
 ## Три класса файлов
 
-Каждый файл сборки попадает ровно в один класс. Приоритет — **`enforced` → `userWritable` → обычный**.
+Каждый файл сборки попадает ровно в один класс. Приоритет — **сначала `enforced`, затем `userWritable`, затем обычный**.
 
 <CardGrid>
   <Card title="userWritable">

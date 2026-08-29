@@ -73,7 +73,7 @@ laminara-server restore --archive /srv/backups/laminara.tar.gz
 | `/readyz` | Сервер готов обслуживать игроков: хранилище отвечает, каталог сборок читается. `200` или `503` со списком того, что не отвечает. |
 
 ```sh
-curl -s http://127.0.0.1:8080/readyz
+curl -s http://127.0.0.1:8099/readyz
 {"status":"degraded","checks":{"storage":"…"},"failed":["storage"]}
 ```
 
@@ -85,7 +85,7 @@ curl -s http://127.0.0.1:8080/readyz
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8099/readyz"]
   interval: 30s
   timeout: 5s
   retries: 3

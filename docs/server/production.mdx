@@ -44,7 +44,7 @@ location / {
     Включите `api.xAccel: true`. Тогда на запрос `/objects/<хеш>` сервер отвечает заголовком `X-Accel-Redirect`, а сами байты отдаёт nginx через `sendfile` — без копирования через процесс сервера. В nginx нужна внутренняя локация, указывающая на каталог хранилища:
 
     ```nginx
-    location /internal-objects/ {
+    location /_objects/ {
         internal;
         alias /var/lib/laminara/objects/;
         add_header Cache-Control "public, immutable, max-age=31536000";
@@ -56,7 +56,7 @@ location / {
 
     Читает файлы сам nginx, поэтому объекты должны быть ему доступны: новые сервер создаёт
     с правами `0644`, но объекты, сложенные прежними версиями сервера, закрыты режимом `0600`.
-    Такой склад нужно один раз открыть на чтение: `chmod -R u+rwX,go+rX /var/lib/laminara/objects`.
+    Такое хранилище нужно один раз открыть на чтение: `chmod -R u+rwX,go+rX /var/lib/laminara/objects`.
   </TabItem>
   <TabItem label="S3-совместимое хранилище">
     Байты через сервер вообще не идут. На запрос объекта он отдаёт редирект на presigned-ссылку хранилища, и лаунчер качает напрямую из S3 или CDN. nginx на пути файлов не участвует; `xAccel` не нужен.
