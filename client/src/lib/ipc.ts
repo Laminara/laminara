@@ -8,11 +8,12 @@ import type {
   FeatureSelection,
   GeneralSettings,
   LauncherUpdate,
+  LoginFailure,
   NewsItem,
   PlayerCounts,
   SyncEvent,
 } from "@/lib/types";
-import { mockAccount, mockBuilds, mockEndpoint, mockFeatures, mockPlayerCounts } from "@/lib/mock";
+import { mockAccount, mockBuilds, mockEndpoint, mockFeatures, mockLoginFailures, mockPlayerCounts } from "@/lib/mock";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -51,8 +52,13 @@ export const ipc = {
   restoreSession: (): Promise<AuthStatus> =>
     isTauri ? core("restore_session") : Promise.resolve({ signedIn: true, username: mockAccount.name, uuid: mockAccount.uuid }),
 
-  login: (username: string, password: string): Promise<Account> =>
-    isTauri ? core("login", { username, password }) : Promise.resolve(mockAccount),
+  login: (username: string, password: string, code: string): Promise<Account> => {
+    if (isTauri) return core("login", { username, password, code });
+    const failure = (kind: LoginFailure["kind"]): LoginFailure => ({ kind, message: mockLoginFailures[kind] });
+    if (password === "wrong") return Promise.reject(failure("failed"));
+    if (password === "2fa" && code.length !== 6) return Promise.reject(failure("secondFactor"));
+    return Promise.resolve(mockAccount);
+  },
 
   logout: (): Promise<void> => (isTauri ? core("logout") : Promise.resolve()),
 

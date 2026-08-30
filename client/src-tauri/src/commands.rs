@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::join_all;
@@ -36,6 +37,13 @@ pub struct AccountDto {
     uuid: String,
     name: String,
     endpoint_id: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LoginError {
+    SecondFactor { message: String },
+    Failed { message: String },
 }
 
 #[derive(Serialize)]
@@ -120,21 +128,51 @@ pub async fn endpoints_set(
         .map_err(|e| player_error("set endpoints", e))
 }
 
+fn login_error(error: &laminara_core::CoreError, code: &str) -> LoginError {
+    if let laminara_core::CoreError::App { code: kind, .. } = error {
+        if kind == laminara_core::error::SECOND_FACTOR_CODE {
+            return LoginError::SecondFactor {
+                message: "Введите код из приложения-аутентификатора".into(),
+            };
+        }
+    }
+    if !code.is_empty() && message_contains(error, INVALID_CREDENTIALS) {
+        return LoginError::Failed {
+            message: "Неверный логин, пароль или код".into(),
+        };
+    }
+    LoginError::Failed {
+        message: player_message(error),
+    }
+}
+
+const INVALID_CREDENTIALS: &str = "invalid credentials";
+
+fn message_contains(error: &laminara_core::CoreError, sentinel: &str) -> bool {
+    matches!(
+        error,
+        laminara_core::CoreError::App { message, .. } if message.to_lowercase().contains(sentinel)
+    )
+}
+
 fn player_message(error: &laminara_core::CoreError) -> String {
     use laminara_core::CoreError;
     match error {
         CoreError::App { message, .. } => {
             for (sentinel, russian) in [
-                ("invalid credentials", "Неверный логин или пароль"),
+                (INVALID_CREDENTIALS, "Неверный логин или пароль"),
                 (
                     "too many attempts",
                     "Слишком много попыток. Подождите несколько минут",
                 ),
                 ("session expired", "Сессия истекла, войдите заново"),
             ] {
-                if message.contains(sentinel) {
+                if message.to_lowercase().contains(sentinel) {
                     return russian.into();
                 }
+            }
+            if message.trim().is_empty() {
+                return "Не удалось выполнить запрос. Попробуйте ещё раз".into();
             }
             message.clone()
         }
@@ -186,14 +224,15 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
             let Some((endpoint_id, uuid, _)) = state.auth.identity() else {
                 return;
             };
-            let Some(refresh) = state.auth.load_refresh(&endpoint_id, &uuid) else {
+            let Some(refresh) = state.auth.load_refresh(&endpoint_id, &uuid).await else {
                 return;
             };
             match state.core.refresh(&refresh).await {
                 Ok(tokens) => {
-                    let _ = state
+                    state
                         .auth
-                        .store_refresh(&endpoint_id, &uuid, &tokens.refresh);
+                        .keep_refresh(&endpoint_id, &uuid, &tokens.refresh)
+                        .await;
                     state
                         .auth
                         .update_access(tokens.access, tokens.access_expires_unix_nanos);
@@ -213,33 +252,44 @@ pub async fn login(
     state: State<'_, AppState>,
     username: String,
     password: String,
-) -> Result<AccountDto, String> {
-    let result = state.core.login(&username, &password).await.map_err(|e| {
-        tracing::error!("login failed for {username}: {e:?}");
-        player_message(&e)
-    })?;
+    code: String,
+) -> Result<AccountDto, LoginError> {
+    let result = state
+        .core
+        .login(&username, &password, &code)
+        .await
+        .map_err(|e| {
+            tracing::error!("login failed for {username}: {e:?}");
+            login_error(&e, &code)
+        })?;
     tracing::info!("signed in as {}", result.account.name);
     let endpoint_id = result.account.endpoint_id.clone();
     let uuid = result.account.uuid.clone();
     let name = result.account.name.clone();
 
-    let _ = state
+    state
         .auth
-        .store_refresh(&endpoint_id, &uuid, &result.tokens.refresh);
-    let _ = state.auth.store_game(
-        &endpoint_id,
-        &uuid,
-        &result.session.access_token,
-        &result.session.client_token,
-    );
-    let _ = state.core.save_selection(
+        .keep_refresh(&endpoint_id, &uuid, &result.tokens.refresh)
+        .await;
+    state
+        .auth
+        .keep_game(
+            &endpoint_id,
+            &uuid,
+            &result.session.access_token,
+            &result.session.client_token,
+        )
+        .await;
+    if let Err(e) = state.core.save_selection(
         Some(laminara_core::config::SelectedAccount {
             endpoint_id: endpoint_id.clone(),
             uuid: uuid.clone(),
             name: name.clone(),
         }),
         None,
-    );
+    ) {
+        tracing::warn!("selected account save failed: {e}");
+    }
 
     let dto = AccountDto {
         uuid: uuid.clone(),
@@ -259,8 +309,8 @@ pub async fn login(
 #[tauri::command]
 pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
     if let Some((endpoint_id, uuid, _)) = state.auth.identity() {
-        state.auth.clear_refresh(&endpoint_id, &uuid);
-        state.auth.clear_game(&endpoint_id, &uuid);
+        state.auth.clear_refresh(&endpoint_id, &uuid).await;
+        state.auth.clear_game(&endpoint_id, &uuid).await;
     }
     state.auth.clear_session();
     state.core.sign_out();
@@ -283,7 +333,11 @@ pub async fn restore_session(
     let Some(account) = state.core.config().selected_account.clone() else {
         return Ok(state.auth.status());
     };
-    let Some((access, client)) = state.auth.load_game(&account.endpoint_id, &account.uuid) else {
+    let Some((access, client)) = state
+        .auth
+        .load_game(&account.endpoint_id, &account.uuid)
+        .await
+    else {
         return Ok(state.auth.status());
     };
     let Some(base) = state.core.base_url_for(&account.endpoint_id) else {
@@ -292,13 +346,17 @@ pub async fn restore_session(
 
     let mut launcher_access = String::new();
     let mut launcher_access_expires = 0i64;
-    if let Some(refresh) = state.auth.load_refresh(&account.endpoint_id, &account.uuid) {
+    if let Some(refresh) = state
+        .auth
+        .load_refresh(&account.endpoint_id, &account.uuid)
+        .await
+    {
         match state.core.refresh(&refresh).await {
             Ok(tokens) => {
-                let _ =
-                    state
-                        .auth
-                        .store_refresh(&account.endpoint_id, &account.uuid, &tokens.refresh);
+                state
+                    .auth
+                    .keep_refresh(&account.endpoint_id, &account.uuid, &tokens.refresh)
+                    .await;
                 launcher_access = tokens.access;
                 launcher_access_expires = tokens.access_expires_unix_nanos;
             }
@@ -314,12 +372,15 @@ pub async fn restore_session(
     match state.core.refresh_session(&base, &access, &client).await {
         Ok(session) => {
             tracing::info!("session restored for {}", session.name);
-            let _ = state.auth.store_game(
-                &account.endpoint_id,
-                &session.uuid,
-                &session.access_token,
-                &session.client_token,
-            );
+            state
+                .auth
+                .keep_game(
+                    &account.endpoint_id,
+                    &session.uuid,
+                    &session.access_token,
+                    &session.client_token,
+                )
+                .await;
             let generation = state.auth.set_session(Session {
                 account: laminara_core::Account {
                     uuid: session.uuid.clone(),
@@ -351,7 +412,13 @@ pub struct NewsItemDto {
 
 #[tauri::command]
 pub async fn news(state: State<'_, AppState>) -> Result<Vec<NewsItemDto>, String> {
-    let items = state.core.news().await.unwrap_or_default();
+    let items = match state.core.news().await {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::warn!("news fetch failed: {e}");
+            Vec::new()
+        }
+    };
     Ok(items
         .into_iter()
         .map(|item| NewsItemDto {
@@ -412,51 +479,58 @@ pub async fn list_builds(state: State<'_, AppState>) -> Result<Vec<BuildDto>, St
         .await
         .map_err(|e| player_error("list profiles", e))?;
     let mine = laminara_core::platform::current();
-    Ok(profiles
-        .into_iter()
+    let launch_profiles: Vec<PathBuf> = profiles
+        .iter()
         .map(|profile| {
-            let installed = state
+            state
                 .core
                 .profile_dir(&profile.name)
                 .join(LAUNCH_PROFILE_NAME)
-                .exists();
-            BuildDto {
-                name: profile.name,
-                minecraft: if profile.minecraft_version.trim().is_empty() {
-                    None
-                } else {
-                    Some(profile.minecraft_version)
-                },
-                loader: if profile.loader.trim().is_empty() {
-                    None
-                } else {
-                    Some(profile.loader)
-                },
-                size_bytes: profile.total_size,
-                install: if installed {
-                    "installed".into()
-                } else {
-                    "missing".into()
-                },
-                has_features: profile.has_features,
-                available: profile.platforms.is_empty()
-                    || profile.platforms.contains(&(mine as i32)),
-                platforms: profile
-                    .platforms
-                    .iter()
-                    .filter_map(|value| {
-                        Platform::try_from(*value)
-                            .ok()
-                            .and_then(laminara_core::platform::key)
-                    })
-                    .collect(),
-                locked: profile.locked,
-                lock_reason: if profile.lock_reason.trim().is_empty() {
-                    None
-                } else {
-                    Some(profile.lock_reason)
-                },
-            }
+        })
+        .collect();
+    let installed: Vec<bool> = crate::auth::offload(move || {
+        Ok(launch_profiles.iter().map(|path| path.exists()).collect())
+    })
+    .await?;
+
+    Ok(profiles
+        .into_iter()
+        .zip(installed)
+        .map(|(profile, installed)| BuildDto {
+            name: profile.name,
+            minecraft: if profile.minecraft_version.trim().is_empty() {
+                None
+            } else {
+                Some(profile.minecraft_version)
+            },
+            loader: if profile.loader.trim().is_empty() {
+                None
+            } else {
+                Some(profile.loader)
+            },
+            size_bytes: profile.total_size,
+            install: if installed {
+                "installed".into()
+            } else {
+                "missing".into()
+            },
+            has_features: profile.has_features,
+            available: profile.platforms.is_empty() || profile.platforms.contains(&(mine as i32)),
+            platforms: profile
+                .platforms
+                .iter()
+                .filter_map(|value| {
+                    Platform::try_from(*value)
+                        .ok()
+                        .and_then(laminara_core::platform::key)
+                })
+                .collect(),
+            locked: profile.locked,
+            lock_reason: if profile.lock_reason.trim().is_empty() {
+                None
+            } else {
+                Some(profile.lock_reason)
+            },
         })
         .collect())
 }
@@ -524,10 +598,11 @@ pub async fn sync_profile(
         }
         Err(err) => {
             tracing::error!("sync failed for {profile}: {err}");
+            let message = player_message(&err);
             let _ = on_event.send(SyncEvent::Failed {
-                message: err.to_string(),
+                message: message.clone(),
             });
-            Err(err.to_string())
+            Err(message)
         }
     }
 }
@@ -555,7 +630,11 @@ pub async fn launch(
         .await
         .map_err(|e| player_error("report machine", e))?;
 
-    let broken = state.core.verify_installed(&profile);
+    let broken = state
+        .core
+        .verify_installed(&profile)
+        .await
+        .map_err(|e| player_error(&format!("integrity check failed for {profile}"), e))?;
     if !broken.is_empty() {
         tracing::error!(
             "integrity check failed for {profile}: {} file(s), first: {:?}",
@@ -673,6 +752,7 @@ pub async fn collect_garbage(state: State<'_, AppState>) -> Result<u64, String> 
     let removed = state
         .core
         .collect_garbage()
+        .await
         .map_err(|e| player_error("collect garbage", e))?;
     tracing::info!("cas gc removed {removed} object(s)");
     Ok(removed)
@@ -886,10 +966,12 @@ pub async fn player_counts(state: State<'_, AppState>) -> Result<Option<PlayerCo
             per_build.insert(name.clone(), players);
         }
     }
-    let total = by_address.values().fold(ServerPlayers::default(), |sum, players| ServerPlayers {
-        online: sum.online + players.online,
-        max: sum.max + players.max,
-    });
+    let total = by_address
+        .values()
+        .fold(ServerPlayers::default(), |sum, players| ServerPlayers {
+            online: sum.online + players.online,
+            max: sum.max + players.max,
+        });
 
     Ok(Some(PlayerCounts { per_build, total }))
 }
@@ -1025,5 +1107,5 @@ pub async fn report_crash(
         .core
         .report_crash(build, build_version, loader, exit_code, log)
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|err| player_error("crash report", err))
 }

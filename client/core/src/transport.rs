@@ -17,7 +17,17 @@ struct ConnectError {
     code: String,
     #[serde(default)]
     message: Option<String>,
+    #[serde(default)]
+    details: Option<Vec<ConnectErrorDetail>>,
 }
+
+#[derive(Deserialize)]
+struct ConnectErrorDetail {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+const SECOND_FACTOR_DETAIL: &str = "laminara.api.v1.TwoFactorRequired";
 
 pub fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -93,12 +103,21 @@ impl Transport {
         }
         match serde_json::from_slice::<ConnectError>(&bytes) {
             Ok(err) => Err(RpcError::App {
-                code: err.code,
+                code: self::second_factor_kind(&err).unwrap_or(err.code),
                 message: err.message.unwrap_or_default(),
             }),
             Err(_) => Err(RpcError::PostSend(format!("http {status}"))),
         }
     }
+}
+
+fn second_factor_kind(err: &ConnectError) -> Option<String> {
+    let demanded = err
+        .details
+        .iter()
+        .flatten()
+        .any(|detail| detail.kind.ends_with(SECOND_FACTOR_DETAIL));
+    demanded.then(|| crate::error::SECOND_FACTOR_CODE.to_string())
 }
 
 impl Default for Transport {

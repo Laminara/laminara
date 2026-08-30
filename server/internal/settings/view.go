@@ -6,10 +6,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/laminara/laminara/server/internal/duration"
 	"github.com/laminara/laminara/server/internal/humanize"
 )
+
+const SecretMask = "***"
 
 type Entry struct {
 	Path    string
@@ -67,7 +69,7 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 		Options: field.options(),
 	}
 	if present {
-		entry.Value = render(field.Kind, raw)
+		entry.Value = renderEntry(field, path, raw)
 	} else {
 		entry.Value = entry.Default
 	}
@@ -75,15 +77,43 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 	return entry
 }
 
+func renderEntry(field Field, path string, raw any) string {
+	if len(field.Variants) == 0 {
+		return render(field.Kind, raw)
+	}
+	return renderTree(path, raw, secretPaths(path, field))
+}
+
+func secretPaths(base string, field Field) map[string]bool {
+	paths := map[string]bool{}
+	collectSecrets(base+".", field.Variants, paths)
+	return paths
+}
+
+func collectSecrets(prefix string, variants map[string][]Field, into map[string]bool) {
+	for _, fields := range variants {
+		for _, field := range fields {
+			key := prefix + field.Key
+			if field.Variants != nil {
+				collectSecrets(key+".", field.Variants, into)
+				continue
+			}
+			if field.Kind == KindSecret {
+				into[key] = true
+			}
+		}
+	}
+}
+
 func display(kind Kind, value string) string {
 	if kind != KindDuration || value == "" {
 		return value
 	}
-	parsed, err := time.ParseDuration(value)
+	parsed, err := duration.Parse(value)
 	if err != nil {
 		return value
 	}
-	spelled := humanize.Duration(parsed)
+	spelled := humanize.Duration(parsed.Duration())
 	if spelled == value {
 		return value
 	}
@@ -136,18 +166,38 @@ func (d *Doc) resolve(path string) (string, Field, string, error) {
 			if !hasField {
 				return base, Field{Key: "", Label: collection.Title, Kind: KindJSON}, "", nil
 			}
-			field, ok := fieldIn(collection.Fields, fieldKey)
+			field, ok := d.fieldAt(base, collection.Fields, fieldKey)
 			if !ok {
 				return "", Field{}, "", fmt.Errorf("в списке «%s» нет настройки «%s»", collection.Title, fieldKey)
 			}
 			return base, field, fieldKey, nil
 		}
 	}
-	field, ok := fieldOf(section, rest)
+	field, ok := d.fieldAt(sectionKey, section.Fields, rest)
 	if !ok {
 		return "", Field{}, "", fmt.Errorf("в разделе «%s» нет настройки «%s»", section.Title, rest)
 	}
 	return sectionKey, field, rest, nil
+}
+
+func (d *Doc) fieldAt(base string, fields []Field, key string) (Field, bool) {
+	for _, field := range fields {
+		if field.Key == key {
+			return field, true
+		}
+		if field.Variants == nil {
+			continue
+		}
+		tail, ok := strings.CutPrefix(key, field.Key+".")
+		if !ok {
+			continue
+		}
+		chosen := d.stringAt(base+"."+field.VariantOf, fieldDefault(fields, field.VariantOf))
+		if found, ok := d.fieldAt(base, field.Variants[chosen], tail); ok {
+			return found, true
+		}
+	}
+	return Field{}, false
 }
 
 func render(kind Kind, raw any) string {
@@ -158,6 +208,15 @@ func render(kind Kind, raw any) string {
 		}
 		return string(data)
 	}
+	if kind == KindSecret {
+		if text, ok := raw.(string); ok && text != "" {
+			return SecretMask
+		}
+	}
+	return renderTree("", raw, nil)
+}
+
+func renderTree(path string, raw any, secrets map[string]bool) string {
 	switch value := raw.(type) {
 	case nil:
 		return ""
@@ -172,14 +231,11 @@ func render(kind Kind, raw any) string {
 		}
 		return strconv.FormatFloat(value, 'f', -1, 64)
 	case string:
-		if kind == KindSecret && value != "" {
-			return "••••••"
-		}
 		return value
 	case []any:
 		parts := make([]string, 0, len(value))
-		for _, item := range value {
-			parts = append(parts, render(KindText, item))
+		for index, item := range value {
+			parts = append(parts, renderBranch(path+"."+strconv.Itoa(index), item, secrets))
 		}
 		return strings.Join(parts, ", ")
 	case map[string]any:
@@ -190,12 +246,19 @@ func render(kind Kind, raw any) string {
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, key+"="+render(KindText, value[key]))
+			parts = append(parts, key+"="+renderBranch(path+"."+key, value[key], secrets))
 		}
 		return strings.Join(parts, ", ")
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+func renderBranch(path string, raw any, secrets map[string]bool) string {
+	if secrets[path] {
+		return SecretMask
+	}
+	return renderTree(path, raw, secrets)
 }
 
 func (d *Doc) Set(path, value string) error {
@@ -309,20 +372,12 @@ func parse(field Field, value string) (any, error) {
 }
 
 func ParseDuration(value string) (string, error) {
-	text := strings.TrimSpace(value)
-	if days, ok := strings.CutSuffix(text, "d"); ok {
-		number, err := strconv.Atoi(days)
-		if err != nil || number <= 0 {
-			return "", fmt.Errorf("сколько дней? например 30d")
-		}
-		text = strconv.Itoa(number*24) + "h"
-	}
-	parsed, err := time.ParseDuration(text)
+	parsed, err := duration.Parse(value)
 	if err != nil {
-		return "", fmt.Errorf("пишите время как 30s, 15m, 12h или 30d, а не «%s»", value)
+		return "", err
 	}
 	if parsed <= 0 {
 		return "", fmt.Errorf("время должно быть больше нуля")
 	}
-	return text, nil
+	return parsed.Compact(), nil
 }

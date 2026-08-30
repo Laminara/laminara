@@ -16,10 +16,54 @@ import (
 	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/api"
+	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/manifest"
+	"github.com/laminara/laminara/server/internal/ratelimit"
 	"github.com/laminara/laminara/server/internal/storage"
 )
+
+type secondFactorProvider struct{}
+
+func (secondFactorProvider) Authenticate(_ context.Context, creds auth.Credentials) (auth.Identity, error) {
+	if creds.Username == "neo" && creds.Password == "matrix" {
+		switch creds.TwoFactorCode {
+		case "":
+			return auth.Identity{}, auth.ErrTwoFactorRequired
+		case "654321":
+			return auth.Identity{Subject: "neo", Username: "neo", UUID: auth.OfflineUUID("neo")}, nil
+		}
+	}
+	return auth.Identity{}, auth.ErrInvalidCredentials
+}
+
+func TestLoginTwoFactor(t *testing.T) {
+	limits, err := ratelimit.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := api.NewService(api.Options{
+		Auth:   auth.NewService(secondFactorProvider{}, auth.NewMemorySessionStore(), auth.DefaultConfig()),
+		Limits: limits,
+	})
+	ctx := context.Background()
+
+	_, err = svc.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{Username: "neo", Password: "matrix"}))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("a missing code must come back as FailedPrecondition, got %v", err)
+	}
+	_, err = svc.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{Username: "neo", Password: "nope"}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("a wrong password must come back as Unauthenticated, got %v", err)
+	}
+	ok, err := svc.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{Username: "neo", Password: "matrix", TwoFactorCode: "654321"}))
+	if err != nil {
+		t.Fatalf("the right code must pass: %v", err)
+	}
+	if ok.Msg.Tokens == nil || ok.Msg.Tokens.Access == "" {
+		t.Fatalf("tokens = %+v", ok.Msg.Tokens)
+	}
+}
 
 func TestListAndGetManifest(t *testing.T) {
 	dir := t.TempDir()

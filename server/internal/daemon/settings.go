@@ -23,6 +23,11 @@ type settingsStore struct {
 	changed func(path string)
 }
 
+type entryView struct {
+	fields []*adminv1.SettingEntry
+	entry  *adminv1.SettingEntry
+}
+
 func (s *settingsStore) List(section, entry string) (admin.SettingsPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,18 +93,21 @@ func entriesToProto(entries []settings.Entry) []*adminv1.SettingEntry {
 	return out
 }
 
-func (s *settingsStore) One(path string) (*adminv1.SettingEntry, error) {
+func (s *settingsStore) Entry(path string) (entryView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := settings.Open(s.path)
 	if err != nil {
-		return nil, err
+		return entryView{}, err
+	}
+	if fields, err := doc.EntryFields(path); err == nil {
+		return entryView{fields: entriesToProto(fields)}, nil
 	}
 	entry, err := doc.Entry(path)
 	if err != nil {
-		return nil, err
+		return entryView{}, err
 	}
-	return entriesToProto([]settings.Entry{entry})[0], nil
+	return entryView{entry: entriesToProto([]settings.Entry{entry})[0]}, nil
 }
 
 func (s *settingsStore) Set(path, value string) (*adminv1.SettingEntry, error) {
@@ -176,9 +184,10 @@ func (s *settingsStore) Restart() error {
 
 func settingsCommand(store *settingsStore) command.Command {
 	return command.Command{
-		Name:     "settings",
-		Aliases:  []string{"config"},
-		Synopsis: "настройки проекта (settings | settings <раздел> | settings <путь> [значение] | settings clear <путь> | settings add <список> [имя] | settings remove <путь>)",
+		Name:       "settings",
+		Aliases:    []string{"config"},
+		SecretArgs: true,
+		Synopsis:   "настройки проекта (settings | settings <раздел> | settings <путь> [значение] | settings clear <путь> | settings add <список> [имя] | settings remove <путь>)",
 		Run: func(_ context.Context, args []string, out io.Writer) error {
 			if store == nil {
 				return errors.New("сервер запущен без файла настроек — править нечего")
@@ -270,16 +279,17 @@ func printSection(store *settingsStore, section string, out io.Writer) error {
 }
 
 func printEntry(store *settingsStore, path string, out io.Writer) error {
-	if page, err := store.List("", path); err == nil && len(page.Entries) > 0 {
-		for _, entry := range page.Entries {
+	view, err := store.Entry(path)
+	if err != nil {
+		return err
+	}
+	if view.entry == nil {
+		for _, entry := range view.fields {
 			fmt.Fprintf(out, "%-28s %-24s %s\n", entry.Label, valueWord(entry), entry.Path)
 		}
 		return nil
 	}
-	entry, err := store.One(path)
-	if err != nil {
-		return err
-	}
+	entry := view.entry
 	fmt.Fprintf(out, "%s\n", entry.Label)
 	fmt.Fprintf(out, "  значение:     %s\n", valueWord(entry))
 	if entry.DefaultValue != "" {

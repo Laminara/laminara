@@ -9,8 +9,8 @@ use crate::config::EndpointConfig;
 use crate::error::{CoreError, RpcError};
 use crate::machine::MachineFacts;
 use crate::proto::api::v1::{
-    GetManifestResponse, LoginResponse, MachineVerdict, NewsItem, ProfileSummary, Tokens,
-    CrashReport, ReportCrashResponse,
+    CrashReport, GetManifestResponse, LoginResponse, MachineVerdict, NewsItem, ProfileSummary,
+    ReportCrashResponse, Tokens,
 };
 use crate::rpc::LauncherClient;
 use crate::transport::Transport;
@@ -137,12 +137,14 @@ impl EndpointPool {
         &self,
         username: String,
         password: String,
+        two_factor_code: String,
         machine: Option<Arc<MachineFacts>>,
         launcher_version: String,
     ) -> Result<LoginResponse, CoreError> {
         self.call(|transport, base_url| {
             let username = username.clone();
             let password = password.clone();
+            let two_factor_code = two_factor_code.clone();
             let machine = machine.clone();
             let launcher_version = launcher_version.clone();
             async move {
@@ -154,7 +156,9 @@ impl EndpointPool {
                         report = Some(facts.report(challenge.nonce, &launcher_version));
                     }
                 }
-                client.login(username, password, report).await
+                client
+                    .login(username, password, two_factor_code, report)
+                    .await
             }
         })
         .await

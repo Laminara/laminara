@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+pub const SECOND_FACTOR_CODE: &str = "second_factor_required";
+
 #[derive(Debug, Error)]
 pub enum CoreError {
     #[error("no endpoint available")]

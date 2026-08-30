@@ -3,12 +3,15 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/auth/hash"
+	"github.com/laminara/laminara/server/internal/auth/totp"
 )
 
 func init() {
@@ -19,9 +22,10 @@ type jsonFileConfig struct {
 	Path   string `json:"path"`
 	Hash   string `json:"hash"`
 	Fields struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		UUID     string `json:"uuid"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		UUID      string `json:"uuid"`
+		TwoFactor string `json:"twoFactorSecret"`
 	} `json:"fields"`
 }
 
@@ -30,7 +34,9 @@ type jsonFileProvider struct {
 	usernameKey string
 	passwordKey string
 	uuidKey     string
+	secretKey   string
 	users       map[string]map[string]any
+	second      *totp.Verifier
 }
 
 func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
@@ -51,8 +57,16 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 		return nil, err
 	}
 	usernameKey := orDefault(cfg.Fields.Username, "username")
+	secretKey := orDefault(cfg.Fields.TwoFactor, "totp")
 	users := make(map[string]map[string]any, len(records))
 	for _, record := range records {
+		name, _ := record[usernameKey].(string)
+		if raw, present := record[secretKey]; present && raw != nil {
+			secret, isString := raw.(string)
+			if !isString || strings.TrimSpace(secret) == "" {
+				return nil, fmt.Errorf("jsonfile auth: record %q carries %q that is not a base32 two-factor secret", name, secretKey)
+			}
+		}
 		if name, ok := record[usernameKey].(string); ok {
 			users[name] = record
 		}
@@ -62,7 +76,9 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 		usernameKey: usernameKey,
 		passwordKey: orDefault(cfg.Fields.Password, "password"),
 		uuidKey:     orDefault(cfg.Fields.UUID, "uuid"),
+		secretKey:   secretKey,
 		users:       users,
+		second:      totp.NewVerifier(),
 	}, nil
 }
 
@@ -78,6 +94,14 @@ func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credential
 	}
 	if !valid {
 		return auth.Identity{}, auth.ErrInvalidCredentials
+	}
+	if secret, _ := record[p.secretKey].(string); strings.TrimSpace(secret) != "" {
+		if creds.TwoFactorCode == "" {
+			return auth.Identity{}, auth.ErrTwoFactorRequired
+		}
+		if !p.second.Verify(creds.Username, secret, creds.TwoFactorCode) {
+			return auth.Identity{}, auth.ErrInvalidCredentials
+		}
 	}
 	id := auth.OfflineUUID(creds.Username)
 	if raw, ok := record[p.uuidKey].(string); ok {

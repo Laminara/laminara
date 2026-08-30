@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/sqlschema"
 )
 
 func write(t *testing.T, body string) string {
@@ -136,8 +137,58 @@ func TestSecretsAreMasked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(entry.Value, "very-secret") {
-		t.Fatalf("a secret must not be printed: %q", entry.Value)
+	if entry.Value != SecretMask {
+		t.Fatalf("a secret must be printed as %q, got %q", SecretMask, entry.Value)
+	}
+}
+
+func TestSecretsAreMaskedInsideAProviderBlock(t *testing.T) {
+	doc, _ := Open(write(t, `{"auth":{"provider":"sql","config":{"driver":"postgres","dsn":"postgres://u:very-secret@h/db"}}}`))
+	for _, path := range []string{"auth.config", "auth.provider"} {
+		entry, err := doc.Entry(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(entry.Value, "very-secret") {
+			t.Fatalf("%s must not print the secret: %q", path, entry.Value)
+		}
+	}
+	block, err := doc.Entry("auth.config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(block.Value, "dsn="+SecretMask) {
+		t.Fatalf("the block must show the masked value: %q", block.Value)
+	}
+	section, err := doc.Section("auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range section {
+		if strings.Contains(item.Value, "very-secret") {
+			t.Fatalf("%s must not print the secret: %q", item.Path, item.Value)
+		}
+	}
+}
+
+func TestVariantIsChosenByItsDiscriminator(t *testing.T) {
+	doc, _ := Open(write(t, `{"crashReports":{"sinks":{"hook":{"type":"discord","config":{"url":"https://discord/app/webhook"}}}}}`))
+	entry, err := doc.Entry("crashReports.sinks.hook.config.url")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Kind != KindSecret || entry.Value != SecretMask {
+		t.Fatalf("a discord webhook is a secret: %+v", entry)
+	}
+	if err := doc.Set("crashReports.sinks.hook.type", "http"); err != nil {
+		t.Fatal(err)
+	}
+	entry, _ = doc.Entry("crashReports.sinks.hook.config.url")
+	if entry.Kind == KindSecret || entry.Value != "" {
+		t.Fatalf("an http address is a plain text field: %+v", entry)
+	}
+	if err := doc.Set("crashReports.sinks.hook.config.chatId", "-100"); err == nil {
+		t.Fatal("a field of another address type must be refused, not silently written")
 	}
 }
 
@@ -232,6 +283,50 @@ func paths(entries []Entry) []string {
 		out = append(out, entry.Path)
 	}
 	return out
+}
+
+func TestDurationFieldsUseTheSharedParser(t *testing.T) {
+	for value, want := range map[string]string{
+		"30s":  "30s",
+		"15m":  "15m",
+		"12h":  "12h",
+		"30d":  "720h",
+		" 15m": "15m",
+	} {
+		got, err := ParseDuration(value)
+		if err != nil {
+			t.Fatalf("%s: %v", value, err)
+		}
+		if got != want {
+			t.Fatalf("%s = %s, want %s", value, got, want)
+		}
+	}
+	for _, value := range []string{"", "30", "12д", "0s", "-5m", "позже"} {
+		if got, err := ParseDuration(value); err == nil {
+			t.Fatalf("%q must be refused, got %s", value, got)
+		}
+	}
+}
+
+func TestDriverOptionsAreSupported(t *testing.T) {
+	var walk func(fields []Field)
+	walk = func(fields []Field) {
+		for _, field := range fields {
+			if field.Key == "driver" {
+				for _, option := range field.options() {
+					if _, _, _, err := sqlschema.Dialect(option); err != nil {
+						t.Errorf("%s is offered as a database but the server cannot open it: %v", option, err)
+					}
+				}
+			}
+			for _, variants := range field.Variants {
+				walk(variants)
+			}
+		}
+	}
+	for _, section := range Sections() {
+		walk(section.Fields)
+	}
 }
 
 func TestAccessRulesCollection(t *testing.T) {

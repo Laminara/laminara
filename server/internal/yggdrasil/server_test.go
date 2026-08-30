@@ -28,6 +28,35 @@ func (stubProvider) Authenticate(_ context.Context, creds auth.Credentials) (aut
 	return auth.Identity{}, auth.ErrInvalidCredentials
 }
 
+type secondFactorProvider struct{}
+
+func (secondFactorProvider) Authenticate(_ context.Context, creds auth.Credentials) (auth.Identity, error) {
+	if creds.Username == "neo" && creds.Password == "matrix" {
+		switch creds.TwoFactorCode {
+		case "":
+			return auth.Identity{}, auth.ErrTwoFactorRequired
+		case "654321":
+			return auth.Identity{Subject: "neo", Username: "neo", UUID: auth.OfflineUUID("neo")}, nil
+		}
+	}
+	return auth.Identity{}, auth.ErrInvalidCredentials
+}
+
+func newHandlerWithProvider(t *testing.T, provider auth.Provider) http.Handler {
+	t.Helper()
+	authService := auth.NewService(provider, auth.NewMemorySessionStore(), auth.DefaultConfig())
+	skinConfig, _ := json.Marshal(map[string]any{"skin": "https://skins.example/%nickname%.png", "slim": true})
+	skinProvider, err := skin.Build("template", skinConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := yggdrasil.NewServer(authService, skinProvider, nil, nil, yggdrasil.Config{ServerName: "Laminara", SkinDomains: []string{"skins.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server.Handler()
+}
+
 func newHandler(t *testing.T) http.Handler {
 	t.Helper()
 	authService := auth.NewService(stubProvider{}, auth.NewMemorySessionStore(), auth.DefaultConfig())
@@ -126,6 +155,51 @@ func TestYggdrasilFlow(t *testing.T) {
 	bad.Body.Close()
 	if bad.StatusCode != http.StatusForbidden {
 		t.Fatalf("bad credentials status = %d", bad.StatusCode)
+	}
+}
+
+func TestAuthenticateWithTwoFactor(t *testing.T) {
+	server := httptest.NewServer(newHandlerWithProvider(t, secondFactorProvider{}))
+	defer server.Close()
+
+	missing := post(t, server.URL+"/authserver/authenticate", map[string]string{"username": "neo", "password": "matrix"})
+	defer missing.Body.Close()
+	if missing.StatusCode != http.StatusForbidden {
+		t.Fatalf("missing code status = %d", missing.StatusCode)
+	}
+	var errBody struct {
+		ErrorMessage string `json:"errorMessage"`
+	}
+	json.NewDecoder(missing.Body).Decode(&errBody)
+	if errBody.ErrorMessage != "Two-factor authentication code required." {
+		t.Fatalf("errorMessage = %q", errBody.ErrorMessage)
+	}
+
+	wrong := post(t, server.URL+"/authserver/authenticate", map[string]string{"username": "neo", "password": "matrix", "twoFactorCode": "111111"})
+	defer wrong.Body.Close()
+	if wrong.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong code status = %d", wrong.StatusCode)
+	}
+
+	authResp := post(t, server.URL+"/authserver/authenticate", map[string]string{"username": "neo", "password": "matrix", "twoFactorCode": "654321"})
+	defer authResp.Body.Close()
+	var authBody struct {
+		AccessToken string `json:"accessToken"`
+	}
+	json.NewDecoder(authResp.Body).Decode(&authBody)
+	if authResp.StatusCode != http.StatusOK || authBody.AccessToken == "" {
+		t.Fatalf("authenticate with code failed: %d %+v", authResp.StatusCode, authBody)
+	}
+
+	signout := post(t, server.URL+"/authserver/signout", map[string]string{"username": "neo", "password": "matrix"})
+	signout.Body.Close()
+	if signout.StatusCode != http.StatusForbidden {
+		t.Fatalf("signout without code status = %d", signout.StatusCode)
+	}
+	signout = post(t, server.URL+"/authserver/signout", map[string]string{"username": "neo", "password": "matrix", "twoFactorCode": "654321"})
+	signout.Body.Close()
+	if signout.StatusCode != http.StatusNoContent {
+		t.Fatalf("signout with code status = %d", signout.StatusCode)
 	}
 }
 

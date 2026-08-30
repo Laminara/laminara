@@ -11,6 +11,7 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidToken       = errors.New("invalid token")
+	ErrTwoFactorRequired  = errors.New("two-factor code required")
 )
 
 type Provider interface {

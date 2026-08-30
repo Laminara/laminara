@@ -1,4 +1,4 @@
-import type { Account, Build, BuildFeatures, EndpointStatus, ServerPlayers } from "@/lib/types";
+import type { Account, Build, BuildFeatures, EndpointStatus, LoginFailure, ServerPlayers } from "@/lib/types";
 
 export const mockEndpoint: EndpointStatus = {
   id: "eu-1",
@@ -12,6 +12,11 @@ export const mockAccount: Account = {
   uuid: "0af1c2d3e4f5",
   name: "Mykyta",
   endpointId: "eu-1",
+};
+
+export const mockLoginFailures: Record<LoginFailure["kind"], string> = {
+  secondFactor: "Введите код из приложения-аутентификатора",
+  failed: "Неверный логин или пароль",
 };
 
 export const mockPlayerCounts: Record<string, ServerPlayers> = {

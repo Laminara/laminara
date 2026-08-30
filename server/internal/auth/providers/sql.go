@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
 
 	"github.com/laminara/laminara/server/internal/sqlschema"
 
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/auth/hash"
+	"github.com/laminara/laminara/server/internal/auth/totp"
 )
 
 func init() {
@@ -27,19 +30,22 @@ type sqlConfig struct {
 	Table  string `json:"table"`
 	Hash   string `json:"hash"`
 	Fields struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		UUID     string `json:"uuid"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		UUID      string `json:"uuid"`
+		TwoFactor string `json:"twoFactorSecret"`
 	} `json:"fields"`
 	Query string `json:"query"`
 }
 
 type sqlProvider struct {
-	db       *sql.DB
-	query    string
-	custom   bool
-	hasUUID  bool
-	verifier hash.Verifier
+	db        *sql.DB
+	query     string
+	custom    bool
+	hasUUID   bool
+	hasSecret bool
+	verifier  hash.Verifier
+	second    *totp.Verifier
 }
 
 func newSQL(raw json.RawMessage) (auth.Provider, error) {
@@ -56,6 +62,9 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 		return nil, err
 	}
 	if cfg.Query != "" {
+		if cfg.Fields.TwoFactor != "" {
+			return nil, errors.New("sql auth: two-factor column works with table mode only, not with a custom query")
+		}
 		db, err := sql.Open(driver, cfg.DSN)
 		if err != nil {
 			return nil, err
@@ -79,17 +88,25 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 		}
 		columns += ", " + quote(uuidCol)
 	}
+	hasSecret := cfg.Fields.TwoFactor != ""
+	if hasSecret {
+		_, secretCol, err := sqlschema.Field(cfg.Table, cfg.Fields.TwoFactor)
+		if err != nil {
+			return nil, err
+		}
+		columns += ", " + quote(secretCol)
+	}
 	db, err := sql.Open(driver, cfg.DSN)
 	if err != nil {
 		return nil, err
 	}
 	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s",
 		columns, quote(table), quote(usernameCol), placeholder)
-	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, verifier: verifier}, nil
+	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, hasSecret: hasSecret, verifier: verifier, second: totp.NewVerifier()}, nil
 }
 
 func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {
-	stored, rawUUID, err := p.lookup(ctx, creds.Username)
+	stored, rawUUID, rawSecret, err := p.lookup(ctx, creds.Username)
 	if err != nil {
 		return auth.Identity{}, err
 	}
@@ -100,6 +117,14 @@ func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) 
 	if !valid {
 		return auth.Identity{}, auth.ErrInvalidCredentials
 	}
+	if secret := strings.TrimSpace(rawSecret.String); p.hasSecret && secret != "" {
+		if creds.TwoFactorCode == "" {
+			return auth.Identity{}, auth.ErrTwoFactorRequired
+		}
+		if !p.second.Verify(creds.Username, secret, creds.TwoFactorCode) {
+			return auth.Identity{}, auth.ErrInvalidCredentials
+		}
+	}
 	id := auth.OfflineUUID(creds.Username)
 	if rawUUID.Valid {
 		if parsed, err := uuid.Parse(rawUUID.String); err == nil {
@@ -109,48 +134,52 @@ func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) 
 	return auth.Identity{Subject: creds.Username, Username: creds.Username, UUID: id}, nil
 }
 
-func (p *sqlProvider) lookup(ctx context.Context, username string) (string, sql.NullString, error) {
+func (p *sqlProvider) lookup(ctx context.Context, username string) (string, sql.NullString, sql.NullString, error) {
 	var stored string
 	var rawUUID sql.NullString
+	var rawSecret sql.NullString
 
 	if !p.custom {
 		dest := []any{&stored}
 		if p.hasUUID {
 			dest = append(dest, &rawUUID)
 		}
-		if err := p.db.QueryRowContext(ctx, p.query, username).Scan(dest...); err != nil {
-			return "", rawUUID, translate(err)
+		if p.hasSecret {
+			dest = append(dest, &rawSecret)
 		}
-		return stored, rawUUID, nil
+		if err := p.db.QueryRowContext(ctx, p.query, username).Scan(dest...); err != nil {
+			return "", rawUUID, rawSecret, translate(err)
+		}
+		return stored, rawUUID, rawSecret, nil
 	}
 
 	rows, err := p.db.QueryContext(ctx, p.query, username)
 	if err != nil {
-		return "", rawUUID, err
+		return "", rawUUID, rawSecret, err
 	}
 	defer rows.Close()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		return "", rawUUID, err
+		return "", rawUUID, rawSecret, err
 	}
 	if len(columns) == 0 || len(columns) > 2 {
-		return "", rawUUID, fmt.Errorf("auth query must select the password and optionally the uuid, got %d columns", len(columns))
+		return "", rawUUID, rawSecret, fmt.Errorf("auth query must select the password and optionally the uuid, got %d columns", len(columns))
 	}
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return "", rawUUID, err
+			return "", rawUUID, rawSecret, err
 		}
-		return "", rawUUID, auth.ErrInvalidCredentials
+		return "", rawUUID, rawSecret, auth.ErrInvalidCredentials
 	}
 	dest := []any{&stored}
 	if len(columns) == 2 {
 		dest = append(dest, &rawUUID)
 	}
 	if err := rows.Scan(dest...); err != nil {
-		return "", rawUUID, err
+		return "", rawUUID, rawSecret, err
 	}
-	return stored, rawUUID, rows.Err()
+	return stored, rawUUID, rawSecret, rows.Err()
 }
 
 func translate(err error) error {

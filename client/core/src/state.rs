@@ -88,13 +88,19 @@ impl Core {
         )
     }
 
-    pub async fn login(&self, username: &str, password: &str) -> Result<LoginResult, CoreError> {
+    pub async fn login(
+        &self,
+        username: &str,
+        password: &str,
+        two_factor_code: &str,
+    ) -> Result<LoginResult, CoreError> {
         let facts = self.machine_facts().await;
         let response = self
             .pool
             .login(
                 username.to_string(),
                 password.to_string(),
+                two_factor_code.to_string(),
                 facts,
                 env!("CARGO_PKG_VERSION").to_string(),
             )
@@ -103,7 +109,6 @@ impl Core {
             code: "login".into(),
             message: "response missing tokens".into(),
         })?;
-        self.transport.set_access_token(Some(tokens.access.clone()));
         let base = self.pool.current_base_url().ok_or(CoreError::NoEndpoint)?;
         self.transport.set_machine_ticket(
             response
@@ -116,9 +121,11 @@ impl Core {
             &base,
             username,
             password,
+            two_factor_code,
             &self.client_token,
         )
         .await?;
+        self.transport.set_access_token(Some(tokens.access.clone()));
         let account = Account {
             uuid: session.uuid.clone(),
             name: session.name.clone(),
@@ -154,7 +161,10 @@ impl Core {
         log: String,
     ) -> Result<String, CoreError> {
         let mut details = std::collections::HashMap::new();
-        details.insert("launcher".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        details.insert(
+            "launcher".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
         details.insert(
             "platform".to_string(),
             crate::platform::current().as_str_name().to_string(),
@@ -179,7 +189,10 @@ impl Core {
             })
             .await?;
         if !response.accepted {
-            return Err(CoreError::Launch(response.message));
+            return Err(CoreError::App {
+                code: "crash".into(),
+                message: response.message,
+            });
         }
         Ok(response.message)
     }
@@ -355,12 +368,16 @@ impl Core {
         Ok(update::relaunch_target(&layout))
     }
 
-    pub fn collect_garbage(&self) -> Result<u64, CoreError> {
-        sync::gc_cas(&self.cas_dir(), &self.config.load().install_dir)
+    pub async fn collect_garbage(&self) -> Result<u64, CoreError> {
+        let cas_dir = self.cas_dir();
+        let install_dir = self.config.load().install_dir.clone();
+        offload(move || sync::gc_cas(&cas_dir, &install_dir)).await
     }
 
-    pub fn verify_installed(&self, profile: &str) -> Vec<String> {
-        sync::verify_installed(&self.profile_dir(profile), &self.state_dir(profile))
+    pub async fn verify_installed(&self, profile: &str) -> Result<Vec<String>, CoreError> {
+        let profile_dir = self.profile_dir(profile);
+        let state_dir = self.state_dir(profile);
+        offload(move || Ok(sync::verify_installed(&profile_dir, &state_dir))).await
     }
 
     pub async fn sync_profile(
@@ -560,6 +577,17 @@ impl Core {
     }
 }
 
+async fn offload<T, F>(work: F) -> Result<T, CoreError>
+where
+    F: FnOnce() -> Result<T, CoreError> + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(result) => result,
+        Err(e) => Err(CoreError::Io(e.to_string())),
+    }
+}
+
 fn java_binary(profile_dir: &Path, profile: &LaunchProfile) -> PathBuf {
     if !profile.java_bin.is_empty() {
         let mut path = profile_dir.to_path_buf();
@@ -606,5 +634,114 @@ fn same_volume(a: &Path, b: &Path) -> bool {
     #[cfg(not(unix))]
     {
         a.components().next() == b.components().next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::proto::core::v1::FilePolicy;
+
+    fn test_core(tmp: &Path) -> Core {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        Core::new(
+            LaminaraPaths {
+                config_dir: tmp.join("config"),
+                data_dir: tmp.join("data"),
+            },
+            ClientConfig {
+                schema_version: 1,
+                endpoints: Vec::new(),
+                server_public_key_hex: hex::encode(key.verifying_key().as_bytes()),
+                trusted_public_keys_hex: Vec::new(),
+                hwid_salt_hex: String::new(),
+                install_dir: tmp.join("install"),
+                game_dir: None,
+                selected_account: None,
+                selected_profile: None,
+                jvm_tuning: Vec::new(),
+                default_memory_mb: 4096,
+                build_settings: std::collections::HashMap::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn ledger_entry(hash: &str) -> sync::OwnedEntry {
+        sync::OwnedEntry {
+            object_hash: hash.to_string(),
+            class: FilePolicy::Unspecified as i32,
+            placement: sync::Placement::Hardlink,
+            released: false,
+        }
+    }
+
+    fn write_ledger(profile: &Path, hashes: &[&str]) {
+        let mut ledger: sync::Ledger = BTreeMap::new();
+        for (index, hash) in hashes.iter().enumerate() {
+            ledger.insert(format!("mods/file{index}.jar"), ledger_entry(hash));
+        }
+        sync::save_ledger(&profile.join(".laminara").join(sync::LEDGER_FILE), &ledger).unwrap();
+    }
+
+    #[tokio::test]
+    async fn offload_returns_the_worker_result() {
+        let value = offload(|| Ok::<u8, CoreError>(7)).await;
+        assert!(matches!(value, Ok(7)));
+    }
+
+    #[tokio::test]
+    async fn offload_survives_a_panicking_worker() {
+        let value: Result<u8, CoreError> = offload(|| panic!("worker failed")).await;
+        assert!(matches!(value, Err(CoreError::Io(_))));
+    }
+
+    #[tokio::test]
+    async fn verify_installed_accepts_read_only_and_reports_broken_immutables() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+        let profile = core.profile_dir("Adventure");
+        std::fs::create_dir_all(profile.join(".laminara")).unwrap();
+        write_ledger(&profile, &["intact", "tampered", "missing"]);
+
+        for (name, contents) in [
+            ("file0.jar", &b"intact"[..]),
+            ("file1.jar", &b"tampered"[..]),
+        ] {
+            let path = profile.join("mods").join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, contents).unwrap();
+        }
+        sync::set_mode(&profile.join("mods/file0.jar"), 0o444);
+
+        let mut broken = core.verify_installed("Adventure").await.unwrap();
+        broken.sort();
+        assert_eq!(
+            broken,
+            vec!["mods/file1.jar".to_string(), "mods/file2.jar".to_string(),]
+        );
+    }
+
+    #[tokio::test]
+    async fn collect_garbage_keeps_objects_named_by_a_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+
+        let profile = core.profile_dir("Adventure");
+        std::fs::create_dir_all(profile.join(".laminara")).unwrap();
+        write_ledger(&profile, &["kept"]);
+
+        let objects = tmp.path().join("data/objects/blake3/ab/cd");
+        std::fs::create_dir_all(&objects).unwrap();
+        std::fs::write(objects.join("kept"), b"kept").unwrap();
+        std::fs::write(objects.join("dropped"), b"dropped").unwrap();
+
+        let removed = core.collect_garbage().await.unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(objects.join("kept").exists());
+        assert!(!objects.join("dropped").exists());
     }
 }

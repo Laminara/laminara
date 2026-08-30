@@ -35,12 +35,12 @@ func NewService(provider Provider, sessions SessionStore, cfg Config) *Service {
 	return &Service{provider: provider, sessions: sessions, cfg: cfg, now: time.Now}
 }
 
-func (s *Service) Verify(ctx context.Context, username, password string) (Identity, error) {
-	return s.provider.Authenticate(ctx, Credentials{Username: username, Password: password})
+func (s *Service) Verify(ctx context.Context, username, password, twoFactorCode string) (Identity, error) {
+	return s.provider.Authenticate(ctx, Credentials{Username: username, Password: password, TwoFactorCode: twoFactorCode})
 }
 
-func (s *Service) Login(ctx context.Context, username, password string) (*Tokens, error) {
-	identity, err := s.provider.Authenticate(ctx, Credentials{Username: username, Password: password})
+func (s *Service) Login(ctx context.Context, username, password, twoFactorCode string) (*Tokens, error) {
+	identity, err := s.provider.Authenticate(ctx, Credentials{Username: username, Password: password, TwoFactorCode: twoFactorCode})
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {
 			return nil, ErrInvalidCredentials

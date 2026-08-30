@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
+	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/hwid"
 )
 
@@ -45,6 +46,14 @@ func (s *Service) ReportMachine(ctx context.Context, req *connect.Request[apiv1.
 }
 
 var errTooManyAttempts = errors.New("too many attempts, wait a few minutes")
+
+func twoFactorError() error {
+	connectErr := connect.NewError(connect.CodeFailedPrecondition, auth.ErrTwoFactorRequired)
+	if detail, err := connect.NewErrorDetail(&apiv1.TwoFactorRequired{}); err == nil {
+		connectErr.AddDetail(detail)
+	}
+	return connectErr
+}
 
 func machineError(err error) error {
 	if banErr, ok := hwid.AsBanError(err); ok {

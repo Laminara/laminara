@@ -66,8 +66,10 @@ import ParamField from "@site/components/ParamField.astro";
   Удаляет сборку (папку профиля и опубликованный манифест). Алиасы: `deletebuild`, `remove`.
 </ParamField>
 
-<ParamField path="auth test <логин> <пароль>">
-  Проверяет пару логин/пароль через настроенный адаптер. `auth validate <токен>` проверяет токен доступа. Удобно для отладки раздела `auth`.
+<ParamField path="auth test <логин> <пароль> [код]">
+  Проверяет пару логин/пароль через настроенный адаптер; для игрока с двухфакторкой укажите
+  код третьим. `auth validate <токен>` проверяет токен доступа. `auth totp <логин>` выпускает
+  секрет двухфакторки — как подключать, в [Аутентификации](/auth/adapters).
 </ParamField>
 
 <ParamField path="access rules · access check <сборка> <ник> · access reload">

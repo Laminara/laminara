@@ -33,7 +33,7 @@ func newService() *auth.Service {
 func TestLoginAndValidate(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
-	tokens, err := svc.Login(ctx, "neo", "matrix")
+	tokens, err := svc.Login(ctx, "neo", "matrix", "")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLoginAndValidate(t *testing.T) {
 }
 
 func TestLoginWrongPassword(t *testing.T) {
-	if _, err := newService().Login(context.Background(), "neo", "wrong"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := newService().Login(context.Background(), "neo", "wrong", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
 	}
 }
@@ -55,7 +55,7 @@ func TestLoginWrongPassword(t *testing.T) {
 func TestRefreshRotationAndReuse(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
-	first, err := svc.Login(ctx, "neo", "matrix")
+	first, err := svc.Login(ctx, "neo", "matrix", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRefreshRotationAndReuse(t *testing.T) {
 func TestLogoutRevokes(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
-	tokens, err := svc.Login(ctx, "neo", "matrix")
+	tokens, err := svc.Login(ctx, "neo", "matrix", "")
 	if err != nil {
 		t.Fatal(err)
 	}

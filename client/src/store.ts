@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Account, ActiveModal, Build, EndpointStatus, LauncherUpdate, NewsItem, Phase, PlayerCounts, SyncEvent, SyncState } from "@/lib/types";
+import type { Account, ActiveModal, Build, EndpointStatus, LauncherUpdate, LoginFailure, NewsItem, Phase, PlayerCounts, SyncEvent, SyncState } from "@/lib/types";
 import { ipc } from "@/lib/ipc";
 import { buildBlock, isPlayable } from "@/lib/buildState";
 
@@ -27,6 +27,7 @@ interface LauncherState {
   news: NewsItem[];
   unreadNews: number;
   error: string | null;
+  twoFactor: boolean;
   modal: ActiveModal;
   menuOpen: boolean;
   gameLog: string[];
@@ -37,6 +38,10 @@ interface LauncherState {
   update: LauncherUpdate | null;
   updateProgress: { done: number; total: number } | null;
   updateDismissed: boolean;
+  listeners: (() => void)[];
+  binding: Promise<void> | null;
+  startup: Promise<void> | null;
+  unbinding: boolean;
   openModal: (modal: ActiveModal) => void;
   closeModal: () => void;
   toggleMenu: () => void;
@@ -50,8 +55,10 @@ interface LauncherState {
   installUpdate: () => Promise<void>;
   continueStartup: () => Promise<void>;
   dismissUpdate: () => void;
+  bindListeners: () => Promise<void>;
+  unbindListeners: () => void;
   init: () => Promise<void>;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, code?: string) => Promise<void>;
   logout: () => Promise<void>;
   select: (name: string) => void;
   play: () => Promise<void>;
@@ -59,8 +66,6 @@ interface LauncherState {
   stopGame: () => Promise<void>;
   refreshPlayers: () => Promise<void>;
 }
-
-let listenersBound = false;
 
 export const useLauncher = create<LauncherState>((set, get) => ({
   phase: "connecting",
@@ -73,6 +78,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   news: [],
   unreadNews: 0,
   error: null,
+  twoFactor: false,
   modal: null,
   menuOpen: false,
   gameLog: [],
@@ -83,6 +89,10 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   update: null,
   updateProgress: null,
   updateDismissed: false,
+  listeners: [],
+  binding: null,
+  startup: null,
+  unbinding: false,
 
   dismissCrash: () => set({ crash: null, crashSent: null }),
 
@@ -168,71 +178,109 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     }
   },
 
-  init: async () => {
-    if (!listenersBound) {
-      listenersBound = true;
-      void ipc.onGameLog((line) =>
-        set((state) => ({
-          gameLog: state.gameLog.length >= LOG_LIMIT ? [...state.gameLog.slice(-(LOG_LIMIT - 1)), line] : [...state.gameLog, line],
-        })),
-      );
-      void ipc.onGameExit((code) => {
-        const stoppedByUser = get().stoppedByUser;
-        set({ stoppedByUser: false });
-        if (get().phase === "running") set({ phase: "home" });
-        if (code === 0 || stoppedByUser) return;
-        setTimeout(() => {
-          const state = get();
-          const build = state.builds.find((item) => item.name === state.selected);
-          set({
-            crash: {
-              code,
-              log: state.gameLog.slice(-CRASH_LOG_LINES),
-              full: state.gameLog,
-              build: state.selected ?? "",
-              loader: build?.loader ?? "",
-              version: build?.minecraft ?? "",
-            },
-            crashSent: null,
-          });
-        }, CRASH_LOG_SETTLE_MS);
-      });
-    }
-
-    try {
-      const endpoints = await ipc.probeEndpoints();
-      set({ endpoint: endpoints.find((item) => item.isCurrent) ?? endpoints[0] ?? null });
-    } catch (err) {
-      set({ phase: "login", error: String(err) });
-      return;
-    }
-
-    await get().checkUpdate();
-    if (get().update?.canInstall) {
-      set({ phase: "updating" });
-      await get().installUpdate();
-      return;
-    }
-
-    await get().continueStartup();
+  bindListeners: () => {
+    const pending = get().binding;
+    if (pending) return pending;
+    if (get().listeners.length) return Promise.resolve();
+    const attached: (() => void)[] = [];
+    const binding = (async () => {
+      try {
+        attached.push(
+          await ipc.onGameLog((line) =>
+            set((state) => ({
+              gameLog: state.gameLog.length >= LOG_LIMIT ? [...state.gameLog.slice(-(LOG_LIMIT - 1)), line] : [...state.gameLog, line],
+            })),
+          ),
+        );
+        attached.push(
+          await ipc.onGameExit((code) => {
+            const stoppedByUser = get().stoppedByUser;
+            set({ stoppedByUser: false });
+            if (get().phase === "running") set({ phase: "home" });
+            if (code === 0 || stoppedByUser) return;
+            setTimeout(() => {
+              const state = get();
+              const build = state.builds.find((item) => item.name === state.selected);
+              set({
+                crash: {
+                  code,
+                  log: state.gameLog.slice(-CRASH_LOG_LINES),
+                  full: state.gameLog,
+                  build: state.selected ?? "",
+                  loader: build?.loader ?? "",
+                  version: build?.minecraft ?? "",
+                },
+                crashSent: null,
+              });
+            }, CRASH_LOG_SETTLE_MS);
+          }),
+        );
+        if (get().unbinding) {
+          for (const off of attached) off();
+          return;
+        }
+        set({ listeners: [...get().listeners, ...attached] });
+      } catch (err) {
+        for (const off of attached) off();
+        console.error("listener bind failed", err);
+        throw err;
+      }
+    })();
+    set({ binding });
+    return binding.finally(() => {
+      if (get().binding === binding) set({ binding: null });
+    });
   },
 
-  login: async (username, password) => {
+  unbindListeners: () => {
+    set({ unbinding: true });
+    for (const off of get().listeners) off();
+    set({ listeners: [], unbinding: false });
+  },
+
+  init: async () => {
+    await get().bindListeners().catch(() => undefined);
+    const started = get().startup;
+    if (started) return started;
+    const startup = (async () => {
+      try {
+        const endpoints = await ipc.probeEndpoints();
+        set({ endpoint: endpoints.find((item) => item.isCurrent) ?? endpoints[0] ?? null });
+      } catch (err) {
+        set({ phase: "login", error: String(err) });
+        return;
+      }
+
+      await get().checkUpdate();
+      if (get().update?.canInstall) {
+        set({ phase: "updating" });
+        await get().installUpdate();
+        return;
+      }
+
+      await get().continueStartup();
+    })();
+    set({ startup });
+    return startup;
+  },
+
+  login: async (username, password, code = "") => {
     set({ error: null });
     try {
-      const account = await ipc.login(username, password);
+      const account = await ipc.login(username, password, code);
       const builds = await ipc.listBuilds();
-      set({ account, builds, selected: pickBuild(builds), phase: "home" });
+      set({ account, builds, selected: pickBuild(builds), phase: "home", twoFactor: false });
       void get().refreshPlayers();
       void get().refreshNews();
     } catch (err) {
-      set({ error: String(err) });
+      const failure = asLoginFailure(err);
+      set({ error: failure.message, twoFactor: failure.kind === "secondFactor" });
     }
   },
 
   logout: async () => {
     await ipc.logout();
-    set({ account: null, phase: "login" });
+    set({ account: null, phase: "login", error: null, twoFactor: false });
   },
 
   play: async () => {
@@ -272,6 +320,16 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     await ipc.stop();
   },
 }));
+
+function asLoginFailure(err: unknown): LoginFailure {
+  if (err && typeof err === "object" && "kind" in err) {
+    const failure = err as { kind: string; message?: string };
+    if (failure.kind === "secondFactor" || failure.kind === "failed") {
+      return { kind: failure.kind, message: failure.message || "Не удалось войти. Попробуйте ещё раз" };
+    }
+  }
+  return { kind: "failed", message: String(err) };
+}
 
 function pickBuild(builds: Build[]): string | null {
   return (builds.find(isPlayable) ?? builds[0])?.name ?? null;

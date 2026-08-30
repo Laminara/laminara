@@ -91,8 +91,11 @@ func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginReq
 	if !s.limits.SignInAllowed(ctx, address, req.Msg.Username) {
 		return nil, connect.NewError(connect.CodeResourceExhausted, errTooManyAttempts)
 	}
-	tokens, err := s.auth.Login(ctx, req.Msg.Username, req.Msg.Password)
+	tokens, err := s.auth.Login(ctx, req.Msg.Username, req.Msg.Password, req.Msg.TwoFactorCode)
 	if err != nil {
+		if errors.Is(err, auth.ErrTwoFactorRequired) {
+			return nil, twoFactorError()
+		}
 		s.limits.SignInFailed(ctx, address, req.Msg.Username)
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)
 	}

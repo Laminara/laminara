@@ -1,4 +1,5 @@
 use crate::error::RpcError;
+use crate::proto::api::v1::CrashReport;
 use crate::proto::api::v1::{
     CheckUpdateRequest, CheckUpdateResponse, GetChallengeRequest, GetChallengeResponse,
     GetManifestRequest, GetManifestResponse, GetNewsRequest, GetNewsResponse, ListProfilesRequest,
@@ -6,7 +7,6 @@ use crate::proto::api::v1::{
     RefreshRequest, RefreshResponse, ReportCrashRequest, ReportCrashResponse, ReportMachineRequest,
     ReportMachineResponse, Tokens,
 };
-use crate::proto::api::v1::CrashReport;
 use crate::transport::Transport;
 
 const SERVICE: &str = "laminara.api.v1.LauncherService";
@@ -28,6 +28,7 @@ impl<'a> LauncherClient<'a> {
         &self,
         username: String,
         password: String,
+        two_factor_code: String,
         machine: Option<MachineReport>,
     ) -> Result<LoginResponse, RpcError> {
         self.transport
@@ -37,6 +38,7 @@ impl<'a> LauncherClient<'a> {
                 &LoginRequest {
                     username,
                     password,
+                    two_factor_code,
                     machine,
                 },
             )
@@ -164,7 +166,7 @@ mod live {
         let client = LauncherClient::new(&transport, &base);
 
         let tokens = client
-            .login("neo".into(), "matrix".into(), None)
+            .login("neo".into(), "matrix".into(), String::new(), None)
             .await
             .expect("login")
             .tokens
@@ -175,7 +177,9 @@ mod live {
         let profiles = client.list_profiles().await.expect("list_profiles");
         eprintln!("live: access ok, {} profiles", profiles.len());
 
-        let bad = client.login("neo".into(), "wrong".into(), None).await;
+        let bad = client
+            .login("neo".into(), "wrong".into(), String::new(), None)
+            .await;
         assert!(
             matches!(bad, Err(RpcError::App { .. })),
             "wrong password should be App error, got {bad:?}"
@@ -210,6 +214,7 @@ mod live {
                 .login(
                     user.into(),
                     "matrix".into(),
+                    String::new(),
                     Some(facts.report(nonce, "0.1.0-test")),
                 )
                 .await

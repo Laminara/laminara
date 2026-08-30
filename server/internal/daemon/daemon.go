@@ -24,13 +24,14 @@ import (
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/admin"
 	"github.com/laminara/laminara/server/internal/auth"
+	"github.com/laminara/laminara/server/internal/auth/totp"
 	"github.com/laminara/laminara/server/internal/buildsvc"
+	"github.com/laminara/laminara/server/internal/buildview"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/control"
 	"github.com/laminara/laminara/server/internal/events"
-	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/logbus"
@@ -59,6 +60,7 @@ type Daemon struct {
 	modules       *module.Registry
 	moduleLoader  *remote.Loader
 	log           *slog.Logger
+	console       io.Writer
 	publicHandler http.Handler
 	publicAddr    string
 	catalog       admin.Catalog
@@ -102,6 +104,7 @@ func New(opts Options) *Daemon {
 		bus:           bus,
 		registry:      registry,
 		log:           log,
+		console:       os.Stdout,
 		publicHandler: opts.PublicHandler,
 		publicAddr:    opts.PublicAddr,
 		update:        opts.Update,
@@ -297,12 +300,30 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 		if ctx.Err() != nil {
 			return
 		}
+		name := line
+		if fields := strings.Fields(line); len(fields) > 0 {
+			name = fields[0]
+		}
+		registered, known := d.registry.Lookup(name)
+		quiet := known && (registered.Secret || registered.SecretArgs)
 		var out bytes.Buffer
 		if err := d.registry.Dispatch(ctx, line, &out); err != nil {
-			d.log.Error("command failed", "source", "console", "command", line, "error", err)
+			if quiet {
+				d.log.Error("command failed", "source", "console", "command", name, "error", err)
+			} else {
+				d.log.Error("command failed", "source", "console", "command", line, "error", err)
+			}
 			continue
 		}
 		reply := strings.TrimRight(out.String(), "\n")
+		if known && registered.Secret {
+			d.log.Info("command succeeded", "source", "console", "command", name)
+			if reply != "" {
+				fmt.Fprintln(d.console, reply)
+				d.log.Info("ответ секретной команды показан в терминале", "source", "console", "command", name)
+			}
+			continue
+		}
 		if reply == "" {
 			continue
 		}
@@ -318,10 +339,12 @@ func (d *Daemon) statusCommand() command.Command {
 		Synopsis: "состояние проекта",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
 			s := d.status()
-			fmt.Fprintf(out, "версия:   %s\n", s.Version)
-			fmt.Fprintf(out, "в работе: %s\n", humanize.Duration(time.Since(time.Unix(0, s.StartedAtNano))))
-			fmt.Fprintf(out, "модулей:  %d\n", s.ModulesLoaded)
-			fmt.Fprintf(out, "память:   %s\n", humanize.Bytes(s.MemoryBytes))
+			buildview.WriteStatus(out, buildview.Status{
+				Version:            s.Version,
+				StartedAtUnixNanos: s.StartedAtNano,
+				ModulesLoaded:      s.ModulesLoaded,
+				MemoryBytes:        s.MemoryBytes,
+			})
 			return nil
 		},
 	}
@@ -341,17 +364,25 @@ func (d *Daemon) versionCommand() command.Command {
 func authCommand(service *auth.Service) command.Command {
 	return command.Command{
 		Name:     "auth",
-		Synopsis: "проверить вход игроков (auth test <логин> <пароль> | auth validate <токен>)",
+		Secret:   true,
+		Synopsis: "проверить вход игроков и выпустить код 2ФА (auth test | auth validate | auth totp)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if len(args) == 0 {
-				return errors.New("auth test <игрок> <пароль> | auth validate <токен>")
+				return errors.New("auth test <игрок> <пароль> [код] | auth validate <токен> | auth totp <игрок>")
 			}
 			switch args[0] {
 			case "test":
 				if len(args) < 3 {
-					return errors.New("напишите игрока и пароль: auth test <игрок> <пароль>")
+					return errors.New("напишите игрока и пароль: auth test <игрок> <пароль> [код]")
 				}
-				tokens, err := service.Login(ctx, args[1], args[2])
+				code := ""
+				if len(args) > 3 {
+					code = args[3]
+				}
+				tokens, err := service.Login(ctx, args[1], args[2], code)
+				if errors.Is(err, auth.ErrTwoFactorRequired) {
+					return errors.New("у игрока включена двухфакторная аутентификация: auth test <игрок> <пароль> <код>")
+				}
 				if err != nil {
 					return err
 				}
@@ -367,8 +398,20 @@ func authCommand(service *auth.Service) command.Command {
 				}
 				fmt.Fprintf(out, "игрок: %s\nuuid:  %s\n", identity.Username, identity.UUID)
 				return nil
+			case "totp":
+				if len(args) < 2 {
+					return errors.New("напишите игрока: auth totp <игрок>")
+				}
+				secret, err := totp.Generate()
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "секрет:  %s\nстрока для приложения-аутентификатора:\n%s\n", secret, totp.URI(secret, args[1]))
+				fmt.Fprintln(out, "впишите секрет игроку в источник аккаунтов — вход без кода будет закрыт")
+				fmt.Fprintln(out, "sql подхватывает секрет сразу, jsonfile — после перезапуска проекта")
+				return nil
 			default:
-				return fmt.Errorf("у auth нет действия «%s» — есть test и validate", args[0])
+				return fmt.Errorf("у auth нет действия «%s» — есть test, validate и totp", args[0])
 			}
 		},
 	}

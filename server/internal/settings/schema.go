@@ -10,6 +10,7 @@ import (
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/selfupdate"
 	"github.com/laminara/laminara/server/internal/skin"
+	"github.com/laminara/laminara/server/internal/sqlschema"
 	"github.com/laminara/laminara/server/internal/storage"
 )
 
@@ -56,8 +57,6 @@ type Collection struct {
 	Fields    []Field
 }
 
-var sqlDrivers = func() []string { return []string{"postgres", "mysql", "sqlite"} }
-
 var schema = []Section{
 	{
 		Key:   "api",
@@ -85,23 +84,27 @@ var schema = []Section{
 					{Key: "fields.username", Label: "Поле логина", Kind: KindText, Default: "username"},
 					{Key: "fields.password", Label: "Поле пароля", Kind: KindText, Default: "password"},
 					{Key: "fields.uuid", Label: "Поле UUID", Kind: KindText, Hint: "Пусто — UUID посчитается из логина."},
+					{Key: "fields.twoFactorSecret", Label: "Поле секрета 2ФА", Kind: KindText, Default: "totp", Hint: "Base32-секрет из приложения-аутентификатора. Записи без него входят как раньше."},
 				},
 				"sql": {
-					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlDrivers},
+					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlschema.Drivers},
 					{Key: "dsn", Label: "Строка подключения", Kind: KindSecret, Hint: "Например postgres://user:pass@host:5432/base?sslmode=disable"},
 					{Key: "table", Label: "Таблица", Kind: KindText, Default: "users"},
 					{Key: "hash", Label: "Как захеширован пароль", Kind: KindChoice, Default: "bcrypt", Options: hash.Names},
 					{Key: "fields.username", Label: "Колонка логина", Kind: KindText, Default: "username"},
 					{Key: "fields.password", Label: "Колонка пароля", Kind: KindText, Default: "password"},
 					{Key: "fields.uuid", Label: "Колонка UUID", Kind: KindText},
+					{Key: "fields.twoFactorSecret", Label: "Колонка секрета 2ФА", Kind: KindText, Hint: "Base32-секрет в вашей таблице. Работает с режимом таблицы, со своим запросом — нет."},
 					{Key: "query", Label: "Свой запрос", Kind: KindText, Hint: "Если задан, таблица и колонки не используются."},
 				},
 				"http": {
 					{Key: "url", Label: "Адрес проверки пароля", Kind: KindText, Hint: "Ваш сайт получает логин и пароль и отвечает JSON."},
 					{Key: "usernameField", Label: "Поле логина в запросе", Kind: KindText, Default: "username"},
 					{Key: "passwordField", Label: "Поле пароля в запросе", Kind: KindText, Default: "password"},
-					{Key: "uuidField", Label: "Поле UUID в ответе", Kind: KindText, Default: "uuid"},
+					{Key: "codeField", Label: "Поле кода в запросе", Kind: KindText, Default: "totp", Hint: "Код подставляется, только когда игрок его ввёл."},
+					{Key: "uuidField", Label: "Поле UUID в ответе", Kind: KindText, Default: "uuid", Hint: "Путь с точкой достаёт из вложенности: user.uuid."},
 					{Key: "successField", Label: "Поле успеха в ответе", Kind: KindText, Default: "ok"},
+					{Key: "secondFactorField", Label: "Признак запроса кода в ответе", Kind: KindText, Hint: "Ваш сайт поднимает его, когда пароль верный, а код не пришёл, — тогда лаунчер спросит код."},
 				},
 			}},
 		},
@@ -159,7 +162,7 @@ var schema = []Section{
 					{Key: "url", Label: "Адрес JSON со скинами", Kind: KindText, Hint: "Подставляются %nickname% и %uuid%."},
 				},
 				"sql": {
-					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlDrivers},
+					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlschema.Drivers},
 					{Key: "dsn", Label: "Строка подключения", Kind: KindSecret},
 					{Key: "table", Label: "Таблица", Kind: KindText},
 					{Key: "lookup", Label: "По чему искать", Kind: KindChoice, Default: "username", Options: func() []string { return []string{"username", "uuid"} }},
@@ -185,7 +188,7 @@ var schema = []Section{
 			{Key: "store.backend", Label: "Где хранить компьютеры", Kind: KindChoice, Default: "memory", Options: hwid.StoreNames},
 			{Key: "store.config", Label: "Настройки хранилища", VariantOf: "store.backend", Variants: map[string][]Field{
 				"sql": {
-					{Key: "driver", Label: "СУБД", Kind: KindChoice, Default: "sqlite", Options: sqlDrivers},
+					{Key: "driver", Label: "СУБД", Kind: KindChoice, Default: "sqlite", Options: sqlschema.Drivers},
 					{Key: "dsn", Label: "Строка подключения", Kind: KindSecret, Hint: "Для sqlite — путь к файлу базы."},
 				},
 			}},
@@ -405,29 +408,6 @@ func collectionOf(section Section, key string) (Collection, bool) {
 		}
 	}
 	return Collection{}, false
-}
-
-func fieldIn(fields []Field, key string) (Field, bool) {
-	for _, field := range fields {
-		if field.Key == key {
-			return field, true
-		}
-		if field.Variants == nil {
-			continue
-		}
-		for _, set := range field.Variants {
-			for _, nested := range set {
-				if field.Key+"."+nested.Key == key {
-					return nested, true
-				}
-			}
-		}
-	}
-	return Field{}, false
-}
-
-func fieldOf(section Section, key string) (Field, bool) {
-	return fieldIn(section.Fields, key)
 }
 
 func (f Field) options() []string {

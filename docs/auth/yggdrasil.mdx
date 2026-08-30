@@ -65,7 +65,7 @@ Yggdrasil поднимается на том же публичном порту,
       "fields": { "username": "username", "skin": "skin", "cape": "cape" }
     }
     ```
-    `driver` — `mariadb`, `mysql` или `postgres`. `cape` и `model` необязательны; если колонка
+    `driver` — `mariadb`, `mysql`, `postgres` или `sqlite`. `cape` и `model` необязательны; если колонка
     `model` есть, значение `slim` включает тонкую модель рук, иначе берётся `slim` из конфига.
 
     Если текстуры лежат не в одной таблице, задайте `query` вместо `table` и `fields` —

@@ -30,6 +30,8 @@ struct AuthenticateRequest {
     password: String,
     client_token: String,
     request_user: bool,
+    #[serde(rename = "twoFactorCode", skip_serializing_if = "String::is_empty")]
+    two_factor_code: String,
 }
 
 #[derive(Deserialize)]
@@ -46,11 +48,42 @@ struct AuthenticateResponse {
     selected_profile: SelectedProfile,
 }
 
+#[derive(Deserialize)]
+struct YggError {
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(rename = "errorMessage")]
+    error_message: Option<String>,
+}
+
+const SECOND_FACTOR_EXCEPTION: &str = "SecondFactorRequiredException";
+
+async fn failure(response: reqwest::Response, stage: &str) -> CoreError {
+    let status = response.status();
+    let parsed = response
+        .text()
+        .await
+        .ok()
+        .and_then(|body| serde_json::from_str::<YggError>(&body).ok());
+    let message = parsed
+        .as_ref()
+        .and_then(|err| err.error_message.clone())
+        .unwrap_or_else(|| format!("{stage}: http {status}"));
+    let code = match parsed.and_then(|err| err.error) {
+        Some(kind) if kind == SECOND_FACTOR_EXCEPTION => {
+            crate::error::SECOND_FACTOR_CODE.to_string()
+        }
+        _ => "yggdrasil".to_string(),
+    };
+    CoreError::App { code, message }
+}
+
 pub async fn authenticate(
     transport: &Transport,
     base_url: &str,
     username: &str,
     password: &str,
+    two_factor_code: &str,
     client_token: &str,
 ) -> Result<GameSession, CoreError> {
     let url = format!(
@@ -66,6 +99,7 @@ pub async fn authenticate(
         password: password.to_string(),
         client_token: client_token.to_string(),
         request_user: false,
+        two_factor_code: two_factor_code.to_string(),
     };
     let mut builder = transport.client().post(&url).json(&request);
     if let Some(ticket) = transport.machine_ticket() {
@@ -76,10 +110,7 @@ pub async fn authenticate(
         .await
         .map_err(|e| CoreError::Transport(e.to_string()))?;
     if !response.status().is_success() {
-        return Err(CoreError::App {
-            code: "yggdrasil".into(),
-            message: format!("authenticate: http {}", response.status()),
-        });
+        return Err(failure(response, "authenticate").await);
     }
     let auth: AuthenticateResponse = response
         .json()
@@ -124,10 +155,7 @@ pub async fn refresh(
         .await
         .map_err(|e| CoreError::Transport(e.to_string()))?;
     if !response.status().is_success() {
-        return Err(CoreError::App {
-            code: "yggdrasil".into(),
-            message: format!("refresh: http {}", response.status()),
-        });
+        return Err(failure(response, "refresh").await);
     }
     let auth: AuthenticateResponse = response
         .json()

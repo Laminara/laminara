@@ -18,13 +18,14 @@ import ParamField from "@site/components/ParamField.astro";
 
 Поля `config` по провайдерам:
 
-- **jsonfile** — `path`, `hash`, `fields{username, password, uuid}`
-- **sql** — `driver`, `dsn`, `table`, `hash`, `fields{username, password, uuid}`
-- **http** — `url`, `usernameField`, `passwordField`, `uuidField`, `successField`
+- **jsonfile** — `path`, `hash`, `fields{username, password, uuid, twoFactorSecret}`
+- **sql** — `driver`, `dsn`, `table`, `hash`, `fields{username, password, uuid, twoFactorSecret}`
+- **http** — `url`, `usernameField`, `passwordField`, `codeField`, `uuidField`, `successField`, `secondFactorField`
 
 Значения `hash`: `argon2id`, `bcrypt`, `sha256`, `sha512`, `md5`, `plain`. Подробнее — [Аутентификация](/auth/adapters).
 
 <ParamField path="config.query" type="string">Для `sql`: свой запрос вместо `table`/`fields`, когда нужна связка таблиц или учёт флага бана. Логин — единственный подстановочный знак, выбираются пароль и (необязательно) UUID.</ParamField>
+<ParamField path="config.fields.twoFactorSecret" type="string">Ключ записи (`jsonfile`, по умолчанию `totp`) или колонка (`sql`), где лежит base32-секрет двухфакторки. Подробнее — [Аутентификация](/auth/adapters).</ParamField>
 
 ## storage
 

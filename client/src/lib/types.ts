@@ -135,6 +135,8 @@ export type SyncEvent =
   | { event: "finished"; data: { downloaded: number; skipped: number; pruned: number } }
   | { event: "failed"; data: { message: string } };
 
+export type LoginFailure = { kind: "secondFactor" | "failed"; message: string };
+
 export interface LauncherUpdate {
   version: string;
   notes: string;

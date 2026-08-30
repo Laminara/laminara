@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -99,9 +100,10 @@ func (s *Server) metadata(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username    string `json:"username"`
-		Password    string `json:"password"`
-		ClientToken string `json:"clientToken"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		ClientToken   string `json:"clientToken"`
+		TwoFactorCode string `json:"twoFactorCode"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -111,10 +113,16 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusTooManyRequests, "Too many attempts. Try again in a few minutes.")
 		return
 	}
-	identity, err := s.auth.Verify(r.Context(), req.Username, req.Password)
+	identity, err := s.auth.Verify(r.Context(), req.Username, req.Password, req.TwoFactorCode)
 	if err != nil {
-		s.limits.SignInFailed(r.Context(), address, req.Username)
-		yggError(w, http.StatusForbidden, "Invalid credentials. Invalid username or password.")
+		if !errors.Is(err, auth.ErrTwoFactorRequired) {
+			s.limits.SignInFailed(r.Context(), address, req.Username)
+		}
+		if errors.Is(err, auth.ErrTwoFactorRequired) {
+			yggErrorType(w, http.StatusForbidden, "SecondFactorRequiredException", messageFor(err))
+			return
+		}
+		yggError(w, http.StatusForbidden, messageFor(err))
 		return
 	}
 	if err := s.machines.VerifyTicket(r.Header.Get(MachineTicketHeader)); err != nil {
@@ -193,14 +201,23 @@ func (s *Server) invalidate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		TwoFactorCode string `json:"twoFactorCode"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if _, err := s.auth.Verify(r.Context(), req.Username, req.Password); err != nil {
-		yggError(w, http.StatusForbidden, "Invalid credentials.")
+	address := clientAddress(r)
+	if !s.limits.SignInAllowed(r.Context(), address, req.Username) {
+		yggError(w, http.StatusTooManyRequests, "Too many attempts. Try again in a few minutes.")
+		return
+	}
+	if _, err := s.auth.Verify(r.Context(), req.Username, req.Password, req.TwoFactorCode); err != nil {
+		if !errors.Is(err, auth.ErrTwoFactorRequired) {
+			s.limits.SignInFailed(r.Context(), address, req.Username)
+		}
+		yggError(w, http.StatusForbidden, messageFor(err))
 		return
 	}
 	s.store.deleteUser(req.Username)
@@ -300,10 +317,21 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func yggError(w http.ResponseWriter, status int, message string) {
+	yggErrorType(w, status, "ForbiddenOperationException", message)
+}
+
+func yggErrorType(w http.ResponseWriter, status int, errorType, message string) {
 	writeJSON(w, status, map[string]string{
-		"error":        "ForbiddenOperationException",
+		"error":        errorType,
 		"errorMessage": message,
 	})
+}
+
+func messageFor(err error) string {
+	if errors.Is(err, auth.ErrTwoFactorRequired) {
+		return "Two-factor authentication code required."
+	}
+	return "Invalid credentials. Invalid username or password."
 }
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {

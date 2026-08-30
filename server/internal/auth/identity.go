@@ -13,8 +13,9 @@ type Identity struct {
 }
 
 type Credentials struct {
-	Username string
-	Password string
+	Username      string
+	Password      string
+	TwoFactorCode string
 }
 
 func OfflineUUID(username string) uuid.UUID {
