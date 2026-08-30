@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/platform"
 	"github.com/laminara/laminara/server/internal/storage"
+	"github.com/laminara/laminara/server/internal/version"
 )
 
 const (
@@ -112,10 +112,10 @@ func (s *Service) status(out io.Writer) error {
 	return nil
 }
 
-func (s *Service) publish(ctx context.Context, version string, out io.Writer) error {
-	version = strings.TrimSpace(strings.TrimPrefix(version, "v"))
-	if !validVersion(version) {
-		return fmt.Errorf("версия %q не похожа на номер вида 1.2.3", version)
+func (s *Service) publish(ctx context.Context, candidate string, out io.Writer) error {
+	candidate = strings.TrimSpace(strings.TrimPrefix(candidate, "v"))
+	if !version.IsValid(candidate) {
+		return fmt.Errorf("версия %q не похожа на номер версии, например 1.2.3", candidate)
 	}
 	current, _, err := NewReleases(s.dir).Current()
 	if err != nil {
@@ -126,12 +126,12 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 		if err != nil {
 			return err
 		}
-		if compareVersions(version, decoded.Version) <= 0 {
-			return fmt.Errorf("версия %s должна быть больше уже опубликованной %s", version, decoded.Version)
+		if !version.IsNewer(candidate, decoded.Version) {
+			return fmt.Errorf("версия %s должна быть больше уже опубликованной %s", candidate, decoded.Version)
 		}
 	}
 
-	dir := filepath.Join(s.dir, version)
+	dir := filepath.Join(s.dir, candidate)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("не читается папка %s: %w", dir, err)
@@ -139,7 +139,7 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 
 	release := &corev1.LauncherRelease{
 		SchemaVersion:       schemaVersion,
-		Version:             version,
+		Version:             candidate,
 		ReleasedAtUnixNanos: time.Now().UnixNano(),
 	}
 	seen := make(map[string]bool)
@@ -197,9 +197,9 @@ func (s *Service) publish(ctx context.Context, version string, out io.Writer) er
 		return err
 	}
 	if s.emit != nil {
-		s.emit("launcher.published", map[string]string{"version": version})
+		s.emit("launcher.published", map[string]string{"version": candidate})
 	}
-	fmt.Fprintf(out, "Лаунчер %s опубликован — старые версии обновятся сами\n", version)
+	fmt.Fprintf(out, "Лаунчер %s опубликован — старые версии обновятся сами\n", candidate)
 	return nil
 }
 
@@ -269,42 +269,6 @@ func platformFromName(lower string, fallback corev1.Platform) corev1.Platform {
 func kindName(kind corev1.LauncherArtifactKind) string {
 	name := corev1.LauncherArtifactKind_name[int32(kind)]
 	return strings.ToLower(strings.TrimPrefix(name, "LAUNCHER_ARTIFACT_KIND_"))
-}
-
-func validVersion(version string) bool {
-	parts := strings.Split(version, ".")
-	if len(parts) != 3 {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" {
-			return false
-		}
-		if _, err := strconv.Atoi(strings.SplitN(part, "-", 2)[0]); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func compareVersions(a, b string) int {
-	as, bs := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < 3; i++ {
-		av, bv := 0, 0
-		if i < len(as) {
-			av, _ = strconv.Atoi(strings.SplitN(as[i], "-", 2)[0])
-		}
-		if i < len(bs) {
-			bv, _ = strconv.Atoi(strings.SplitN(bs[i], "-", 2)[0])
-		}
-		if av != bv {
-			if av < bv {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
 }
 
 func kindWord(kind corev1.LauncherArtifactKind) string {

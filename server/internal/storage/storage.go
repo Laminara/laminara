@@ -27,7 +27,6 @@ type Backend interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Stat(ctx context.Context, key string) (size int64, exists bool, err error)
 	Delete(ctx context.Context, key string) error
-	List(ctx context.Context, prefix string) ([]string, error)
 	Locate(ctx context.Context, key string, ttl time.Duration) (Location, error)
 }
 

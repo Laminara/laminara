@@ -1,6 +1,11 @@
 package prepare
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/laminara/laminara/server/internal/jre"
@@ -40,5 +45,25 @@ func TestResolveJavaBinPerPlatform(t *testing.T) {
 
 	if _, err := resolveJavaBin([]jre.RuntimeFile{{Path: "lib/modules"}}, "linux"); err == nil {
 		t.Fatal("a runtime without java must error")
+	}
+}
+
+func TestDownloadRuntimeExplainsWhereToTakeJavaFrom(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mux.HandleFunc("/all.json", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"linux": {"java-runtime-delta": [ { "version": { "name": "21.0.3" } } ]}}`)
+	})
+
+	preparer := NewPreparerWith(server.Client(), "", server.URL+"/all.json", 1)
+	_, err := preparer.downloadRuntime(context.Background(), t.TempDir(), "linux-arm64", "java-runtime-delta")
+	if err == nil {
+		t.Fatal("a platform Mojang ships no runtime for must fail with a hint")
+	}
+	for _, want := range []string{"нет готовой Java", "linux-arm64", "JDK", "laminara.profile.json"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("hint %q does not mention %q", err.Error(), want)
+		}
 	}
 }

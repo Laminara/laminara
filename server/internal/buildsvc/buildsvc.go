@@ -61,16 +61,6 @@ func (s *Service) fire(topic, name string) {
 	}
 }
 
-var platforms = map[string][2]string{
-	"windows-x64":   {"windows", "x86_64"},
-	"windows-x86":   {"windows", "x86"},
-	"windows-arm64": {"windows", "arm64"},
-	"linux":         {"linux", "x86_64"},
-	"linux-i386":    {"linux", "x86"},
-	"mac-os":        {"osx", "x86_64"},
-	"mac-os-arm64":  {"osx", "arm64"},
-}
-
 const defaultPlatform = "windows-x64"
 
 func (s *Service) Commands() []command.Command {
@@ -122,16 +112,15 @@ func buildLine(build admin.BuildEntry) string {
 
 func (s *Service) manifestsOf(name string) []string {
 	var found []string
-	flat := filepath.Join(s.profilesDir, name+".manifest")
+	flat := catalog.ManifestPath(s.profilesDir, name, corev1.Platform_PLATFORM_UNSPECIFIED)
 	if _, err := os.Stat(flat); err == nil {
 		found = append(found, flat)
 	}
 	for _, p := range platform.Game() {
-		key, ok := platform.Key(p)
-		if !ok {
+		if _, ok := platform.Key(p); !ok {
 			continue
 		}
-		candidate := filepath.Join(s.profilesDir, name+"."+key+".manifest")
+		candidate := catalog.ManifestPath(s.profilesDir, name, p)
 		if _, err := os.Stat(candidate); err == nil {
 			found = append(found, candidate)
 		}
@@ -222,7 +211,7 @@ func (s *Service) delete(_ context.Context, args []string, out io.Writer) error 
 	}
 	for _, manifestPath := range s.manifestsOf(name) {
 		_ = os.Remove(manifestPath)
-		_ = os.Remove(manifestPath + ".sig")
+		_ = os.Remove(catalog.SignaturePath(manifestPath))
 	}
 	s.fire("build.deleted", name)
 	fmt.Fprintf(out, "Сборка «%s» удалена.\n", name)
@@ -395,7 +384,7 @@ func samePlatformAsFlat(layout buildLayout, target corev1.Platform) bool {
 	if !ok {
 		return false
 	}
-	profile, err := os.ReadFile(filepath.Join(layout.root, prepare.LaunchProfileName))
+	profile, err := os.ReadFile(filepath.Join(layout.root, manifest.LaunchProfileName))
 	if err != nil {
 		return false
 	}
@@ -452,11 +441,11 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(s.profilesDir, manifestName(name, variant))
+		target := catalog.ManifestPath(s.profilesDir, name, variant)
 		if err := os.WriteFile(target, published.Canonical, 0o644); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target+".sig", published.Signature, 0o644); err != nil {
+		if err := os.WriteFile(catalog.SignaturePath(target), published.Signature, 0o644); err != nil {
 			return err
 		}
 		label, ok := platform.Key(variant)

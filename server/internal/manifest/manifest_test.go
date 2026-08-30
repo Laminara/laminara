@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/manifest"
+	"github.com/laminara/laminara/server/internal/progress"
 	"github.com/laminara/laminara/server/internal/storage"
 )
 
@@ -102,30 +102,61 @@ func TestCanonicalOrderIndependent(t *testing.T) {
 	}
 }
 
-func TestGCCollectsOrphans(t *testing.T) {
-	ctx := context.Background()
-	cas, backend := newCAS(t)
-	root := writeTree(t, map[string]string{"mods/a.jar": "alpha"})
+type recorder struct {
+	events []progress.Event
+}
+
+func (r *recorder) Report(event progress.Event) {
+	r.events = append(r.events, event)
+}
+
+func TestBuildReportsIndexedFiles(t *testing.T) {
+	cas, _ := newCAS(t)
+	root := writeTree(t, map[string]string{
+		"mods/a.jar":           "alpha",
+		"config/b.txt":         "bravo",
+		".laminara/hidden.txt": "charlie",
+	})
+	reporter := &recorder{}
+	ctx := progress.With(context.Background(), reporter)
 	built, err := manifest.NewBuilder(cas).Build(ctx, root, "p", "1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	orphan, err := cas.Put(ctx, strings.NewReader("garbage"))
-	if err != nil {
-		t.Fatal(err)
+	if len(reporter.events) != len(built.Files) {
+		t.Fatalf("events = %d, files = %d", len(reporter.events), len(built.Files))
 	}
+	for i, event := range reporter.events {
+		if event.Phase != "Индексация файлов" {
+			t.Fatalf("event %d phase = %q", i, event.Phase)
+		}
+		if event.Total != 0 || event.Current != 0 {
+			t.Fatalf("event %d reports a total it cannot know", i)
+		}
+		if event.Message == "" {
+			t.Fatalf("event %d carries no count", i)
+		}
+	}
+	if reporter.events[0].Message != "1 файл" || reporter.events[1].Message != "2 файла" {
+		t.Fatalf("counts = %q, %q", reporter.events[0].Message, reporter.events[1].Message)
+	}
+}
 
-	deleted, err := manifest.GC(ctx, backend, []*corev1.Manifest{built})
-	if err != nil {
+func TestBuildRefusesUnreadableTree(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads through the removed permissions")
+	}
+	cas, _ := newCAS(t)
+	root := writeTree(t, map[string]string{
+		"mods/a.jar":   "alpha",
+		"locked/b.txt": "bravo",
+	})
+	locked := filepath.Join(root, "locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if deleted != 1 {
-		t.Fatalf("deleted = %d, want 1", deleted)
-	}
-	if has, _ := cas.Has(ctx, orphan); has {
-		t.Fatal("orphan was not collected")
-	}
-	if has, _ := cas.Has(ctx, built.Files[0].Object); !has {
-		t.Fatal("referenced object was collected")
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	if _, err := manifest.NewBuilder(cas).Build(context.Background(), root, "p", "1"); err == nil {
+		t.Fatal("a tree with an unreadable directory must fail the build")
 	}
 }

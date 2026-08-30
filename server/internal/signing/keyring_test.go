@@ -97,6 +97,12 @@ func TestUnknownKeyIsNotTrusted(t *testing.T) {
 	}
 }
 
+func TestKeyringWithoutAPathIsRefused(t *testing.T) {
+	if _, err := signing.NewKeyring("", nil); err == nil {
+		t.Fatal("an empty key path must stop the setup instead of inventing a key nobody can trust tomorrow")
+	}
+}
+
 func TestUnreadableEntryFails(t *testing.T) {
 	dir := t.TempDir()
 	broken := filepath.Join(dir, "broken.hex")

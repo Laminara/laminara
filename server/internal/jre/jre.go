@@ -2,6 +2,7 @@ package jre
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -40,6 +41,8 @@ type Runtime struct {
 
 type allRuntimes map[string]map[string][]Runtime
 
+var ErrNoMojangRuntime = errors.New("Mojang publishes no java runtime for this platform")
+
 func (c *Client) Select(ctx context.Context, platformKey, component string) (*Runtime, error) {
 	var all allRuntimes
 	if err := httpx.GetJSON(ctx, c.http, c.url, &all); err != nil {
@@ -47,7 +50,7 @@ func (c *Client) Select(ctx context.Context, platformKey, component string) (*Ru
 	}
 	platform, ok := all[platformKey]
 	if !ok {
-		return nil, fmt.Errorf("no java runtimes for platform %q", platformKey)
+		return nil, fmt.Errorf("%w: %s", ErrNoMojangRuntime, platformKey)
 	}
 	runtimes := platform[component]
 	if len(runtimes) == 0 {
@@ -87,30 +90,4 @@ func (c *Client) FetchFiles(ctx context.Context, manifestURL string) ([]RuntimeF
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
-}
-
-func PlatformKey(goos, goarch string) string {
-	switch goos {
-	case "linux":
-		if goarch == "386" {
-			return "linux-i386"
-		}
-		return "linux"
-	case "darwin":
-		if goarch == "arm64" {
-			return "mac-os-arm64"
-		}
-		return "mac-os"
-	case "windows":
-		switch goarch {
-		case "386":
-			return "windows-x86"
-		case "arm64":
-			return "windows-arm64"
-		default:
-			return "windows-x64"
-		}
-	default:
-		return ""
-	}
 }

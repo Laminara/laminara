@@ -2,11 +2,15 @@ package skin_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/laminara/laminara/server/internal/skin"
 	"github.com/laminara/laminara/server/internal/store/storetest"
@@ -138,4 +142,109 @@ func TestSQLProviderCustomQueryAndModel(t *testing.T) {
 	if !textures.Slim {
 		t.Fatal("model column must decide the arm model")
 	}
+}
+
+func TestSQLProviderModelWithoutCape(t *testing.T) {
+	db, dsn := storetest.Start(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE profiles (username varchar(50), skin varchar(255), cape varchar(255), model varchar(16))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO profiles (username, skin, cape, model) VALUES (?, ?, ?, ?)`,
+		"Strah", "https://cdn.example/s.png", "https://cdn.example/c.png", "slim"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO profiles (username, skin, cape, model) VALUES (?, ?, NULL, ?)`,
+		"Andrey", "https://cdn.example/a.png", "classic"); err != nil {
+		t.Fatal(err)
+	}
+
+	withoutCape, err := skin.Build("sql", marshal(map[string]any{
+		"driver": "postgres",
+		"dsn":    dsn,
+		"table":  "profiles",
+		"fields": map[string]string{"username": "username", "skin": "skin", "model": "model"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	textures, err := withoutCape.Textures(ctx, "Strah", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if textures.SkinURL != "https://cdn.example/s.png" || textures.CapeURL != "" {
+		t.Fatalf("a config without fields.cape must still select the skin: %+v", textures)
+	}
+	if !textures.Slim {
+		t.Fatal("the model column must reach the query when fields.cape is not set")
+	}
+	classic, err := withoutCape.Textures(ctx, "Andrey", "y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classic.SkinURL != "https://cdn.example/a.png" || classic.Slim {
+		t.Fatalf("textures = %+v", classic)
+	}
+
+	withCape, err := skin.Build("sql", marshal(map[string]any{
+		"driver": "postgres",
+		"dsn":    dsn,
+		"table":  "profiles",
+		"fields": map[string]string{"username": "username", "skin": "skin", "cape": "cape", "model": "model"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	both, err := withCape.Textures(ctx, "Strah", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if both.SkinURL != "https://cdn.example/s.png" || both.CapeURL != "https://cdn.example/c.png" || !both.Slim {
+		t.Fatalf("textures = %+v", both)
+	}
+}
+
+func TestSQLProviderSQLite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skins.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE users (username varchar(50), skin varchar(255), model varchar(16))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO users (username, skin, model) VALUES (?, ?, ?)`,
+		"Strah", "https://cdn.example/s.png", "slim"); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := skin.Build("sql", marshal(map[string]any{
+		"driver": "sqlite",
+		"dsn":    path,
+		"table":  "users",
+		"fields": map[string]string{"username": "username", "skin": "skin", "model": "model"},
+	}))
+	if err != nil {
+		t.Fatalf("a driver the settings screen offers must build: %v", err)
+	}
+	textures, err := provider.Textures(ctx, "Strah", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if textures.SkinURL != "https://cdn.example/s.png" || !textures.Slim {
+		t.Fatalf("textures = %+v", textures)
+	}
+}
+
+func marshal(value any) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }

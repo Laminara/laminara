@@ -178,11 +178,6 @@ func (c *CAS) Get(ctx context.Context, ref *corev1.ObjectRef) (io.ReadCloser, er
 	return c.backend.Get(ctx, ObjectKey(ref.Hash.Algo, ref.Hash.Value))
 }
 
-func (c *CAS) Has(ctx context.Context, ref *corev1.ObjectRef) (bool, error) {
-	_, exists, err := c.backend.Stat(ctx, ObjectKey(ref.Hash.Algo, ref.Hash.Value))
-	return exists, err
-}
-
 func (c *CAS) Locate(ctx context.Context, ref *corev1.ObjectRef, ttl time.Duration) (Location, error) {
 	return c.backend.Locate(ctx, ObjectKey(ref.Hash.Algo, ref.Hash.Value), ttl)
 }

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
 )
 
@@ -139,7 +140,7 @@ func (i *Installer) resolveDataValue(value string, req Request) (string, error) 
 }
 
 func (i *Installer) processorCommand(processor Processor, placeholders map[string]string, req Request) ([]string, error) {
-	jarRelative, err := mavenPath(processor.Jar)
+	jarRelative, err := maven.Path(processor.Jar)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +151,7 @@ func (i *Installer) processorCommand(processor Processor, placeholders map[strin
 	}
 	classpath := []string{jarPath}
 	for _, entry := range processor.Classpath {
-		relative, err := mavenPath(entry)
+		relative, err := maven.Path(entry)
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +232,7 @@ func copyZipFile(file *zip.File, dest string) error {
 
 func resolveToken(token string, placeholders map[string]string, librariesDir string) (string, error) {
 	if strings.HasPrefix(token, "[") && strings.HasSuffix(token, "]") {
-		relative, err := mavenPath(token[1 : len(token)-1])
+		relative, err := maven.Path(token[1 : len(token)-1])
 		if err != nil {
 			return "", err
 		}
@@ -249,26 +250,7 @@ func libraryPath(library Library) (string, error) {
 	if library.Downloads.Artifact.Path != "" {
 		return library.Downloads.Artifact.Path, nil
 	}
-	return mavenPath(library.Name)
-}
-
-func mavenPath(coords string) (string, error) {
-	extension := "jar"
-	if at := strings.LastIndex(coords, "@"); at >= 0 {
-		extension = coords[at+1:]
-		coords = coords[:at]
-	}
-	parts := strings.Split(coords, ":")
-	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid maven coordinates %q", coords)
-	}
-	group := strings.ReplaceAll(parts[0], ".", "/")
-	artifact, version := parts[1], parts[2]
-	file := artifact + "-" + version
-	if len(parts) >= 4 {
-		file += "-" + parts[3]
-	}
-	return group + "/" + artifact + "/" + version + "/" + file + "." + extension, nil
+	return maven.Path(library.Name)
 }
 
 func processorName(coords string) string {

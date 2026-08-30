@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/laminara/laminara/server/internal/loader"
+	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/mojang"
 )
 
@@ -120,25 +121,11 @@ func fromArtifact(a mojang.Artifact) Artifact {
 }
 
 func mavenArtifact(coords, base string) (Artifact, error) {
-	path, err := mavenPath(coords)
+	path, err := maven.Path(coords)
 	if err != nil {
 		return Artifact{}, err
 	}
 	return Artifact{Path: "libraries/" + path, URL: strings.TrimRight(base, "/") + "/" + path}, nil
-}
-
-func mavenPath(coords string) (string, error) {
-	parts := strings.Split(coords, ":")
-	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid maven coordinates %q", coords)
-	}
-	group := strings.ReplaceAll(parts[0], ".", "/")
-	artifact, version := parts[1], parts[2]
-	file := artifact + "-" + version
-	if len(parts) >= 4 {
-		file += "-" + parts[3]
-	}
-	return group + "/" + artifact + "/" + version + "/" + file + ".jar", nil
 }
 
 func archBits(arch string) string {
@@ -146,26 +133,4 @@ func archBits(arch string) string {
 		return "32"
 	}
 	return "64"
-}
-
-func MojangOS(goos string) string {
-	switch goos {
-	case "windows":
-		return "windows"
-	case "darwin":
-		return "osx"
-	default:
-		return "linux"
-	}
-}
-
-func MojangArch(goarch string) string {
-	switch goarch {
-	case "386":
-		return "x86"
-	case "arm64":
-		return "arm64"
-	default:
-		return "x86_64"
-	}
 }

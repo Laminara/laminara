@@ -50,7 +50,12 @@ func TestCASPutGet(t *testing.T) {
 
 func TestCASDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	cas := newCAS(t)
+	config, _ := json.Marshal(map[string]string{"root": t.TempDir()})
+	backend, err := storage.BuildBackend("fs", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cas := storage.NewCAS(backend, corev1.HashAlgo_HASH_ALGO_BLAKE3)
 
 	first, err := cas.Put(ctx, strings.NewReader("same content"))
 	if err != nil {
@@ -63,9 +68,9 @@ func TestCASDeduplicates(t *testing.T) {
 	if !bytes.Equal(first.Hash.Value, second.Hash.Value) {
 		t.Fatal("identical content produced different hashes")
 	}
-	has, err := cas.Has(ctx, first)
-	if err != nil || !has {
-		t.Fatalf("expected object to exist, has=%v err=%v", has, err)
+	key := storage.ObjectKey(first.Hash.Algo, first.Hash.Value)
+	if _, exists, err := backend.Stat(ctx, key); err != nil || !exists {
+		t.Fatalf("expected %s to be stored once, exists=%v err=%v", key, exists, err)
 	}
 }
 

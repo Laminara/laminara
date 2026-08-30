@@ -1,3 +1,4 @@
+import { Check } from "@phosphor-icons/react";
 import type { Build } from "@/lib/types";
 import { useLauncher } from "@/store";
 import { loaderLabels } from "@/config/branding";
@@ -19,15 +20,17 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
         block && "opacity-50",
       )}
     >
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-mute">
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-mute">
           {build.loader ? loaderLabels[build.loader] : "Сборка"}
           {build.minecraft && <span className="text-dim"> · {build.minecraft}</span>}
         </span>
         {block ? (
-          <span className="rounded-md bg-surface-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mute">{block.badge}</span>
+          <span className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-mute">{block.badge}</span>
         ) : selected ? (
-          <span className="rounded-md bg-primary px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-ink">Сейчас</span>
+          <span className="flex shrink-0 items-center rounded-md bg-primary px-1.5 py-0.5 text-primary-ink" title="Выбранная сборка">
+            <Check size={11} weight="bold" />
+          </span>
         ) : (
           <StatusDot state={build.install} />
         )}

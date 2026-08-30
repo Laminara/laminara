@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
+	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/platform"
-	"github.com/laminara/laminara/server/internal/prepare"
 )
 
 type buildLayout struct {
@@ -18,7 +18,7 @@ type buildLayout struct {
 func (s *Service) layout(name string) buildLayout {
 	root := filepath.Join(s.profilesDir, name)
 	layout := buildLayout{root: root}
-	if _, err := os.Stat(filepath.Join(root, prepare.LaunchProfileName)); err == nil {
+	if _, err := os.Stat(filepath.Join(root, manifest.LaunchProfileName)); err == nil {
 		layout.flat = true
 		return layout
 	}
@@ -34,7 +34,7 @@ func (s *Service) layout(name string) buildLayout {
 		if !ok {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(root, entry.Name(), prepare.LaunchProfileName)); err != nil {
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), manifest.LaunchProfileName)); err != nil {
 			continue
 		}
 		layout.platforms = append(layout.platforms, p)
@@ -52,12 +52,4 @@ func (l buildLayout) dir(p corev1.Platform) (string, string) {
 	}
 	key, _ := platform.Key(p)
 	return filepath.Join(l.root, key), l.root
-}
-
-func manifestName(build string, p corev1.Platform) string {
-	key, ok := platform.Key(p)
-	if !ok {
-		return build + ".manifest"
-	}
-	return build + "." + key + ".manifest"
 }

@@ -1,6 +1,8 @@
 package slp
 
 import (
+	"context"
+	"net"
 	"testing"
 	"time"
 )
@@ -37,7 +39,45 @@ func TestDecode(t *testing.T) {
 }
 
 func TestPingRefusesQuickly(t *testing.T) {
-	if _, err := Ping("127.0.0.1:1", 300*time.Millisecond); err == nil {
+	if _, err := PingContext(context.Background(), "127.0.0.1:1", 300*time.Millisecond); err == nil {
 		t.Fatal("a closed port must report an error")
+	}
+}
+
+func TestPingHonoursContext(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, conn := range held {
+				_ = conn.Close()
+			}
+		}()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, conn)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	if _, err := PingContext(ctx, listener.Addr().String(), 5*time.Second); err == nil {
+		t.Fatal("a cancelled ping must report an error")
+	}
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("cancellation took %s", took)
 	}
 }

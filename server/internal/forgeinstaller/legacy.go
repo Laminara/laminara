@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
 )
 
@@ -55,7 +56,7 @@ func (i *Installer) legacyInstall(ctx context.Context, req Request) (*LaunchInfo
 	profile := i.legacy
 	launch := &LaunchInfo{MainClass: profile.VersionInfo.MainClass}
 
-	forgePath, err := mavenPath(profile.Install.Path)
+	forgePath, err := maven.Path(profile.Install.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (i *Installer) legacyInstall(ctx context.Context, req Request) (*LaunchInfo
 		if library.Name == profile.Install.Path {
 			continue
 		}
-		path, err := mavenPath(library.Name)
+		path, err := maven.Path(library.Name)
 		if err != nil {
 			return nil, err
 		}

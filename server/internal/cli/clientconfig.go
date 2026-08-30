@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,6 +14,7 @@ import (
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
+	"github.com/laminara/laminara/server/internal/mediatype"
 	"github.com/laminara/laminara/server/internal/signing"
 )
 
@@ -56,26 +56,7 @@ func inlineAsset(path string) (string, error) {
 	if len(data) > maxInlineAsset {
 		return "", fmt.Errorf("картинка %s весит %s — оставьте под %s", path, humanize.Bytes(uint64(len(data))), humanize.Bytes(uint64(maxInlineAsset)))
 	}
-	return "data:" + mimeOf(path) + ";base64," + base64.StdEncoding.EncodeToString(data), nil
-}
-
-func mimeOf(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".svg":
-		return "image/svg+xml"
-	case ".png":
-		return "image/png"
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".webp":
-		return "image/webp"
-	case ".mp4":
-		return "video/mp4"
-	case ".webm":
-		return "video/webm"
-	default:
-		return "application/octet-stream"
-	}
+	return "data:" + mediatype.Guess(path, "") + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func brandingFrom(cfg *config.Config) (*clientBranding, error) {

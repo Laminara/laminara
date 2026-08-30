@@ -15,14 +15,16 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	_ "modernc.org/sqlite"
+
+	"github.com/laminara/laminara/server/internal/sqlschema"
 )
 
 type Driver string
 
 const (
-	DriverPostgres Driver = "postgres"
-	DriverMySQL    Driver = "mysql"
-	DriverSQLite   Driver = "sqlite"
+	DriverPostgres Driver = sqlschema.Postgres
+	DriverMySQL    Driver = sqlschema.MySQL
+	DriverSQLite   Driver = sqlschema.SQLite
 )
 
 type Config struct {
@@ -71,20 +73,24 @@ func sqliteDSN(dsn string) (string, error) {
 }
 
 func Open(cfg Config) (*bun.DB, error) {
-	switch cfg.Driver {
-	case DriverPostgres:
+	driver, err := sqlschema.Canonical(string(cfg.Driver))
+	if err != nil {
+		return nil, err
+	}
+	switch driver {
+	case sqlschema.Postgres:
 		sqldb, err := sql.Open("pgx", cfg.DSN)
 		if err != nil {
 			return nil, err
 		}
 		return bun.NewDB(sqldb, pgdialect.New()), nil
-	case DriverMySQL:
+	case sqlschema.MySQL:
 		sqldb, err := sql.Open("mysql", cfg.DSN)
 		if err != nil {
 			return nil, err
 		}
 		return bun.NewDB(sqldb, mysqldialect.New()), nil
-	case DriverSQLite:
+	case sqlschema.SQLite:
 		dsn, err := sqliteDSN(cfg.DSN)
 		if err != nil {
 			return nil, err

@@ -8,14 +8,39 @@ import (
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func Dialect(name string) (driver string, quote func(string) string, placeholder string, err error) {
+const (
+	Postgres = "postgres"
+	MySQL    = "mysql"
+	SQLite   = "sqlite"
+)
+
+func Drivers() []string { return []string{Postgres, MySQL, SQLite} }
+
+func Canonical(name string) (string, error) {
 	switch name {
 	case "postgres", "postgresql", "pgx":
-		return "pgx", func(s string) string { return `"` + s + `"` }, "$1", nil
+		return Postgres, nil
 	case "mysql", "mariadb":
-		return "mysql", func(s string) string { return "`" + s + "`" }, "?", nil
+		return MySQL, nil
+	case SQLite:
+		return SQLite, nil
 	default:
-		return "", nil, "", fmt.Errorf("unsupported sql driver %q", name)
+		return "", fmt.Errorf("unsupported sql driver %q", name)
+	}
+}
+
+func Dialect(name string) (driver string, quote func(string) string, placeholder string, err error) {
+	canonical, err := Canonical(name)
+	if err != nil {
+		return "", nil, "", err
+	}
+	switch canonical {
+	case Postgres:
+		return "pgx", func(s string) string { return `"` + s + `"` }, "$1", nil
+	case MySQL:
+		return MySQL, func(s string) string { return "`" + s + "`" }, "?", nil
+	default:
+		return SQLite, func(s string) string { return `"` + s + `"` }, "?", nil
 	}
 }
 

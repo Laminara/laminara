@@ -97,17 +97,6 @@ func (b *s3Backend) Delete(ctx context.Context, key string) error {
 	return b.client.RemoveObject(ctx, b.bucket, key, minio.RemoveObjectOptions{})
 }
 
-func (b *s3Backend) List(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	for object := range b.client.ListObjects(ctx, b.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
-		if object.Err != nil {
-			return nil, object.Err
-		}
-		keys = append(keys, object.Key)
-	}
-	return keys, nil
-}
-
 func (b *s3Backend) Locate(ctx context.Context, key string, ttl time.Duration) (Location, error) {
 	if ttl <= 0 {
 		ttl = time.Hour

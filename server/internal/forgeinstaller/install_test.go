@@ -33,20 +33,6 @@ func writeJar(t *testing.T, path string, files map[string]string) {
 	}
 }
 
-func TestMavenPath(t *testing.T) {
-	cases := map[string]string{
-		"net.neoforged:neoforge:21.1.235":                           "net/neoforged/neoforge/21.1.235/neoforge-21.1.235.jar",
-		"net.neoforged:neoforge:21.1.235:client":                    "net/neoforged/neoforge/21.1.235/neoforge-21.1.235-client.jar",
-		"net.neoforged:neoform:1.21.1-20240808.144430:mappings@txt": "net/neoforged/neoform/1.21.1-20240808.144430/neoform-1.21.1-20240808.144430-mappings.txt",
-	}
-	for coords, want := range cases {
-		got, err := mavenPath(coords)
-		if err != nil || got != want {
-			t.Fatalf("mavenPath(%q) = %q, %v; want %q", coords, got, err, want)
-		}
-	}
-}
-
 func TestResolveToken(t *testing.T) {
 	placeholders := map[string]string{"ROOT": "/profile", "MINECRAFT_JAR": "/mc/client.jar"}
 	libraries := "/libs"

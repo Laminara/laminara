@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/laminara/laminara/server/internal/news"
@@ -148,5 +149,73 @@ func TestUnknownSourceIsARefusalAtStartup(t *testing.T) {
 	}
 	if _, err := news.New(&cfg); err == nil {
 		t.Fatal("an unknown source must fail loudly on start, not silently serve nothing")
+	}
+}
+
+func TestLocalBannerIsInlinedByItsExtension(t *testing.T) {
+	dir := t.TempDir()
+	png := filepath.Join(dir, "banner.png")
+	if err := os.WriteFile(png, []byte("png-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "news.json")
+	body := fmt.Sprintf(`[{"id": "a", "title": "Анонс", "banner": %q}]`, png)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := serviceFor(t, fmt.Sprintf(`{"source": {"type": "file", "config": {"path": %q}}}`, path))
+
+	items := service.Latest(context.Background())
+	if len(items) != 1 {
+		t.Fatalf("expected the single item, got %d", len(items))
+	}
+	if got := items[0].BannerDataUri; !strings.HasPrefix(got, "data:image/png;base64,") {
+		t.Fatalf("a .png banner must be inlined as png, got %q", got)
+	}
+}
+
+func TestWebBannerWithoutAnExtensionTakesTheServedType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/webp")
+		fmt.Fprint(w, "webp-bytes")
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "news.json")
+	body := fmt.Sprintf(`[{"id": "a", "title": "Анонс", "banner": %q}]`, server.URL+"/today")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := serviceFor(t, fmt.Sprintf(`{"source": {"type": "file", "config": {"path": %q}}}`, path))
+
+	items := service.Latest(context.Background())
+	if len(items) != 1 {
+		t.Fatalf("expected the single item, got %d", len(items))
+	}
+	if got := items[0].BannerDataUri; !strings.HasPrefix(got, "data:image/webp;base64,") {
+		t.Fatalf("the served type must be kept when the name gives nothing, got %q", got)
+	}
+}
+
+func TestUnrecognisedBannerStillInlinesAsAnImage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, "png-bytes")
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "news.json")
+	body := fmt.Sprintf(`[{"id": "a", "title": "Анонс", "banner": %q}]`, server.URL+"/today")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := serviceFor(t, fmt.Sprintf(`{"source": {"type": "file", "config": {"path": %q}}}`, path))
+
+	items := service.Latest(context.Background())
+	if len(items) != 1 {
+		t.Fatalf("expected the single item, got %d", len(items))
+	}
+	if got := items[0].BannerDataUri; !strings.HasPrefix(got, "data:image/png;base64,") {
+		t.Fatalf("a banner of an unknown type must still be inlined as an image, got %q", got)
 	}
 }

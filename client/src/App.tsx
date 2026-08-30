@@ -21,13 +21,15 @@ import { ErrorToast } from "@/components/launcher/ErrorToast";
 
 export default function App() {
   const init = useLauncher((state) => state.init);
+  const unbindListeners = useLauncher((state) => state.unbindListeners);
   const phase = useLauncher((state) => state.phase);
   const modal = useLauncher((state) => state.modal);
   const refreshPlayers = useLauncher((state) => state.refreshPlayers);
 
   useEffect(() => {
     void init();
-  }, [init]);
+    return () => unbindListeners();
+  }, [init, unbindListeners]);
 
   useEffect(() => {
     const id = setInterval(() => void refreshPlayers(), 30000);

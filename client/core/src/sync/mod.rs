@@ -18,7 +18,7 @@ use crate::proto::core::v1::{FilePolicy, HashAlgo, Manifest, ManifestFile};
 use crate::transport::Transport;
 
 const DEFAULT_PARALLEL: usize = 8;
-const LEDGER_FILE: &str = "installed.json";
+pub(crate) const LEDGER_FILE: &str = "installed.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStage {
@@ -47,20 +47,20 @@ pub struct SyncOutcome {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-enum Placement {
+pub(crate) enum Placement {
     Hardlink,
     Copy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OwnedEntry {
-    object_hash: String,
-    class: i32,
-    placement: Placement,
-    released: bool,
+pub(crate) struct OwnedEntry {
+    pub object_hash: String,
+    pub class: i32,
+    pub placement: Placement,
+    pub released: bool,
 }
 
-type Ledger = BTreeMap<String, OwnedEntry>;
+pub(crate) type Ledger = BTreeMap<String, OwnedEntry>;
 
 fn load_ledger(path: &Path) -> Ledger {
     std::fs::read_to_string(path)
@@ -69,7 +69,7 @@ fn load_ledger(path: &Path) -> Ledger {
         .unwrap_or_default()
 }
 
-fn save_ledger(path: &Path, ledger: &Ledger) -> Result<(), CoreError> {
+pub(crate) fn save_ledger(path: &Path, ledger: &Ledger) -> Result<(), CoreError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -112,7 +112,7 @@ impl Hasher {
     }
 }
 
-fn set_mode(path: &Path, mode: u32) {
+pub(crate) fn set_mode(path: &Path, mode: u32) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1081,9 +1081,15 @@ mod live {
                 base_url: base.clone(),
             }],
         );
-        pool.login("neo".into(), "matrix".into(), None, "0.1.0-test".into())
-            .await
-            .expect("login");
+        pool.login(
+            "neo".into(),
+            "matrix".into(),
+            String::new(),
+            None,
+            "0.1.0-test".into(),
+        )
+        .await
+        .expect("login");
         let name = pool
             .list_profiles()
             .await

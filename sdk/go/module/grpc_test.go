@@ -95,7 +95,7 @@ type eventModule struct{ got []string }
 
 func (e *eventModule) Info() Info          { return Info{Name: "ev", Version: "1"} }
 func (e *eventModule) Commands() []Command { return nil }
-func (e *eventModule) Events() []string { return []string{"build.published"} }
+func (e *eventModule) Events() []string    { return []string{"build.published"} }
 func (e *eventModule) OnEvent(_ context.Context, topic string, data map[string]string) error {
 	e.got = append(e.got, topic+":"+data["name"])
 	return nil

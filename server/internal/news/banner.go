@@ -6,10 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/laminara/laminara/server/internal/mediatype"
 )
 
 const (
@@ -62,8 +63,7 @@ func (c *bannerCache) inline(ctx context.Context, source string) string {
 }
 
 func (c *bannerCache) read(ctx context.Context, source string) ([]byte, string) {
-	lower := strings.ToLower(source)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+	if isWebLink(source) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 		if err != nil {
 			return nil, ""
@@ -80,7 +80,7 @@ func (c *bannerCache) read(ctx context.Context, source string) ([]byte, string) 
 		if err != nil || len(data) > maxBannerBytes {
 			return nil, ""
 		}
-		return data, imageMIME(source, response.Header.Get("Content-Type"))
+		return data, mediatype.GuessImage(source, response.Header.Get("Content-Type"))
 	}
 
 	info, err := os.Stat(source)
@@ -91,26 +91,5 @@ func (c *bannerCache) read(ctx context.Context, source string) ([]byte, string) 
 	if err != nil {
 		return nil, ""
 	}
-	return data, imageMIME(source, "")
-}
-
-func imageMIME(source, declared string) string {
-	switch strings.ToLower(filepath.Ext(strings.SplitN(source, "?", 2)[0])) {
-	case ".png":
-		return "image/png"
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".webp":
-		return "image/webp"
-	case ".gif":
-		return "image/gif"
-	case ".svg":
-		return "image/svg+xml"
-	}
-	for _, known := range []string{"image/png", "image/jpeg", "image/webp", "image/gif"} {
-		if strings.HasPrefix(strings.ToLower(declared), known) {
-			return known
-		}
-	}
-	return "image/png"
+	return data, mediatype.GuessImage(source, "")
 }

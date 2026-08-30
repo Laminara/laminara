@@ -7,6 +7,7 @@ import (
 
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/crash"
+	"github.com/laminara/laminara/server/internal/duration"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
@@ -128,22 +129,7 @@ type SessionConfig struct {
 	RedisAddr string `json:"redisAddr"`
 }
 
-type Duration time.Duration
-
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
-
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return err
-	}
-	*d = Duration(parsed)
-	return nil
-}
+type Duration = duration.Duration
 
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)

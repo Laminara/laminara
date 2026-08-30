@@ -32,6 +32,30 @@ func TestCompare(t *testing.T) {
 	}
 }
 
+func TestIsValid(t *testing.T) {
+	cases := map[string]bool{
+		"1.2.3":       true,
+		"v1.2.3":      true,
+		"1.2.3.4":     false,
+		"1.2.3-rc1":   true,
+		"1.2.3-beta":  true,
+		"1.2.3+build": false,
+		"1.2":         false,
+		"1":           false,
+		"":            false,
+		"latest":      false,
+		"1.2.x":       false,
+		"..":          false,
+		"1.2.3-":      false,
+	}
+
+	for value, want := range cases {
+		if got := version.IsValid(value); got != want {
+			t.Errorf("IsValid(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
+
 func TestDevBuildAcceptsAnyRelease(t *testing.T) {
 	if !version.IsNewer("0.1.0", "0.0.0-dev") {
 		t.Fatal("a release must count as newer than a development build")

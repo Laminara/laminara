@@ -1,6 +1,7 @@
 package slp
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -32,14 +33,21 @@ func SplitAddress(address string) (string, uint16) {
 	return host, uint16(number)
 }
 
-func Ping(address string, timeout time.Duration) (Status, error) {
+func PingContext(ctx context.Context, address string, timeout time.Duration) (Status, error) {
 	host, port := SplitAddress(address)
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(int(port))), timeout)
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	if err != nil {
 		return Status{}, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	deadline := time.Now().Add(timeout)
+	if at, ok := ctx.Deadline(); ok && at.Before(deadline) {
+		deadline = at
+	}
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	defer stop()
 
 	handshake := []byte{0x00}
 	handshake = appendVarint(handshake, protocolVersion)

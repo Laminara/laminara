@@ -3,6 +3,7 @@ package prepare
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,13 +16,12 @@ import (
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/mojang"
+	"github.com/laminara/laminara/server/internal/platform"
 	"github.com/laminara/laminara/server/internal/progress"
 	"github.com/laminara/laminara/server/internal/resolve"
 )
 
 const defaultWorkers = 12
-
-const LaunchProfileName = manifest.LaunchProfileName
 
 type Preparer struct {
 	mojang        *mojang.Client
@@ -164,10 +164,10 @@ func loaderMustInstaller(name string) loader.Installer {
 }
 
 func (p *Preparer) serverJavaBin(ctx context.Context, root, component string) (string, error) {
-	platformKey := jre.PlatformKey(runtime.GOOS, runtime.GOARCH)
+	platformKey, _ := platform.Key(platform.FromRuntime(runtime.GOOS, runtime.GOARCH))
 	selected, err := p.jre.Select(ctx, platformKey, component)
 	if err != nil {
-		return "", err
+		return "", noRuntimeHint(err, platformKey, "установщику загрузчика не на чем работать")
 	}
 	files, err := p.jre.FetchFiles(ctx, selected.Manifest.URL)
 	if err != nil {
@@ -188,7 +188,7 @@ func (p *Preparer) serverJavaBin(ctx context.Context, root, component string) (s
 func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, component string) (string, error) {
 	runtimeInfo, err := p.jre.Select(ctx, platformKey, component)
 	if err != nil {
-		return "", err
+		return "", noRuntimeHint(err, platformKey, "положите свой JDK в папку сборки и укажите его в javaBin файла "+manifest.LaunchProfileName)
 	}
 	files, err := p.jre.FetchFiles(ctx, runtimeInfo.Manifest.URL)
 	if err != nil {
@@ -212,6 +212,13 @@ func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, compo
 		return "", err
 	}
 	return javaBin, nil
+}
+
+func noRuntimeHint(err error, platformKey, remedy string) error {
+	if !errors.Is(err, jre.ErrNoMojangRuntime) {
+		return err
+	}
+	return fmt.Errorf("у Mojang нет готовой Java для платформы %s — %s", platformKey, remedy)
 }
 
 func resolveJavaBin(files []jre.RuntimeFile, platformKey string) (string, error) {
@@ -271,7 +278,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(opts.ProfileDir, LaunchProfileName), data, 0o644)
+	return os.WriteFile(filepath.Join(opts.ProfileDir, manifest.LaunchProfileName), data, 0o644)
 }
 
 func mergeUnique(base, extra []string) []string {

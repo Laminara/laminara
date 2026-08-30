@@ -1,10 +1,11 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use keyring::Entry;
 use laminara_core::account::GameSession;
+use laminara_core::secrets::{delete_password, read_password};
 use laminara_core::state::Account;
-use laminara_core::secrets::blocking;
 use laminara_core::KEYRING_SERVICE as SERVICE;
 use serde::Serialize;
 use zeroize::Zeroizing;
@@ -14,6 +15,31 @@ pub struct Session {
     pub access: Zeroizing<String>,
     pub access_expires_unix_nanos: i64,
     pub game: GameSession,
+}
+
+pub(crate) async fn offload<T, F>(work: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(work).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(message),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+async fn load_secret(
+    what: &str,
+    work: impl Future<Output = Result<Option<String>, String>>,
+) -> Option<String> {
+    match work.await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::warn!("{what} unavailable: {e}");
+            None
+        }
+    }
 }
 
 #[derive(Default)]
@@ -35,26 +61,39 @@ impl AuthManager {
         Entry::new(SERVICE, &format!("{endpoint_id}:{uuid}")).map_err(|e| e.to_string())
     }
 
-    pub fn store_refresh(
+    pub async fn store_refresh(
         &self,
         endpoint_id: &str,
         uuid: &str,
         refresh: &str,
     ) -> Result<(), String> {
         let entry = Self::entry(endpoint_id, uuid)?;
-        blocking(|| entry.set_password(refresh).map_err(|e| e.to_string()))
+        let refresh = refresh.to_string();
+        offload(move || entry.set_password(&refresh).map_err(|e| e.to_string())).await
     }
 
-    pub fn load_refresh(&self, endpoint_id: &str, uuid: &str) -> Option<String> {
+    pub async fn keep_refresh(&self, endpoint_id: &str, uuid: &str, refresh: &str) {
+        if let Err(e) = self.store_refresh(endpoint_id, uuid, refresh).await {
+            tracing::warn!("refresh token save failed for {uuid}: {e}");
+        }
+    }
+
+    pub async fn keep_game(&self, endpoint_id: &str, uuid: &str, access: &str, client: &str) {
+        if let Err(e) = self.store_game(endpoint_id, uuid, access, client).await {
+            tracing::warn!("game session save failed for {uuid}: {e}");
+        }
+    }
+
+    pub async fn load_refresh(&self, endpoint_id: &str, uuid: &str) -> Option<String> {
         let entry = Self::entry(endpoint_id, uuid).ok()?;
-        blocking(|| entry.get_password().ok())
+        load_secret("refresh token", offload(move || read_password(entry))).await
     }
 
-    pub fn clear_refresh(&self, endpoint_id: &str, uuid: &str) {
+    pub async fn clear_refresh(&self, endpoint_id: &str, uuid: &str) {
         if let Ok(entry) = Self::entry(endpoint_id, uuid) {
-            blocking(|| {
-                let _ = entry.delete_credential();
-            });
+            if let Err(e) = offload(move || delete_password(entry)).await {
+                tracing::warn!("refresh token clear failed: {e}");
+            }
         }
     }
 
@@ -62,7 +101,7 @@ impl AuthManager {
         Entry::new(SERVICE, &format!("{endpoint_id}:{uuid}:yggdrasil")).map_err(|e| e.to_string())
     }
 
-    pub fn store_game(
+    pub async fn store_game(
         &self,
         endpoint_id: &str,
         uuid: &str,
@@ -71,21 +110,21 @@ impl AuthManager {
     ) -> Result<(), String> {
         let entry = Self::game_entry(endpoint_id, uuid)?;
         let secret = format!("{access}\n{client}");
-        blocking(|| entry.set_password(&secret).map_err(|e| e.to_string()))
+        offload(move || entry.set_password(&secret).map_err(|e| e.to_string())).await
     }
 
-    pub fn load_game(&self, endpoint_id: &str, uuid: &str) -> Option<(String, String)> {
+    pub async fn load_game(&self, endpoint_id: &str, uuid: &str) -> Option<(String, String)> {
         let entry = Self::game_entry(endpoint_id, uuid).ok()?;
-        let raw = blocking(|| entry.get_password().ok())?;
+        let raw = load_secret("game session secret", offload(move || read_password(entry))).await?;
         let (access, client) = raw.split_once('\n')?;
         Some((access.to_string(), client.to_string()))
     }
 
-    pub fn clear_game(&self, endpoint_id: &str, uuid: &str) {
+    pub async fn clear_game(&self, endpoint_id: &str, uuid: &str) {
         if let Ok(entry) = Self::game_entry(endpoint_id, uuid) {
-            blocking(|| {
-                let _ = entry.delete_credential();
-            });
+            if let Err(e) = offload(move || delete_password(entry)).await {
+                tracing::warn!("game session secret clear failed: {e}");
+            }
         }
     }
 

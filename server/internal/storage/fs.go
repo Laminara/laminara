@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -142,29 +141,6 @@ func (b *fsBackend) Delete(_ context.Context, key string) error {
 		return err
 	}
 	return nil
-}
-
-func (b *fsBackend) List(_ context.Context, prefix string) ([]string, error) {
-	base := b.resolve(prefix)
-	var keys []string
-	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(b.root, p)
-		if err != nil {
-			return err
-		}
-		keys = append(keys, filepath.ToSlash(rel))
-		return nil
-	})
-	return keys, err
 }
 
 func (b *fsBackend) Locate(_ context.Context, key string, _ time.Duration) (Location, error) {

@@ -9,10 +9,12 @@ import (
 )
 
 type Command struct {
-	Name     string
-	Aliases  []string
-	Synopsis string
-	Run      func(ctx context.Context, args []string, out io.Writer) error
+	Name       string
+	Aliases    []string
+	Synopsis   string
+	Secret     bool
+	SecretArgs bool
+	Run        func(ctx context.Context, args []string, out io.Writer) error
 }
 
 type Registry struct {
@@ -42,6 +44,11 @@ func (r *Registry) List() []Command {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func (r *Registry) Lookup(name string) (Command, bool) {
+	c, ok := r.commands[name]
+	return c, ok
 }
 
 func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) error {

@@ -9,6 +9,7 @@ generate:
 lint:
 	buf lint
 	go vet ./...
+	@test -z "$$(gofmt -l server sdk)" || { echo "gofmt не выровнял:"; gofmt -l server sdk; exit 1; }
 
 tidy:
 	go mod tidy

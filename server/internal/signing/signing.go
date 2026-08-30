@@ -10,9 +10,11 @@ import (
 	"strings"
 )
 
+var ErrNoKeyPath = errors.New("не указан путь к ключу подписи")
+
 func Load(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
-		return nil, errors.New("no key path given")
+		return nil, ErrNoKeyPath
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,8 +50,7 @@ func Generate(path string) (ed25519.PrivateKey, error) {
 
 func LoadOrCreate(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
-		_, priv, err := ed25519.GenerateKey(rand.Reader)
-		return priv, err
+		return nil, ErrNoKeyPath
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

@@ -15,10 +15,6 @@ type Published struct {
 	Signature []byte
 }
 
-func Publish(ctx context.Context, cas *storage.CAS, signer *manifest.Signer, profileDir, name, version string) (*Published, error) {
-	return PublishVariant(ctx, cas, signer, profileDir, profileDir, name, version, corev1.Platform_PLATFORM_UNSPECIFIED)
-}
-
 func PublishVariant(
 	ctx context.Context,
 	cas *storage.CAS,

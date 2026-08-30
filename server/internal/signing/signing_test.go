@@ -2,6 +2,7 @@ package signing_test
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -30,12 +31,11 @@ func TestLoadOrCreatePersistsAndReloads(t *testing.T) {
 	}
 }
 
-func TestEmptyPathGeneratesEphemeral(t *testing.T) {
-	key, err := signing.LoadOrCreate("")
-	if err != nil {
-		t.Fatal(err)
+func TestEmptyPathIsRefused(t *testing.T) {
+	if _, err := signing.LoadOrCreate(""); !errors.Is(err, signing.ErrNoKeyPath) {
+		t.Fatalf("LoadOrCreate(\"\") = %v, want ErrNoKeyPath: an ephemeral key would sign manifests that no launcher accepts after the next restart", err)
 	}
-	if len(key) != ed25519.PrivateKeySize {
-		t.Fatalf("key size = %d", len(key))
+	if _, err := signing.Load(""); !errors.Is(err, signing.ErrNoKeyPath) {
+		t.Fatalf("Load(\"\") = %v, want ErrNoKeyPath", err)
 	}
 }

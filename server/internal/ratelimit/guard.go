@@ -2,12 +2,13 @@ package ratelimit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/laminara/laminara/server/internal/duration"
 )
 
 type Guard struct {
@@ -31,24 +32,7 @@ type Config struct {
 	Challenge Bucket `json:"challenge"`
 }
 
-type Duration time.Duration
-
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
-
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return err
-	}
-	*d = Duration(parsed)
-	return nil
-}
-
-func (d Duration) MarshalJSON() ([]byte, error) { return json.Marshal(time.Duration(d).String()) }
+type Duration = duration.Duration
 
 func (b Bucket) orElse(limit int, per time.Duration) Bucket {
 	if b.Limit <= 0 {

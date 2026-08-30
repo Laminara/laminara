@@ -2,6 +2,7 @@ package jre_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -60,19 +61,21 @@ func TestSelectAndFetchFiles(t *testing.T) {
 	}
 }
 
-func TestPlatformKey(t *testing.T) {
-	cases := map[[2]string]string{
-		{"linux", "amd64"}:   "linux",
-		{"linux", "386"}:     "linux-i386",
-		{"darwin", "amd64"}:  "mac-os",
-		{"darwin", "arm64"}:  "mac-os-arm64",
-		{"windows", "amd64"}: "windows-x64",
-		{"windows", "arm64"}: "windows-arm64",
-		{"windows", "386"}:   "windows-x86",
+func TestSelectWithoutMojangRuntime(t *testing.T) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	mux.HandleFunc("/all.json", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"linux": {"java-runtime-delta": [ { "version": { "name": "21.0.3" } } ]}}`)
+	})
+
+	client := jre.NewClientWith(server.Client(), server.URL+"/all.json")
+	if _, err := client.Select(context.Background(), "linux", "java-runtime-delta"); err != nil {
+		t.Fatalf("select linux: %v", err)
 	}
-	for input, want := range cases {
-		if got := jre.PlatformKey(input[0], input[1]); got != want {
-			t.Fatalf("PlatformKey(%q,%q) = %q, want %q", input[0], input[1], got, want)
-		}
+	_, err := client.Select(context.Background(), "linux-arm64", "java-runtime-delta")
+	if !errors.Is(err, jre.ErrNoMojangRuntime) {
+		t.Fatalf("select linux-arm64 = %v, want ErrNoMojangRuntime: Mojang ships no such runtime", err)
 	}
 }

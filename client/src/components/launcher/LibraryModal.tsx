@@ -4,6 +4,7 @@ import { loaderLabels } from "@/config/branding";
 import { buildBlock } from "@/lib/buildState";
 import { cn, formatBytes, formatCount, plural } from "@/lib/format";
 import { Modal } from "@/components/ui/Modal";
+import { inputClass } from "@/components/ui/atoms";
 
 export function LibraryModal() {
   const builds = useLauncher((state) => state.builds);
@@ -25,7 +26,7 @@ export function LibraryModal() {
         placeholder="Поиск сборки…"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        className="mb-4 w-full rounded-md border border-border bg-surface-2 px-4 py-2.5 text-sm outline-none transition-colors placeholder:text-mute focus:border-border-strong"
+        className={cn(inputClass, "mb-4")}
       />
 
       <div className="grid grid-cols-3 gap-3">

@@ -6,6 +6,7 @@ use keyring::Entry;
 use rand::RngCore;
 
 use super::{KeyBackend, SPKI_ED25519_PREFIX};
+use crate::secrets::{blocking, read_password};
 use crate::KEYRING_SERVICE as SERVICE;
 
 const ENTRY: &str = "machine-key";
@@ -53,17 +54,26 @@ fn entry() -> Option<Entry> {
 }
 
 fn read_keyring() -> Option<[u8; 32]> {
-    let stored = crate::secrets::blocking(|| entry()?.get_password().ok())?;
-    decode(&stored)
+    let entry = entry()?;
+    match blocking(move || read_password(entry)) {
+        Ok(Some(stored)) => decode(&stored),
+        Ok(None) => None,
+        Err(message) => {
+            tracing::warn!("machine key unavailable: {message}");
+            None
+        }
+    }
 }
 
 fn write_keyring(bytes: &[u8; 32]) {
     let encoded = hex::encode(bytes);
-    crate::secrets::blocking(|| {
-        if let Some(entry) = entry() {
-            let _ = entry.set_password(&encoded);
-        }
+    let outcome = blocking(move || match entry() {
+        Some(entry) => entry.set_password(&encoded).map_err(|e| e.to_string()),
+        None => Ok(()),
     });
+    if let Err(message) = outcome {
+        tracing::warn!("machine key store failed: {message}");
+    }
 }
 
 fn key_file() -> Option<PathBuf> {

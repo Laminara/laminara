@@ -1,6 +1,8 @@
 package buildview
 
 import (
+	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +17,20 @@ type Field struct {
 	Label string
 	Value string
 	Hint  string
+}
+
+type Status struct {
+	Version            string
+	StartedAtUnixNanos int64
+	ModulesLoaded      uint32
+	MemoryBytes        uint64
+}
+
+func WriteStatus(out io.Writer, status Status) {
+	fmt.Fprintf(out, "версия:   %s\n", status.Version)
+	fmt.Fprintf(out, "в работе: %s\n", humanize.Duration(time.Since(time.Unix(0, status.StartedAtUnixNanos))))
+	fmt.Fprintf(out, "модулей:  %d\n", status.ModulesLoaded)
+	fmt.Fprintf(out, "память:   %s\n", humanize.Bytes(status.MemoryBytes))
 }
 
 func StatusWord(status string) string {

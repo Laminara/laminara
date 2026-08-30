@@ -47,3 +47,18 @@ func TestListIsSorted(t *testing.T) {
 		t.Fatalf("not sorted: %v", list)
 	}
 }
+
+func TestLookupFindsCommandsAndAliases(t *testing.T) {
+	r := NewRegistry()
+	r.Register(Command{Name: "auth", Aliases: []string{"a"}, Secret: true})
+
+	if got, ok := r.Lookup("auth"); !ok || !got.Secret {
+		t.Fatalf("Lookup(\"auth\") = %+v, %v", got, ok)
+	}
+	if got, ok := r.Lookup("a"); !ok || !got.Secret {
+		t.Fatalf("an alias must carry the same command, got %+v, %v", got, ok)
+	}
+	if _, ok := r.Lookup("nope"); ok {
+		t.Fatal("an unknown name must not resolve")
+	}
+}

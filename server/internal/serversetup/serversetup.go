@@ -2,6 +2,7 @@ package serversetup
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -67,6 +68,9 @@ func Build(cfg *config.Config) (*Wired, error) {
 	}
 
 	if backend != nil && cfg.Build != nil && cfg.Build.ProfilesDir != "" {
+		if cfg.Build.SigningKeyPath == "" {
+			return nil, errors.New("в конфиге нет build.signingKeyPath — без него ключ подписи создаётся заново при каждом запуске, и старые лаунчеры перестают принимать манифесты")
+		}
 		ring, err := signing.NewKeyring(cfg.Build.SigningKeyPath, cfg.Build.TrustedSigningKeys)
 		if err != nil {
 			return nil, err

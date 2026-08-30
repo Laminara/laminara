@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/pathpolicy"
 	"github.com/laminara/laminara/server/internal/progress"
 	"github.com/laminara/laminara/server/internal/storage"
@@ -62,28 +63,9 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		return nil, err
 	}
 
-	fileCount := int64(0)
-	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if d.Name() == internalDir {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() == SettingsFileName {
-			return nil
-		}
-		fileCount++
-		return nil
-	})
-	progress.Report(ctx, progress.Event{Phase: "Индексация файлов", Total: fileCount})
-
 	var files []*corev1.ManifestFile
 	var total uint64
-	var indexed int64
+	var indexed int
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -118,7 +100,10 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		})
 		total += ref.Size
 		indexed++
-		progress.Report(ctx, progress.Event{Phase: "Индексация файлов", Current: indexed, Total: fileCount})
+		progress.Report(ctx, progress.Event{
+			Phase:   "Индексация файлов",
+			Message: humanize.Count(indexed, "файл", "файла", "файлов"),
+		})
 		return nil
 	})
 	if err != nil {

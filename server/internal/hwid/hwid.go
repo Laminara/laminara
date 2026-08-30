@@ -6,6 +6,7 @@ import (
 	"time"
 
 	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
+	"github.com/laminara/laminara/server/internal/duration"
 )
 
 const ReportSchemaVersion = 1
@@ -58,26 +59,7 @@ type Config struct {
 	SaltPath         string `json:"saltPath"`
 }
 
-type Duration time.Duration
-
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
-
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return err
-	}
-	*d = Duration(parsed)
-	return nil
-}
-
-func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(time.Duration(d).String())
-}
+type Duration = duration.Duration
 
 func (c Config) withDefaults() Config {
 	if c.Mode == "" {

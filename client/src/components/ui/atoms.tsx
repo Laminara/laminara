@@ -1,5 +1,8 @@
 import type { InstallState } from "@/lib/types";
 
+export const inputClass =
+  "w-full rounded-md border border-border bg-surface-2 px-4 py-3 text-sm text-text outline-none transition-colors placeholder:text-mute focus:border-border-strong";
+
 export function Dot() {
   return <span className="h-1 w-1 rounded-full bg-mute" />;
 }

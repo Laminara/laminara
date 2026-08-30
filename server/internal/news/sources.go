@@ -57,7 +57,7 @@ func (f *fileSource) Items(context.Context) ([]Item, error) {
 	if err != nil {
 		return f.items, nil
 	}
-	items, err := Parse(data)
+	items, err := parse(data)
 	if err != nil {
 		return f.items, err
 	}
@@ -142,7 +142,7 @@ func (h *httpSource) Items(ctx context.Context) ([]Item, error) {
 	if err != nil {
 		return h.items, err
 	}
-	items, err := Parse(body)
+	items, err := parse(body)
 	if err != nil {
 		return h.items, err
 	}

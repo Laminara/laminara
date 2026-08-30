@@ -6,8 +6,9 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/laminara/laminara/server/internal/admin"
 	"github.com/laminara/laminara/server/internal/buildview"
@@ -16,36 +17,47 @@ import (
 
 const pingTimeout = 2 * time.Second
 
-func (s *Service) Players(_ context.Context) ([]admin.BuildPlayers, error) {
+const pingLimit = 16
+
+func (s *Service) Players(ctx context.Context) ([]admin.BuildPlayers, error) {
 	builds, err := s.Builds()
 	if err != nil {
 		return nil, err
 	}
 	list := make([]admin.BuildPlayers, len(builds))
-	var wait sync.WaitGroup
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(pingLimit)
 	for i, build := range builds {
 		list[i] = admin.BuildPlayers{Build: build.Name, Address: build.ServerAddress}
 		if build.ServerAddress == "" {
 			continue
 		}
-		wait.Add(1)
-		go func(at int, address string) {
-			defer wait.Done()
-			status, err := slp.Ping(address, pingTimeout)
-			if err != nil {
-				list[at].Error = err.Error()
-				return
-			}
-			list[at].Reachable = true
-			list[at].Online = status.Online
-			list[at].Max = status.Max
-			list[at].Names = status.Sample
-			list[at].Version = status.Version
-		}(i, build.ServerAddress)
+		group.Go(func() error {
+			return pingBuild(groupCtx, &list[i], build.ServerAddress)
+		})
 	}
-	wait.Wait()
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Build < list[j].Build })
 	return list, nil
+}
+
+func pingBuild(ctx context.Context, entry *admin.BuildPlayers, address string) error {
+	status, err := slp.PingContext(ctx, address, pingTimeout)
+	if err == nil {
+		entry.Reachable = true
+		entry.Online = status.Online
+		entry.Max = status.Max
+		entry.Names = status.Sample
+		entry.Version = status.Version
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	entry.Error = err.Error()
+	return nil
 }
 
 func (s *Service) players(ctx context.Context, _ []string, out io.Writer) error {
@@ -114,12 +126,13 @@ func (s *Service) buildInfo(ctx context.Context, args []string, out io.Writer) e
 	var players *admin.BuildPlayers
 	if found.ServerAddress != "" {
 		list, err := s.Players(ctx)
-		if err == nil {
-			for i := range list {
-				if list[i].Build == found.Name {
-					players = &list[i]
-					break
-				}
+		if err != nil {
+			return err
+		}
+		for i := range list {
+			if list[i].Build == found.Name {
+				players = &list[i]
+				break
 			}
 		}
 	}

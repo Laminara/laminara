@@ -63,7 +63,7 @@ type document struct {
 	Items []Item `json:"items"`
 }
 
-func Parse(data []byte) ([]Item, error) {
+func parse(data []byte) ([]Item, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
 		return nil, nil
@@ -152,13 +152,16 @@ func identity(item Item) string {
 	return item.Title
 }
 
+func isWebLink(link string) bool {
+	lower := strings.ToLower(strings.TrimSpace(link))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
 func safeLink(link string) string {
-	trimmed := strings.TrimSpace(link)
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		return trimmed
+	if !isWebLink(link) {
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(link)
 }
 
 func clamp(value string, limit int) string {

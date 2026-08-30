@@ -2,14 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
-	"github.com/laminara/laminara/server/internal/humanize"
+	"github.com/laminara/laminara/server/internal/buildview"
 )
 
 func statusCmd() *cobra.Command {
@@ -32,10 +31,12 @@ func statusCmd() *cobra.Command {
 				fmt.Println(string(out))
 				return nil
 			}
-			fmt.Printf("версия:   %s\n", msg.Version)
-			fmt.Printf("в работе: %s\n", humanize.Duration(time.Since(time.Unix(0, msg.StartedAtUnixNanos))))
-			fmt.Printf("модулей:  %d\n", msg.ModulesLoaded)
-			fmt.Printf("память:   %s\n", humanize.Bytes(msg.MemoryBytes))
+			buildview.WriteStatus(cmd.OutOrStdout(), buildview.Status{
+				Version:            msg.Version,
+				StartedAtUnixNanos: msg.StartedAtUnixNanos,
+				ModulesLoaded:      msg.ModulesLoaded,
+				MemoryBytes:        msg.MemoryBytes,
+			})
 			return nil
 		},
 	}

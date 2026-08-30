@@ -103,7 +103,7 @@ func TestPrepareAndPublish(t *testing.T) {
 	}
 	cas := storage.NewCAS(backend, corev1.HashAlgo_HASH_ALGO_BLAKE3)
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	published, err := prepare.Publish(ctx, cas, manifest.NewSigner(priv), profileDir, "vanilla-1.21.1", "1")
+	published, err := prepare.PublishVariant(ctx, cas, manifest.NewSigner(priv), profileDir, profileDir, "vanilla-1.21.1", "1", corev1.Platform_PLATFORM_UNSPECIFIED)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
 	}
