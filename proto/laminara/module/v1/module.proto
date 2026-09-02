@@ -10,12 +10,26 @@ message CommandSpec {
   string synopsis = 3;
 }
 
+enum ProviderKind {
+  PROVIDER_KIND_UNSPECIFIED = 0;
+  PROVIDER_KIND_AUTH = 1;
+  PROVIDER_KIND_SKIN = 2;
+  PROVIDER_KIND_ACCESS = 3;
+  PROVIDER_KIND_NEWS = 4;
+}
+
+message ProviderSpec {
+  ProviderKind kind = 1;
+  string name = 2;
+}
+
 message InfoResponse {
   string name = 1;
   string version = 2;
   string description = 3;
   repeated CommandSpec commands = 4;
   repeated string events = 5;
+  repeated ProviderSpec providers = 6;
 }
 
 message ExecuteRequest {
@@ -42,9 +56,91 @@ message EmitRequest {
 
 message EmitResponse {}
 
+message OpenProviderRequest {
+  ProviderKind kind = 1;
+  string name = 2;
+  bytes config = 3;
+}
+
+message OpenProviderResponse {
+  uint64 handle = 1;
+}
+
+enum AuthOutcome {
+  AUTH_OUTCOME_UNSPECIFIED = 0;
+  AUTH_OUTCOME_ACCEPTED = 1;
+  AUTH_OUTCOME_INVALID_CREDENTIALS = 2;
+  AUTH_OUTCOME_TWO_FACTOR_REQUIRED = 3;
+}
+
+message AuthenticateRequest {
+  uint64 handle = 1;
+  string username = 2;
+  string password = 3;
+  string two_factor_code = 4;
+}
+
+message AuthenticateResponse {
+  AuthOutcome outcome = 1;
+  string subject = 2;
+  string username = 3;
+  string uuid = 4;
+}
+
+message TexturesRequest {
+  uint64 handle = 1;
+  string username = 2;
+  string uuid = 3;
+}
+
+message TexturesResponse {
+  string skin_url = 1;
+  string cape_url = 2;
+  bool slim = 3;
+}
+
+message AccessSubject {
+  string subject = 1;
+  string username = 2;
+  string uuid = 3;
+}
+
+message AllowsRequest {
+  uint64 handle = 1;
+  string build = 2;
+  AccessSubject subject = 3;
+}
+
+message AllowsResponse {
+  bool allowed = 1;
+}
+
+message NewsItem {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  int64 published_at_unix_nanos = 4;
+  string tag = 5;
+  string link = 6;
+  string banner = 7;
+}
+
+message NewsItemsRequest {
+  uint64 handle = 1;
+}
+
+message NewsItemsResponse {
+  repeated NewsItem items = 1;
+}
+
 service ModuleService {
   rpc Configure(ConfigureRequest) returns (ConfigureResponse);
   rpc Info(InfoRequest) returns (InfoResponse);
   rpc Execute(ExecuteRequest) returns (stream ExecuteResponse);
   rpc Emit(EmitRequest) returns (EmitResponse);
+  rpc OpenProvider(OpenProviderRequest) returns (OpenProviderResponse);
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+  rpc Textures(TexturesRequest) returns (TexturesResponse);
+  rpc Allows(AllowsRequest) returns (AllowsResponse);
+  rpc NewsItems(NewsItemsRequest) returns (NewsItemsResponse);
 }

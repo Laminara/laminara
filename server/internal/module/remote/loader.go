@@ -101,26 +101,33 @@ func (l *Loader) load(path string, config []byte, registry *module.Registry) err
 		client.Kill()
 		return err
 	}
-	info, specs, topics, err := svc.Info(ctx)
+	manifest, err := svc.Info(ctx)
 	if err != nil {
 		client.Kill()
 		return err
 	}
-	registry.Add(newRemoteModule(info, specs, svc))
+	registry.Add(newRemoteModule(manifest.Info, manifest.Commands, svc))
 	l.clients = append(l.clients, client)
-	if len(topics) > 0 {
-		set := make(map[string]bool, len(topics))
-		for _, topic := range topics {
+	if len(manifest.Events) > 0 {
+		set := make(map[string]bool, len(manifest.Events))
+		for _, topic := range manifest.Events {
 			set[topic] = true
 		}
 		l.handlers = append(l.handlers, &eventTarget{
-			name:   info.Name,
+			name:   manifest.Info.Name,
 			topics: set,
 			svc:    svc,
 			queue:  make(chan events.Event, eventQueueSize),
 		})
 	}
-	l.log.Info("module loaded", "name", info.Name, "version", info.Version, "commands", len(specs), "events", len(topics))
+	l.registerProviders(manifest.Info.Name, manifest.Providers, svc)
+	l.log.Info("module loaded",
+		"name", manifest.Info.Name,
+		"version", manifest.Info.Version,
+		"commands", len(manifest.Commands),
+		"events", len(manifest.Events),
+		"providers", len(manifest.Providers),
+	)
 	return nil
 }
 

@@ -1,20 +1,17 @@
 version: v2
 inputs:
   - directory: proto
-    exclude_paths:
+    paths:
       - proto/laminara/module/v1
 managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/laminara/laminara/gen/go
+      value: github.com/laminara/laminara/sdk/go/gen
 plugins:
   - local: [go, tool, protoc-gen-go]
-    out: gen/go
-    opt: paths=source_relative
-  - local: [go, tool, protoc-gen-connect-go]
-    out: gen/go
+    out: sdk/go/gen
     opt: paths=source_relative
   - local: [go, tool, protoc-gen-go-grpc]
-    out: gen/go
+    out: sdk/go/gen
     opt: paths=source_relative

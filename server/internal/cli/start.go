@@ -5,6 +5,7 @@ import (
 
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/daemon"
+	"github.com/laminara/laminara/server/internal/modulesetup"
 	"github.com/laminara/laminara/server/internal/serversetup"
 )
 
@@ -22,6 +23,9 @@ func startCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				logging := daemon.NewLogging(cfg.Log)
+				opts.Logging = logging
+				opts.Modules = modulesetup.Build(cfg.Modules, logging.Log)
 				wired, err := serversetup.Build(cfg)
 				if err != nil {
 					return err
@@ -38,15 +42,6 @@ func startCmd() *cobra.Command {
 				opts.Signing = wired.Signing
 				opts.Update = cfg.Update
 				opts.Log = cfg.Log
-				if cfg.Modules != nil {
-					opts.ModulesDir = cfg.Modules.Dir
-					if len(cfg.Modules.Config) > 0 {
-						opts.ModulesConfig = make(map[string][]byte, len(cfg.Modules.Config))
-						for name, raw := range cfg.Modules.Config {
-							opts.ModulesConfig[name] = raw
-						}
-					}
-				}
 			}
 			server := daemon.New(opts)
 			err := server.Run(cmd.Context())

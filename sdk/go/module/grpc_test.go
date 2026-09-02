@@ -7,10 +7,11 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
-	modulev1 "github.com/laminara/laminara/gen/go/laminara/module/v1"
+	modulev1 "github.com/laminara/laminara/sdk/go/gen/laminara/module/v1"
 )
 
 type testModule struct{}
@@ -141,6 +142,128 @@ func TestServerAdapterInfo(t *testing.T) {
 	}
 	if info.Commands[0].Name != "greet" || len(info.Commands[0].Aliases) != 1 {
 		t.Fatalf("command spec = %+v", info.Commands[0])
+	}
+}
+
+type providerModule struct {
+	openedWith string
+}
+
+func (p *providerModule) Info() Info          { return Info{Name: "prov", Version: "1"} }
+func (p *providerModule) Commands() []Command { return nil }
+
+func (p *providerModule) AuthProviders() []string { return []string{"demo"} }
+
+func (p *providerModule) OpenAuth(_ context.Context, name string, config []byte) (AuthProvider, error) {
+	if name != "demo" {
+		return nil, ErrUnknownProvider
+	}
+	p.openedWith = string(config)
+	return demoAuth{}, nil
+}
+
+func (p *providerModule) NewsSources() []string { return []string{"demo"} }
+
+func (p *providerModule) OpenNews(context.Context, string, []byte) (NewsSource, error) {
+	return demoNews{}, nil
+}
+
+type demoAuth struct{}
+
+func (demoAuth) Authenticate(_ context.Context, creds Credentials) (Identity, error) {
+	switch {
+	case creds.Password != "secret":
+		return Identity{}, ErrInvalidCredentials
+	case creds.TwoFactorCode == "":
+		return Identity{}, ErrTwoFactorRequired
+	}
+	return Identity{Subject: "42", Username: creds.Username, UUID: "d1b0f4a2-0000-4000-8000-000000000001"}, nil
+}
+
+type demoNews struct{}
+
+func (demoNews) Items(context.Context) ([]NewsItem, error) {
+	return []NewsItem{{ID: "1", Title: "Открытие", PublishedAt: time.Unix(1700000000, 0).UTC()}}, nil
+}
+
+func TestServerAdapterProviders(t *testing.T) {
+	m := &providerModule{}
+	srv := &grpcServer{impl: m}
+	ctx := context.Background()
+
+	info, err := srv.Info(ctx, &modulev1.InfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(info.Providers) != 2 {
+		t.Fatalf("declared providers = %+v", info.Providers)
+	}
+	if info.Providers[0].Kind != modulev1.ProviderKind_PROVIDER_KIND_AUTH || info.Providers[0].Name != "demo" {
+		t.Fatalf("auth spec = %+v", info.Providers[0])
+	}
+	if info.Providers[1].Kind != modulev1.ProviderKind_PROVIDER_KIND_NEWS {
+		t.Fatalf("news spec = %+v", info.Providers[1])
+	}
+
+	opened, err := srv.OpenProvider(ctx, &modulev1.OpenProviderRequest{
+		Kind:   modulev1.ProviderKind_PROVIDER_KIND_AUTH,
+		Name:   "demo",
+		Config: []byte(`{"url":"https://cms"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.openedWith != `{"url":"https://cms"}` {
+		t.Fatalf("provider config not delivered: %q", m.openedWith)
+	}
+
+	accepted, err := srv.Authenticate(ctx, &modulev1.AuthenticateRequest{
+		Handle: opened.Handle, Username: "neo", Password: "secret", TwoFactorCode: "654321",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Outcome != modulev1.AuthOutcome_AUTH_OUTCOME_ACCEPTED || accepted.Username != "neo" {
+		t.Fatalf("accepted = %+v", accepted)
+	}
+
+	second, err := srv.Authenticate(ctx, &modulev1.AuthenticateRequest{Handle: opened.Handle, Username: "neo", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Outcome != modulev1.AuthOutcome_AUTH_OUTCOME_TWO_FACTOR_REQUIRED {
+		t.Fatalf("second factor outcome = %v", second.Outcome)
+	}
+
+	wrong, err := srv.Authenticate(ctx, &modulev1.AuthenticateRequest{Handle: opened.Handle, Username: "neo", Password: "nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrong.Outcome != modulev1.AuthOutcome_AUTH_OUTCOME_INVALID_CREDENTIALS {
+		t.Fatalf("wrong password outcome = %v", wrong.Outcome)
+	}
+
+	if _, err := srv.Textures(ctx, &modulev1.TexturesRequest{Handle: opened.Handle}); err == nil {
+		t.Fatal("an auth handle must not answer texture calls")
+	}
+	if _, err := srv.Authenticate(ctx, &modulev1.AuthenticateRequest{Handle: opened.Handle + 100}); err == nil {
+		t.Fatal("an unopened handle must be refused")
+	}
+
+	news, err := srv.OpenProvider(ctx, &modulev1.OpenProviderRequest{Kind: modulev1.ProviderKind_PROVIDER_KIND_NEWS, Name: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := srv.NewsItems(ctx, &modulev1.NewsItemsRequest{Handle: news.Handle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items.Items) != 1 || items.Items[0].PublishedAtUnixNanos != time.Unix(1700000000, 0).UnixNano() {
+		t.Fatalf("news items = %+v", items.Items)
+	}
+
+	if _, err := srv.OpenProvider(ctx, &modulev1.OpenProviderRequest{Kind: modulev1.ProviderKind_PROVIDER_KIND_SKIN, Name: "demo"}); err == nil {
+		t.Fatal("a module without skin providers must refuse to open one")
 	}
 }
 

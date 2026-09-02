@@ -1,18 +1,26 @@
 ---
 title: Модули
-description: Как написать модуль Laminara — расширить сервер своими командами.
+description: Как написать модуль Laminara — свои команды, обработчики событий и провайдеры.
 ---
 
 Модуль — это отдельный исполняемый файл, который сервер запускает изолированным
 субпроцессом и общается с ним по gRPC. Модуль добавляет команды в единый реестр
 сервера, поэтому его команды появляются в CLI, консоли, `exec` и `help` наравне
-со встроенными. Падение модуля не роняет сервер, а писать модуль можно на любом
-языке, поддерживающем gRPC-контракт (Go — из коробки, через SDK).
+со встроенными; он же может подписаться на события и отдать серверу свои
+провайдеры — аутентификации, скинов, доступа к сборкам и новостей. Падение модуля
+не роняет сервер, а писать модуль можно на любом языке, поддерживающем
+gRPC-контракт (Go — из коробки, через SDK).
 
 ## Модуль на Go
 
-Возьмите SDK `github.com/laminara/laminara/sdk/go/module` и реализуйте два метода —
-`Info()` и `Commands()`:
+SDK живёт отдельным Go-модулем `github.com/laminara/laminara/sdk/go`, поэтому
+подключается одной строкой и не тянет за собой код сервера:
+
+```bash
+go get github.com/laminara/laminara/sdk/go
+```
+
+Реализуйте два метода — `Info()` и `Commands()`:
 
 ```go
 package main
@@ -60,11 +68,11 @@ func main() {
 ## Конфигурация
 
 Чтобы модуль принимал настройки, реализуйте необязательный интерфейс
-`Configure(ctx context.Context, config []byte) error` — сервер передаст блок конфигурации
+`Configure(config []byte) error` — сервер передаст блок конфигурации
 (сырой JSON) до чтения `Info`. Понадобится импорт `encoding/json`:
 
 ```go
-func (g *greeter) Configure(_ context.Context, config []byte) error {
+func (g *greeter) Configure(config []byte) error {
 	var settings struct {
 		Greeting string `json:"greeting"`
 	}
@@ -98,6 +106,59 @@ func (g *greeter) OnEvent(_ context.Context, topic string, data map[string]strin
 в `data["name"]`. Каждое событие доставляется подписанному модулю в отдельной
 горутине, поэтому медленный модуль не блокирует сервер.
 
+## Провайдеры
+
+Модуль может отдать серверу провайдер — реализацию одного из адаптеров, которые
+сервер выбирает по имени в конфиге. Провайдер модуля встаёт в тот же реестр, что и
+встроенные, поэтому в конфиге он пишется ровно так же, как `jsonfile` или `http`:
+
+| Вид | Интерфейс модуля | Где называется в конфиге |
+|---|---|---|
+| Аутентификация | `AuthProviders` + `AuthProvider` | `auth.provider` |
+| Скины | `SkinProviders` + `SkinProvider` | `yggdrasil.skinProvider` |
+| Доступ к сборкам | `AccessSources` + `AccessSource` | `access.sources.<имя>.type` |
+| Новости | `NewsSources` + `NewsSource` | `news.source.type` |
+
+Первый интерфейс перечисляет имена, второй — работает. Сервер запрашивает список
+при загрузке модуля, а открывает провайдер тогда, когда доходит до него в конфиге,
+и передаёт соседний блок настроек: для аутентификации это `auth.config`, для скинов
+`yggdrasil.skinConfig`, для доступа и новостей — `config` рядом с `type`.
+
+```go
+func (m *cms) AuthProviders() []string { return []string{"mycms"} }
+
+func (m *cms) OpenAuth(_ context.Context, name string, config []byte) (module.AuthProvider, error) {
+	var settings struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(config, &settings); err != nil {
+		return nil, err
+	}
+	return &cmsAuth{url: settings.URL}, nil
+}
+
+func (a *cmsAuth) Authenticate(ctx context.Context, creds module.Credentials) (module.Identity, error) {
+	switch verdict := a.ask(ctx, creds); verdict {
+	case verdictWrongPassword:
+		return module.Identity{}, module.ErrInvalidCredentials
+	case verdictNeedsCode:
+		return module.Identity{}, module.ErrTwoFactorRequired
+	}
+	return module.Identity{Subject: "42", Username: creds.Username, UUID: "..."}, nil
+}
+```
+
+Две ошибки из SDK — `ErrInvalidCredentials` и `ErrTwoFactorRequired` — сервер понимает
+как отдельные исходы: первая приводит к отказу и тратит бюджет попыток, вторая просит
+лаунчер показать поле для кода из приложения-аутентификатора. Любая другая ошибка
+считается сбоем модуля, а не неверным паролем. `UUID` — строка в обычном формате; если
+модуль оставит её пустой, сервер посчитает офлайновый UUID от ника.
+
+Имя провайдера должно быть свободным: занятое встроенным адаптером или другим модулем
+имя сервер не примет и напишет об этом в журнал, а не подменит существующий провайдер
+молча. Модули загружаются раньше, чем сервер читает конфиг, поэтому провайдер модуля
+доступен уже при первом запуске — и виден в списке вариантов на экране настроек.
+
 ## Сборка и установка
 
 Соберите модуль в обычный бинарь и положите его в каталог модулей сервера:
@@ -120,6 +181,21 @@ go build -o /var/lib/laminara/modules/greeter ./greeter
 }
 ```
 
+Блок `modules.config` — настройки самого модуля. Провайдер настраивается там, где
+сервер его выбирает, поэтому модуль с провайдером аутентификации выглядит так:
+
+```json
+{
+  "modules": {
+    "dir": "/var/lib/laminara/modules"
+  },
+  "auth": {
+    "provider": "mycms",
+    "config": { "url": "https://site.example/api" }
+  }
+}
+```
+
 Сервер подхватит модуль при запуске. Проверьте:
 
 ```
@@ -134,4 +210,5 @@ $ laminara-server status --json   # modulesLoaded увеличится
 
 Команда модуля видна и в `help`, и в интерактивной консоли (наберите `/`, затем
 имя команды). Устройство обмена — go-plugin: сервер запускает бинарь и говорит с ним
-по gRPC, контракт лежит в `proto/`.
+по gRPC. Контракт лежит в `proto/laminara/module/v1`, а сгенерированный по нему код
+входит в SDK, поэтому модулю не нужны ни `buf`, ни кодогенерация.

@@ -36,8 +36,8 @@ import (
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/logbus"
 	"github.com/laminara/laminara/server/internal/module"
-	"github.com/laminara/laminara/server/internal/module/builtin"
 	"github.com/laminara/laminara/server/internal/module/remote"
+	"github.com/laminara/laminara/server/internal/modulesetup"
 	"github.com/laminara/laminara/server/internal/signing"
 	"github.com/laminara/laminara/server/internal/version"
 )
@@ -78,8 +78,8 @@ type Options struct {
 	Launcher      *launchersvc.Service
 	PublicHandler http.Handler
 	PublicAddr    string
-	ModulesDir    string
-	ModulesConfig map[string][]byte
+	Logging       *Logging
+	Modules       *modulesetup.Runtime
 	Events        *events.Bus
 	ConfigPath    string
 	Update        *config.UpdateConfig
@@ -87,12 +87,11 @@ type Options struct {
 }
 
 func New(opts Options) *Daemon {
-	bus := logbus.NewBus(4096)
-	level := new(slog.LevelVar)
-	level.Set(slog.LevelInfo)
-	sink, file := logSink(opts.Log)
-	log := slog.New(logbus.NewHandler(sink, level, bus))
-	slog.SetDefault(log)
+	logging := opts.Logging
+	if logging == nil {
+		logging = NewLogging(opts.Log)
+	}
+	bus, level, log, file := logging.Bus, logging.Level, logging.Log, logging.File
 
 	registry := command.NewRegistry()
 	registry.Register(command.HelpCommand(registry))
@@ -155,19 +154,18 @@ func New(opts Options) *Daemon {
 		}
 	}
 
-	modules := module.NewRegistry()
-	modules.Add(builtin.NewDiagnostics(modules))
-	if opts.ModulesDir != "" {
-		d.moduleLoader = remote.NewLoader(log)
-		if err := d.moduleLoader.LoadDir(opts.ModulesDir, opts.ModulesConfig, modules); err != nil {
-			log.Error("modules dir scan failed", "dir", opts.ModulesDir, "error", err)
-		}
+	runtime := opts.Modules
+	if runtime == nil {
+		runtime = modulesetup.Build(nil, log)
+	}
+	d.moduleLoader = runtime.Loader
+	if d.moduleLoader != nil {
 		d.moduleLoader.Subscribe(opts.Events)
 	}
-	if err := modules.Load(module.CommandHost{Registry: registry}); err != nil {
+	if err := runtime.Registry.Load(module.CommandHost{Registry: registry}); err != nil {
 		log.Error("module load failed", "error", err)
 	}
-	d.modules = modules
+	d.modules = runtime.Registry
 	return d
 }
 

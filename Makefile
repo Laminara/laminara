@@ -5,14 +5,17 @@ LDFLAGS := -X github.com/laminara/laminara/server/internal/version.Current=$(VER
 
 generate:
 	buf generate
+	buf generate --template buf.gen.sdk.yaml
 
 lint:
 	buf lint
 	go vet ./...
+	cd sdk/go && go vet ./...
 	@test -z "$$(gofmt -l server sdk)" || { echo "gofmt не выровнял:"; gofmt -l server sdk; exit 1; }
 
 tidy:
 	go mod tidy
+	cd sdk/go && go mod tidy
 
 build: generate
 	go build ./...
@@ -20,6 +23,7 @@ build: generate
 
 test: generate
 	go test ./...
+	cd sdk/go && go test ./...
 
 run: generate
 	go run ./server/cmd/laminara-server start
