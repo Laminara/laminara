@@ -140,11 +140,21 @@ jobs:
         working-directory: client
         run: cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml
 
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Сгенерировать контракты
+        shell: bash
+        run: |
+          buf generate
+          buf generate --template buf.gen.sdk.yaml
+
       - name: Проверить запекание на собранном лаунчере
         shell: bash
         env:
-          LAMINARA_LAUNCHER_TEMPLATE: ${{ runner.os == 'Windows' && format('client/target/release/{0}', matrix.built) || '' }}
-          LAMINARA_WINRES_EXE: ${{ runner.os == 'Windows' && format('client/target/release/{0}', matrix.built) || '' }}
+          LAMINARA_LAUNCHER_TEMPLATE: ${{ runner.os == 'Windows' && format('{0}/client/target/release/{1}', github.workspace, matrix.built) || '' }}
+          LAMINARA_WINRES_EXE: ${{ runner.os == 'Windows' && format('{0}/client/target/release/{1}', github.workspace, matrix.built) || '' }}
         run: go test ./server/internal/winres/... ./server/internal/launchersvc/...
 
       - name: Разложить артефакт
