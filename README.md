@@ -70,7 +70,7 @@ GravitLauncher — самый известный лаунчер в русско�
 Сервер (только Linux):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/MrLeonardosMi/Laminara/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/laminara/laminara/main/install.sh | bash
 laminara-server status
 ```
 
