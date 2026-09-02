@@ -1,99 +1,14 @@
 package cli
 
 import (
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/laminara/laminara/server/internal/clientconfig"
 	"github.com/laminara/laminara/server/internal/config"
-	"github.com/laminara/laminara/server/internal/humanize"
-	"github.com/laminara/laminara/server/internal/hwid"
-	"github.com/laminara/laminara/server/internal/mediatype"
-	"github.com/laminara/laminara/server/internal/signing"
 )
-
-type clientEndpoint struct {
-	ID      string `json:"id"`
-	BaseURL string `json:"baseUrl"`
-}
-
-type clientConfigOut struct {
-	Endpoints            []clientEndpoint `json:"endpoints"`
-	ServerPublicKeyHex   string           `json:"serverPublicKeyHex"`
-	TrustedPublicKeysHex []string         `json:"trustedPublicKeysHex,omitempty"`
-	HWIDSaltHex          string           `json:"hwidSaltHex,omitempty"`
-	Branding             *clientBranding  `json:"branding,omitempty"`
-}
-
-type clientBranding struct {
-	Name             string `json:"name,omitempty"`
-	WindowTitle      string `json:"windowTitle,omitempty"`
-	Tagline          string `json:"tagline,omitempty"`
-	PrimaryColor     string `json:"primaryColor,omitempty"`
-	PrimaryInk       string `json:"primaryInk,omitempty"`
-	BackgroundColor  string `json:"backgroundColor,omitempty"`
-	LogoDataURI      string `json:"logoDataUri,omitempty"`
-	HeroMediaDataURI string `json:"heroMediaDataUri,omitempty"`
-	SiteURL          string `json:"siteUrl,omitempty"`
-}
-
-const maxInlineAsset = 8 << 20
-
-func inlineAsset(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("картинка оформления %s: %w", path, err)
-	}
-	if len(data) > maxInlineAsset {
-		return "", fmt.Errorf("картинка %s весит %s — оставьте под %s", path, humanize.Bytes(uint64(len(data))), humanize.Bytes(uint64(maxInlineAsset)))
-	}
-	return "data:" + mediatype.Guess(path, "") + ";base64," + base64.StdEncoding.EncodeToString(data), nil
-}
-
-func brandingFrom(cfg *config.Config) (*clientBranding, error) {
-	if cfg.Branding == nil {
-		return nil, nil
-	}
-	logo, err := inlineAsset(cfg.Branding.LogoPath)
-	if err != nil {
-		return nil, err
-	}
-	hero, err := inlineAsset(cfg.Branding.HeroMediaPath)
-	if err != nil {
-		return nil, err
-	}
-	return &clientBranding{
-		Name:             cfg.Branding.Name,
-		WindowTitle:      cfg.Branding.WindowTitle,
-		Tagline:          cfg.Branding.Tagline,
-		PrimaryColor:     cfg.Branding.PrimaryColor,
-		PrimaryInk:       cfg.Branding.PrimaryInk,
-		BackgroundColor:  cfg.Branding.BackgroundColor,
-		LogoDataURI:      logo,
-		HeroMediaDataURI: hero,
-		SiteURL:          cfg.Branding.SiteURL,
-	}, nil
-}
-
-func hwidSalt(cfg *config.Config) (string, error) {
-	if cfg.HWID == nil || cfg.HWID.Mode == hwid.ModeOff {
-		return "", nil
-	}
-	salt, err := hwid.LoadOrCreateSalt(cfg.HWID.SaltPath)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(salt), nil
-}
 
 func clientConfigCmd() *cobra.Command {
 	var configPath string
@@ -107,38 +22,21 @@ func clientConfigCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if cfg.Build == nil || cfg.Build.SigningKeyPath == "" {
-				return fmt.Errorf("в конфиге нет build.signingKeyPath — без ключа подписи лаунчер собрать нельзя")
-			}
-			ring, err := signing.NewKeyring(cfg.Build.SigningKeyPath, cfg.Build.TrustedSigningKeys)
-			if err != nil {
-				return err
-			}
-			branding, err := brandingFrom(cfg)
-			if err != nil {
-				return err
-			}
-			salt, err := hwidSalt(cfg)
-			if err != nil {
-				return err
-			}
-			out := clientConfigOut{
-				ServerPublicKeyHex:   ring.ActiveHex(),
-				TrustedPublicKeysHex: ring.TrustedHex(),
-				HWIDSaltHex:          salt,
-				Branding:             branding,
+			if len(endpoints) == 0 && cfg.Launcher != nil {
+				endpoints = cfg.Launcher.Endpoints
 			}
 			if len(endpoints) == 0 {
 				if cfg.API == nil || cfg.API.Addr == "" {
-					return fmt.Errorf("не указан --endpoint, и в конфиге нет api.addr")
+					return fmt.Errorf("не указан --endpoint, и в конфиге нет ни launcher.endpoints, ни api.addr")
 				}
 				endpoints = []string{"http://" + cfg.API.Addr}
-				fmt.Fprintln(os.Stderr, "Внимание: адрес не указан — беру api.addr, а это почти наверняка не тот адрес, по которому придут игроки. Укажите --endpoint")
+				fmt.Fprintln(os.Stderr, "Внимание: адрес не указан — беру api.addr, а это почти наверняка не тот адрес, по которому придут игроки. Укажите --endpoint или launcher.endpoints")
 			}
-			for _, endpoint := range endpoints {
-				out.Endpoints = append(out.Endpoints, clientEndpoint{ID: endpointID(endpoint), BaseURL: endpoint})
+			document, err := clientconfig.Build(cfg, endpoints)
+			if err != nil {
+				return err
 			}
-			data, err := json.MarshalIndent(out, "", "  ")
+			data, err := document.JSON()
 			if err != nil {
 				return err
 			}
@@ -150,11 +48,4 @@ func clientConfigCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&endpoints, "endpoint", nil, "публичный адрес, по которому придут игроки (можно несколько раз, по порядку предпочтения)")
 	_ = cmd.MarkFlagRequired("config")
 	return cmd
-}
-
-func endpointID(raw string) string {
-	if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
-		return strings.Split(parsed.Host, ":")[0]
-	}
-	return raw
 }

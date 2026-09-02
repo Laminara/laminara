@@ -68,8 +68,6 @@ jobs:
               -ldflags "-s -w -X github.com/laminara/laminara/server/internal/version.Current=$VERSION" \
               -o "release/laminara-server-linux-$arch" ./server/cmd/laminara-server
           done
-          cd release && sha256sum laminara-server-* > checksums.txt && cat checksums.txt
-
       - name: Проверить, что бинарь называет свою версию
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -80,13 +78,90 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release
+          name: release-server
+          path: release/*
+          if-no-files-found: error
+
+  launcher:
+    name: Лаунчер (${{ matrix.os }})
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: laminara-launcher-linux-x86_64
+            built: laminara
+          - os: windows-2025
+            artifact: laminara-launcher-windows-x86_64.exe
+            built: laminara.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Системные библиотеки Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client
+
+      - name: Иконка с запасом под свою картинку
+        run: go run ./server/cmd/iconslots client/src-tauri/icons/128x128@2x.png client/src-tauri/icons/icon.ico
+
+      - name: Собрать фронтенд
+        working-directory: client
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Собрать лаунчер
+        working-directory: client
+        run: cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml
+
+      - name: Проверить запекание на собранном лаунчере
+        shell: bash
+        env:
+          LAMINARA_LAUNCHER_TEMPLATE: ${{ runner.os == 'Windows' && format('client/target/release/{0}', matrix.built) || '' }}
+          LAMINARA_WINRES_EXE: ${{ runner.os == 'Windows' && format('client/target/release/{0}', matrix.built) || '' }}
+        run: go test ./server/internal/winres/... ./server/internal/launchersvc/...
+
+      - name: Разложить артефакт
+        shell: bash
+        run: |
+          mkdir -p release
+          cp "client/target/release/${{ matrix.built }}" "release/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact }}
           path: release/*
           if-no-files-found: error
 
   publish:
     name: Публикация
-    needs: [version, build]
+    needs: [version, build, launcher]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -95,8 +170,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: release
+          pattern: release-*
+          merge-multiple: true
           path: release
+
+      - name: Посчитать контрольные суммы
+        run: cd release && sha256sum laminara-* > checksums.txt && cat checksums.txt
 
       - name: Собрать список изменений
         id: changelog

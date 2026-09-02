@@ -363,11 +363,27 @@ var schema = []Section{
 		},
 	},
 	{
+		Key:   "console",
+		Title: "Консоль в браузере",
+		Hint:  "Та же консоль, что и в терминале, но в браузере. Без ссылки или пароля её адрес отвечает «страницы нет».",
+		Fields: []Field{
+			{Key: "enabled", Label: "Включена", Kind: KindBool, Default: "true"},
+			{Key: "auth", Label: "Как входить", Kind: KindChoice, Default: "link", Options: func() []string { return []string{"link", "password", "both"} }, Hint: "link — только по одноразовой ссылке из команды «web», password — по паролю, both — и так, и так."},
+			{Key: "password", Label: "Пароль", Kind: KindSecret, Hint: "Хеш argon2id, посчитайте командой «laminara-server hash». Нужен при входе по паролю."},
+			{Key: "publicUrl", Label: "Адрес сервера", Kind: KindText, Hint: "Например https://launcher.example.com — подставляется в ссылку на консоль."},
+			{Key: "sessionTTL", Label: "Сколько помнить вход", Kind: KindDuration, Default: "168h", Hint: "0 — не забывать никогда."},
+			{Key: "linkTTL", Label: "Сколько живёт ссылка", Kind: KindDuration, Default: "10m"},
+			{Key: "statePath", Label: "Файл сеансов", Kind: KindText, Hint: "Где хранить открытые сеансы, чтобы они пережили перезапуск."},
+		},
+	},
+	{
 		Key:   "launcher",
-		Title: "Обновления лаунчера",
-		Hint:  "Папка с собранными лаунчерами: подпапка на версию, внутри — файлы под каждую систему.",
+		Title: "Лаунчер игроков",
+		Hint:  "Папка с лаунчерами: подпапка на версию, внутри — файлы под каждую систему. Команда «launcher build» кладёт их туда сама.",
 		Fields: []Field{
 			{Key: "dir", Label: "Папка лаунчеров", Kind: KindText},
+			{Key: "endpoints", Label: "Адреса для игроков", Kind: KindList, Hint: "Куда лаунчер ходит на сервер, например https://launcher.example.com. Этот адрес запекается в лаунчер, менять его потом — только новой сборкой."},
+			{Key: "autoBake", Label: "Пересобирать при обновлении", Kind: KindBool, Default: "true", Hint: "После обновления сервера перепечь и выпустить лаунчер заново — но только если его уже выпускали."},
 		},
 	},
 	{

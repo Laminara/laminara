@@ -1,6 +1,7 @@
 package version
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -38,6 +39,11 @@ func Compare(left, right string) int {
 
 func IsNewer(candidate, current string) bool {
 	return Compare(candidate, current) > 0
+}
+
+func NextPatch(value string) string {
+	core, _, _ := split(value)
+	return fmt.Sprintf("%d.%d.%d", part(core, 0), part(core, 1), part(core, 2)+1)
 }
 
 func IsValid(value string) bool {

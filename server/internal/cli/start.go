@@ -40,6 +40,7 @@ func startCmd() *cobra.Command {
 				opts.Catalog = wired.Catalog
 				opts.Machines = wired.Machines
 				opts.Signing = wired.Signing
+				opts.Console = wired.Console
 				opts.Update = cfg.Update
 				opts.Log = cfg.Log
 			}

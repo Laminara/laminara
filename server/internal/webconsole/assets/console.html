@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Консоль Laminara</title>
+    <link rel="stylesheet" href="xterm.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e8e4dd;
+        --dim: #8b857c;
+        --bg: #1c1b19;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.5 ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 14px;
+        border-bottom: 1px solid #2f2d2a;
+      }
+      header b {
+        font-weight: 600;
+        color: #e0a458;
+      }
+      header span {
+        color: var(--dim);
+      }
+      #warning {
+        margin-left: auto;
+        color: #d98b5f;
+      }
+      #screen {
+        flex: 1;
+        min-height: 0;
+        padding: 8px 10px;
+      }
+      #status {
+        padding: 6px 14px;
+        border-top: 1px solid #2f2d2a;
+        color: var(--dim);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <b>Laminara</b>
+      <span>консоль сервера</span>
+      <span id="warning"></span>
+    </header>
+    <div id="screen"></div>
+    <div id="status">подключаюсь…</div>
+    <script src="xterm.js"></script>
+    <script src="addon-fit.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -14,6 +14,7 @@ import (
 	"github.com/laminara/laminara/server/internal/authsetup"
 	"github.com/laminara/laminara/server/internal/buildsvc"
 	"github.com/laminara/laminara/server/internal/catalog"
+	"github.com/laminara/laminara/server/internal/clientconfig"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/events"
@@ -23,9 +24,12 @@ import (
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
+	"github.com/laminara/laminara/server/internal/selfupdate"
 	"github.com/laminara/laminara/server/internal/signing"
 	"github.com/laminara/laminara/server/internal/skin"
 	"github.com/laminara/laminara/server/internal/storage"
+	"github.com/laminara/laminara/server/internal/version"
+	"github.com/laminara/laminara/server/internal/webconsole"
 	"github.com/laminara/laminara/server/internal/yggdrasil"
 )
 
@@ -40,6 +44,7 @@ type Wired struct {
 	Limits        *ratelimit.Guard
 	News          *news.Service
 	Crashes       *crash.Service
+	Console       *webconsole.Service
 	PublicHandler http.Handler
 	PublicAddr    string
 	Events        *events.Bus
@@ -85,6 +90,14 @@ func Build(cfg *config.Config) (*Wired, error) {
 			wired.Launcher.SetEmitter(func(topic string, data map[string]string) {
 				launcherBus.Publish(events.Event{Topic: topic, Data: data})
 			})
+			wired.Launcher.SetBakery(&launchersvc.Bakery{
+				Repo:    cfg.Update.RepoOr(selfupdate.DefaultRepo),
+				Version: version.Current,
+				Auto:    cfg.Launcher.Bakes(),
+				Document: func() (clientconfig.Document, error) {
+					return clientconfig.Build(cfg, cfg.Launcher.Endpoints)
+				},
+			})
 		}
 		bus := wired.Events
 		wired.Build.SetEmitter(func(topic string, data map[string]string) {
@@ -121,6 +134,12 @@ func Build(cfg *config.Config) (*Wired, error) {
 		return nil, err
 	}
 	wired.Crashes = crashes
+
+	console, err := webconsole.New(cfg.Console, slog.Default())
+	if err != nil {
+		return nil, err
+	}
+	wired.Console = console
 	if cfg.Build != nil && cfg.Build.ProfilesDir != "" {
 		wired.Catalog = catalog.New(cfg.Build.ProfilesDir)
 		served := wired.Catalog
@@ -171,6 +190,7 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 
 	mux := http.NewServeMux()
 	healthChecks(wired, backend).Mount(mux)
+	wired.Console.Mount(mux)
 	if launcher != nil {
 		mux.Handle("/", launcher)
 	}

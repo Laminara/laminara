@@ -1,9 +1,11 @@
 mod auth;
+mod baked;
 mod commands;
 mod logging;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -22,8 +24,14 @@ pub struct AppState {
     pub authlib_jar: PathBuf,
 }
 
-const EMBEDDED_CLIENT_CONFIG: &str =
+const DEFAULT_CLIENT_CONFIG: &str =
     include_str!(concat!(env!("OUT_DIR"), "/embedded_client_config.json"));
+
+static CLIENT_CONFIG: OnceLock<String> = OnceLock::new();
+
+fn client_config() -> &'static str {
+    CLIENT_CONFIG.get_or_init(|| baked::read().unwrap_or_else(|| DEFAULT_CLIENT_CONFIG.to_string()))
+}
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,14 +48,14 @@ struct EmbeddedConfig {
 }
 
 pub fn embedded_branding() -> serde_json::Value {
-    serde_json::from_str::<EmbeddedConfig>(EMBEDDED_CLIENT_CONFIG)
+    serde_json::from_str::<EmbeddedConfig>(client_config())
         .map(|config| config.branding)
         .unwrap_or(serde_json::Value::Null)
 }
 
 fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientConfig, String> {
     let file = paths.config_file();
-    let embedded: EmbeddedConfig = serde_json::from_str(EMBEDDED_CLIENT_CONFIG)
+    let embedded: EmbeddedConfig = serde_json::from_str(client_config())
         .map_err(|e| format!("embedded client config: {e}"))?;
 
     let mut endpoints = embedded.endpoints;

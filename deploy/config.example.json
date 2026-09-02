@@ -40,7 +40,18 @@
     ]
   },
   "launcher": {
-    "dir": "/var/lib/laminara/launcher"
+    "dir": "/var/lib/laminara/launcher",
+    "endpoints": [
+      "https://launcher.example.com"
+    ],
+    "autoBake": true
+  },
+  "console": {
+    "enabled": true,
+    "auth": "link",
+    "publicUrl": "https://launcher.example.com",
+    "sessionTTL": "168h",
+    "statePath": "/var/lib/laminara/console-sessions.json"
   },
   "modules": {
     "dir": "/var/lib/laminara/modules",
@@ -118,7 +129,7 @@
   "update": {
     "check": true,
     "install": false,
-    "repo": "MrLeonardosMi/Laminara",
+    "repo": "laminara/laminara",
     "interval": "24h"
   },
   "log": {

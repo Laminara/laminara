@@ -3,65 +3,78 @@ title: Сборка лаунчера
 description: Как получить exe и Linux-бинарь под свой проект, в том числе кросс-сборкой с Linux.
 ---
 
-import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+import { Aside, Steps } from "@astrojs/starlight/components";
 
 Лаунчер принадлежит **одному проекту**: адрес сервера, ключи подписи, соль машинного
 отпечатка и оформление записываются в файл при сборке. Игрок ничего не настраивает и адрес
 не вводит, а чужой проект через этот файл не откроется.
 
-## Что нужно
+## Одной командой
 
-<CardGrid>
-  <Card title="Всегда">
-  Node 24 + pnpm, Rust 1.96+ (rustup)
-</Card>
-  <Card title="Для Windows с Linux">
-  `cargo install cargo-xwin`, пакеты `clang lld llvm`
-</Card>
-</CardGrid>
-
-Windows-сборка с Linux делается **кросс-компиляцией**: `cargo-xwin` сам скачивает заголовки
-и библиотеки Windows SDK (около гигабайта, один раз), линкует `lld`. Виртуальная машина с
-Windows не нужна.
-
-## Как собрать
+Сервер делает лаунчер сам — ни Rust, ни Node, ни компилятора на нём не нужно. Он берёт
+готовый лаунчер из релиза Laminara и **впечатывает** в него вашу конфигурацию: адрес,
+ключи, соль, оформление и иконку.
 
 <Steps>
 
-1. **Заберите конфигурацию с сервера**
+1. **Укажите адрес, по которому придут игроки**
 
-   ```bash
-   laminara-server client-config \
-     --config /etc/laminara/config.json \
-     --endpoint https://launcher.ваш-домен > mygame.client.json
+   ```json
+   {
+     "launcher": {
+       "dir": "/var/lib/laminara/launcher",
+       "endpoints": ["https://launcher.ваш-домен"]
+     }
+   }
    ```
-   Внутри — адреса, весь [набор ключей](/server/signing), соль
-   [машинного отпечатка](/server/machines) и оформление вместе с картинками.
 
    <Aside type="caution">
-   `--endpoint` — адрес, по которому лаунчер будет ходить **у игрока**. `127.0.0.1` годится
-   только для проверки на самом сервере. Укажите его несколько раз — лаунчер возьмёт самый
-   быстрый из отвечающих и переключится на запасной, если основной умрёт.
+   Это адрес **у игрока**, а не адрес слушателя: `127.0.0.1` годится только для проверки на
+   самом сервере. Адресов можно указать несколько — лаунчер возьмёт самый быстрый из
+   отвечающих и переключится на запасной, если основной умрёт.
    </Aside>
 
-2. **Соберите**
+2. **Соберите и выпустите**
 
-   ```bash
-   cd client
-   ./build-launcher.sh ../mygame.client.json --target windows
-   ./build-launcher.sh ../mygame.client.json --target linux
    ```
-   Готовые файлы — в `client/dist-launcher/`. Имя берётся из оформления: если в конфиге
-   сервера `branding.windowTitle` = «Magic World», получится `Magic World.exe`. Перебить —
-   флагом `--name`.
+   launcher build
+   ```
+
+   Команда скачивает заготовки под Windows и Linux (проверяя их контрольные суммы),
+   впечатывает конфигурацию, ставит вашу иконку из `branding.logoPath` и сразу публикует
+   версию. Имя файла — из оформления: при `branding.windowTitle` = «Magic World» получится
+   `Magic World.exe`. Версию можно назвать явно: `launcher build 1.3.0`.
 
 3. **Выложите игрокам**
 
-   Файл самодостаточный: игрок скачивает и запускает, установка не нужна. Дальше лаунчер
-   [обновляет себя сам](/launcher/updates) — выложите его же командой `launcher publish`,
-   и следующая версия доедет до игроков без их участия.
+   Файлы лежат в `launcher/<версия>/`, игроки берут их по ссылке с сервера. Файл
+   самодостаточный: скачал и запустил, установка не нужна. Дальше лаунчер
+   [обновляет себя сам](/launcher/updates).
 
 </Steps>
+
+После обновления сервера лаунчер перепекается и выпускается заново — так до игроков доедет
+свежая версия. Отключается это настройкой `launcher.autoBake`.
+
+## Сборка своими руками
+
+Нужна, если хочется большего, чем даёт запекание: свои свойства файла, инсталлятор, AppImage,
+пакет под macOS. Тогда нужны Node 24 + pnpm и Rust 1.96+, а для Windows с Linux —
+`cargo install cargo-xwin` и пакеты `clang lld llvm` (кросс-компиляция, виртуальная машина
+с Windows не нужна).
+
+```bash
+laminara-server client-config \
+  --config /etc/laminara/config.json \
+  --endpoint https://launcher.ваш-домен > mygame.client.json
+
+cd client
+./build-launcher.sh ../mygame.client.json --target windows
+./build-launcher.sh ../mygame.client.json --target linux
+```
+
+Готовые файлы — в `client/dist-launcher/`. Положите их в `launcher/<версия>/` на сервере и
+выпустите командой `launcher publish <версия>` — дальше всё как обычно.
 
 ## Что должно быть на компьютере игрока
 

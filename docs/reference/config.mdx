@@ -70,9 +70,23 @@ import ParamField from "@site/components/ParamField.astro";
 
 ## launcher
 
-<ParamField path="dir" type="string">Каталог с версиями лаунчера: `<dir>/<версия>/<артефакты>`. Публикуется командой `launcher publish`.</ParamField>
+<ParamField path="dir" type="string">Каталог с версиями лаунчера: `<dir>/<версия>/<артефакты>`. Туда же кладёт файлы `launcher build`.</ParamField>
+<ParamField path="endpoints" type="string[]">Адреса, по которым лаунчер ходит на сервер **у игрока**. Запекаются в файл, поэтому меняются только новой сборкой.</ParamField>
+<ParamField path="autoBake" type="boolean" default="true">Пересобирать и выпускать лаунчер после обновления сервера — но только если его уже выпускали.</ParamField>
 
-Подробнее — [Обновление лаунчера](/launcher/updates).
+Подробнее — [Сборка лаунчера](/launcher/building) и [Обновление лаунчера](/launcher/updates).
+
+## console
+
+<ParamField path="enabled" type="boolean" default="true">Отдавать ли консоль по адресу `/console/`. Без сеанса её адреса отвечают 404.</ParamField>
+<ParamField path="auth" type="string" default="link">Как входить: `link` — по одноразовой ссылке из команды `web`, `password` — по паролю, `both` — и так, и так.</ParamField>
+<ParamField path="password" type="string">Хеш пароля (`laminara-server hash`). Нужен при `auth` = `password` или `both`.</ParamField>
+<ParamField path="publicUrl" type="string">Адрес сервера снаружи, например `https://launcher.example.com` — подставляется в ссылку на консоль.</ParamField>
+<ParamField path="sessionTTL" type="duration" default="168h">Сколько браузер помнит вход. `0` — не забывать никогда.</ParamField>
+<ParamField path="linkTTL" type="duration" default="10m">Сколько живёт одноразовая ссылка.</ParamField>
+<ParamField path="statePath" type="string">Файл с открытыми сеансами, чтобы они пережили перезапуск.</ParamField>
+
+Подробнее — [Консоль](/console).
 
 ## branding
 
@@ -135,7 +149,7 @@ import ParamField from "@site/components/ParamField.astro";
 
 <ParamField path="check" type="boolean">Смотреть релизы на GitHub раз в `interval` и писать в лог, когда выходит версия свежее. По умолчанию `true`.</ParamField>
 <ParamField path="install" type="boolean">Ставить новую версию самому и перезапускаться. По умолчанию `false`.</ParamField>
-<ParamField path="repo" type="string">Репозиторий релизов в виде «владелец/имя». По умолчанию `MrLeonardosMi/Laminara`.</ParamField>
+<ParamField path="repo" type="string">Репозиторий релизов в виде «владелец/имя». По умолчанию `laminara/laminara`.</ParamField>
 <ParamField path="interval" type="duration">Как часто смотреть релизы. По умолчанию `24h`.</ParamField>
 
 Подробнее — [Обновление сервера](/server/updates).

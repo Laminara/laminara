@@ -30,6 +30,7 @@ type Service struct {
 	signer *manifest.Signer
 	dir    string
 	emit   func(topic string, data map[string]string)
+	bakery *Bakery
 }
 
 func NewService(cas *storage.CAS, signer *manifest.Signer, dir string) *Service {
@@ -43,16 +44,18 @@ func (s *Service) SetEmitter(emit func(topic string, data map[string]string)) {
 func (s *Service) Commands() []command.Command {
 	return []command.Command{{
 		Name:     "launcher",
-		Synopsis: "версии лаунчера (launcher versions | launcher publish <версия> | launcher status)",
+		Synopsis: "лаунчер игроков (launcher build [версия] | launcher versions | launcher publish <версия> | launcher status)",
 		Run:      s.run,
 	}}
 }
 
 func (s *Service) run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("как пользоваться: launcher versions | launcher publish <версия> | launcher status")
+		return fmt.Errorf("как пользоваться: launcher build [версия] | launcher versions | launcher publish <версия> | launcher status")
 	}
 	switch args[0] {
+	case "build":
+		return s.build(ctx, args[1:], out)
 	case "versions":
 		return s.versions(out)
 	case "publish":

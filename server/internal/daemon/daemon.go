@@ -40,6 +40,7 @@ import (
 	"github.com/laminara/laminara/server/internal/modulesetup"
 	"github.com/laminara/laminara/server/internal/signing"
 	"github.com/laminara/laminara/server/internal/version"
+	"github.com/laminara/laminara/server/internal/webconsole"
 )
 
 const (
@@ -64,6 +65,7 @@ type Daemon struct {
 	publicHandler http.Handler
 	publicAddr    string
 	catalog       admin.Catalog
+	launcher      *launchersvc.Service
 	update        *config.UpdateConfig
 	logFile       io.Closer
 }
@@ -74,6 +76,7 @@ type Options struct {
 	Catalog       *catalog.Catalog
 	Machines      *hwid.Gate
 	Signing       *signing.Keyring
+	Console       *webconsole.Service
 	Build         *buildsvc.Service
 	Launcher      *launchersvc.Service
 	PublicHandler http.Handler
@@ -138,7 +141,11 @@ func New(opts Options) *Daemon {
 		registry.Register(banCommand(opts.Machines))
 		registry.Register(bansCommand(opts.Machines))
 	}
+	for _, webCommand := range opts.Console.Commands() {
+		registry.Register(webCommand)
+	}
 	if opts.Launcher != nil {
+		d.launcher = opts.Launcher
 		for _, launcherCommand := range opts.Launcher.Commands() {
 			registry.Register(launcherCommand)
 		}
@@ -232,6 +239,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.readCommands(ctx)
 	go d.watchUpdates(ctx)
+	go d.launcher.Catch(ctx, d.log)
 
 	d.log.Info("laminara-server started",
 		"source", "daemon",

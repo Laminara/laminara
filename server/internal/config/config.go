@@ -11,24 +11,26 @@ import (
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
+	"github.com/laminara/laminara/server/internal/webconsole"
 )
 
 type Config struct {
-	Auth      *AuthConfig       `json:"auth"`
-	Storage   *StorageConfig    `json:"storage"`
-	Build     *BuildConfig      `json:"build"`
-	API       *APIConfig        `json:"api"`
-	Yggdrasil *YggdrasilConfig  `json:"yggdrasil"`
-	Modules   *ModulesConfig    `json:"modules"`
-	Launcher  *LauncherConfig   `json:"launcher"`
-	Branding  *BrandingConfig   `json:"branding"`
-	Access    *access.Config    `json:"access"`
-	HWID      *hwid.Config      `json:"hwid"`
-	RateLimit *ratelimit.Config `json:"rateLimit"`
-	News      *news.Config      `json:"news"`
-	Update    *UpdateConfig     `json:"update"`
-	Log       *LogConfig        `json:"log"`
-	Crashes   *crash.Config     `json:"crashReports"`
+	Auth      *AuthConfig        `json:"auth"`
+	Storage   *StorageConfig     `json:"storage"`
+	Build     *BuildConfig       `json:"build"`
+	API       *APIConfig         `json:"api"`
+	Yggdrasil *YggdrasilConfig   `json:"yggdrasil"`
+	Modules   *ModulesConfig     `json:"modules"`
+	Launcher  *LauncherConfig    `json:"launcher"`
+	Branding  *BrandingConfig    `json:"branding"`
+	Access    *access.Config     `json:"access"`
+	HWID      *hwid.Config       `json:"hwid"`
+	RateLimit *ratelimit.Config  `json:"rateLimit"`
+	News      *news.Config       `json:"news"`
+	Console   *webconsole.Config `json:"console"`
+	Update    *UpdateConfig      `json:"update"`
+	Log       *LogConfig         `json:"log"`
+	Crashes   *crash.Config      `json:"crashReports"`
 }
 
 type BrandingConfig struct {
@@ -83,7 +85,13 @@ func (u *UpdateConfig) IntervalOr(fallback time.Duration) time.Duration {
 }
 
 type LauncherConfig struct {
-	Dir string `json:"dir"`
+	Dir       string   `json:"dir"`
+	Endpoints []string `json:"endpoints"`
+	AutoBake  *bool    `json:"autoBake"`
+}
+
+func (l *LauncherConfig) Bakes() bool {
+	return l != nil && (l.AutoBake == nil || *l.AutoBake)
 }
 
 type ModulesConfig struct {

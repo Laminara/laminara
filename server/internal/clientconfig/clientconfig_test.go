@@ -1,4 +1,4 @@
-package cli
+package clientconfig
 
 import (
 	"os"
@@ -45,5 +45,23 @@ func TestInlineAssetPicksTheMediaTypeByExtension(t *testing.T) {
 func TestInlineAssetWithoutAPathIsEmpty(t *testing.T) {
 	if got, err := inlineAsset(""); err != nil || got != "" {
 		t.Fatalf("inlineAsset(\"\") = %q, %v", got, err)
+	}
+}
+
+func TestLauncherNameComesFromBranding(t *testing.T) {
+	for _, test := range []struct {
+		branding *Branding
+		want     string
+	}{
+		{nil, "Laminara"},
+		{&Branding{Name: "Magic World"}, "Magic World"},
+		{&Branding{Name: "Magic", WindowTitle: "Magic World"}, "Magic World"},
+		{&Branding{WindowTitle: `Ma/gic:World?`}, "MagicWorld"},
+		{&Branding{WindowTitle: "   "}, "Laminara"},
+	} {
+		got := Document{Branding: test.branding}.LauncherName()
+		if got != test.want {
+			t.Fatalf("LauncherName(%+v) = %q, want %q", test.branding, got, test.want)
+		}
 	}
 }
