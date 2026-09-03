@@ -69,13 +69,19 @@ impl MachineFacts {
             None => (Vec::new(), vec![CollectorFlag::Weak]),
         };
 
-        let key = tokio::time::timeout(
+        let key = match tokio::time::timeout(
             KEY_BUDGET,
             tokio::task::spawn_blocking(PlatformKey::load_or_create),
         )
         .await
         .ok()
-        .and_then(|joined| joined.ok());
+        .and_then(|joined| joined.ok())
+        {
+            Some(key) => Some(key),
+            None => tokio::task::spawn_blocking(PlatformKey::software)
+                .await
+                .ok(),
+        };
 
         let mut signals: Vec<Signal> = measurements
             .iter()

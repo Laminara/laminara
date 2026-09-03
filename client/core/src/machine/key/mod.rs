@@ -72,6 +72,10 @@ impl PlatformKey {
                 hardware_backed: true,
             };
         }
+        PlatformKey::software()
+    }
+
+    pub fn software() -> PlatformKey {
         PlatformKey {
             backend: Box::new(software::SoftwareKey::load_or_create()),
             hardware_backed: false,
@@ -160,6 +164,18 @@ mod tests {
             "platform key: hardware_backed={} spki={} bytes",
             key.hardware_backed(),
             spki.len()
+        );
+    }
+
+    #[test]
+    fn the_software_key_is_always_available() {
+        let key = PlatformKey::software();
+
+        assert!(!key.hardware_backed());
+        assert!(!key.public_spki().is_empty());
+        assert!(
+            key.sign(b"payload").is_some(),
+            "the fallback key must sign: it is what a slow hardware key falls back to"
         );
     }
 }
