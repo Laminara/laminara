@@ -282,15 +282,26 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 }
 
 func mergeUnique(base, extra []string) []string {
-	seen := make(map[string]bool, len(base))
-	for _, path := range base {
-		seen[path] = true
+	at := make(map[string]int, len(base))
+	for i, path := range base {
+		at[artifactOf(path)] = i
 	}
 	for _, path := range extra {
-		if !seen[path] {
-			seen[path] = true
-			base = append(base, path)
+		artifact := artifactOf(path)
+		if index, found := at[artifact]; found {
+			base[index] = path
+			continue
 		}
+		at[artifact] = len(base)
+		base = append(base, path)
 	}
 	return base
+}
+
+func artifactOf(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	if len(parts) < 3 {
+		return filepath.ToSlash(path)
+	}
+	return strings.Join(parts[:len(parts)-2], "/")
 }
