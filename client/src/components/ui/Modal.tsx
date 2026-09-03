@@ -30,7 +30,7 @@ export function Modal({ title, subtitle, compact = false, onClose, children }: M
       <div
         className={cn(
           "flex flex-col overflow-hidden rounded-lg border border-border bg-bg-tint shadow-panel",
-          compact ? "max-h-[78%] w-[560px]" : "h-[78%] w-[75%]",
+          compact ? "max-h-[85%] w-[560px]" : "h-[88%] w-[84%]",
         )}
         onClick={(event) => event.stopPropagation()}
       >

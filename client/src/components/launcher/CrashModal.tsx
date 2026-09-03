@@ -13,19 +13,19 @@ export function CrashModal() {
 
   return (
     <Modal title="Игра завершилась с ошибкой" subtitle={`Код выхода ${crash.code}`} onClose={dismiss}>
-      <div className="flex flex-col gap-4">
-        <div className="flex items-start gap-3 rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">
+      <div className="flex h-full flex-col gap-4">
+        <div className="flex shrink-0 items-start gap-3 rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">
           <Warning size={18} className="mt-0.5 shrink-0 text-primary" />
           <span>Последние строки журнала игры. Полный журнал лаунчера — в папке данных, файл launcher.log.</span>
         </div>
 
-        <pre className="max-h-80 overflow-auto rounded-md border border-border bg-surface p-3 text-[11px] leading-relaxed text-dim">
+        <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-surface p-3 text-[11px] leading-relaxed text-dim">
           {crash.log.length > 0 ? crash.log.join("\n") : "Журнал пуст."}
         </pre>
 
-        {sent && <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">{sent}</div>}
+        {sent && <div className="shrink-0 rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">{sent}</div>}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex shrink-0 justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard?.writeText(crash.log.join("\n"))}>
             Копировать
           </Button>

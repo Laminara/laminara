@@ -65,6 +65,7 @@ interface LauncherState {
   cancelSync: () => Promise<void>;
   stopGame: () => Promise<void>;
   refreshPlayers: () => Promise<void>;
+  refreshBuilds: () => Promise<void>;
 }
 
 export const useLauncher = create<LauncherState>((set, get) => ({
@@ -135,6 +136,15 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     })),
 
   refreshPlayers: () => quietly(async () => set({ players: await ipc.playerCounts() })),
+
+  refreshBuilds: () =>
+    quietly(async () => {
+      const phase = get().phase;
+      if (phase !== "home") return;
+      const builds = await ipc.listBuilds();
+      const selected = get().selected;
+      set({ builds, selected: selected && builds.some((build) => build.name === selected) ? selected : pickBuild(builds) });
+    }),
 
   refreshNews: () =>
     quietly(async () => {

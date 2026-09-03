@@ -25,6 +25,7 @@ export default function App() {
   const phase = useLauncher((state) => state.phase);
   const modal = useLauncher((state) => state.modal);
   const refreshPlayers = useLauncher((state) => state.refreshPlayers);
+  const refreshBuilds = useLauncher((state) => state.refreshBuilds);
 
   useEffect(() => {
     void init();
@@ -35,6 +36,16 @@ export default function App() {
     const id = setInterval(() => void refreshPlayers(), 30000);
     return () => clearInterval(id);
   }, [refreshPlayers]);
+
+  useEffect(() => {
+    const id = setInterval(() => void refreshBuilds(), 20000);
+    const onFocus = () => void refreshBuilds();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshBuilds]);
 
   const isHome = phase !== "connecting" && phase !== "login" && phase !== "updating";
 
