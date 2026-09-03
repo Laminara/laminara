@@ -56,6 +56,8 @@ pub struct ClientConfig {
     pub default_memory_mb: u32,
     #[serde(default)]
     pub build_settings: std::collections::HashMap<String, BuildSettings>,
+    #[serde(default)]
+    pub stale_update: Option<String>,
 }
 
 impl ClientConfig {
@@ -71,8 +73,9 @@ impl ClientConfig {
         }
         let text =
             serde_json::to_string_pretty(self).map_err(|e| CoreError::Config(e.to_string()))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text).map_err(|e| CoreError::Config(e.to_string()))?;
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        crate::privatefile::write(&tmp, text.as_bytes())
+            .map_err(|e| CoreError::Config(e.to_string()))?;
         std::fs::rename(&tmp, path).map_err(|e| CoreError::Config(e.to_string()))?;
         Ok(())
     }

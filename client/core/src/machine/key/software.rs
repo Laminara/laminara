@@ -87,7 +87,7 @@ fn read_file() -> Option<[u8; 32]> {
 
 fn write_file(bytes: &[u8; 32]) {
     let Some(path) = key_file() else { return };
-    if fs::write(&path, hex::encode(bytes)).is_err() {
+    if crate::privatefile::write(&path, hex::encode(bytes).as_bytes()).is_err() {
         return;
     }
     hide(&path);

@@ -169,6 +169,8 @@ pub async fn refresh(
     })
 }
 
+const MAX_PREFETCH_BYTES: usize = 4 << 20;
+
 pub async fn prefetch(transport: &Transport, base_url: &str) -> Result<String, CoreError> {
     let url = format!("{}/yggdrasil/", base_url.trim_end_matches('/'));
     let response = transport
@@ -177,10 +179,20 @@ pub async fn prefetch(transport: &Transport, base_url: &str) -> Result<String, C
         .send()
         .await
         .map_err(|e| CoreError::Transport(e.to_string()))?;
-    let bytes = response
-        .bytes()
+    let mut response = response;
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
+        .map_err(|e| CoreError::Transport(e.to_string()))?
+    {
+        if bytes.len() + chunk.len() > MAX_PREFETCH_BYTES {
+            return Err(CoreError::Transport(format!(
+                "сервер прислал больше {MAX_PREFETCH_BYTES} байт в ответ на запрос yggdrasil"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
@@ -194,9 +206,6 @@ pub fn ensure_client_token(path: &Path) -> Result<String, CoreError> {
     let mut bytes = [0u8; 16];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
     let token = hex::encode(bytes);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, &token)?;
+    crate::privatefile::write(path, token.as_bytes())?;
     Ok(token)
 }

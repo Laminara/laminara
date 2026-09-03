@@ -10,6 +10,7 @@ pub mod machine;
 pub mod manifest;
 pub mod paths;
 pub mod platform;
+pub mod privatefile;
 pub mod process;
 pub mod rpc;
 pub mod secrets;
