@@ -104,6 +104,7 @@ fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientCon
         jvm_tuning: vec![],
         default_memory_mb: 4096,
         build_settings: std::collections::HashMap::new(),
+        stale_update: None,
     };
     config.save(&file).map_err(|e| e.to_string())?;
     Ok(config)
@@ -139,7 +140,7 @@ pub fn run() {
     let log_dir = dirs::data_dir().map(|d| d.join("laminara").join("logs"));
     let _log_guard = log_dir.as_ref().and_then(|dir| logging::init(dir));
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = env!("LAMINARA_VERSION"),
         "Laminara launcher starting"
     );
 

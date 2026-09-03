@@ -119,6 +119,8 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
         session.uuid.clone(),
         "--accessToken".into(),
         session.access_token.clone(),
+        "--userProperties".into(),
+        "{}".into(),
         "--clientId".into(),
         String::new(),
         "--xuid".into(),
@@ -285,6 +287,10 @@ mod tests {
         assert!(line.contains("--accessToken AT"));
         assert!(line.contains("--uuid 0af1c2d3e4f5"));
         assert!(line.contains("--userType msa"));
+        assert!(
+            line.contains("--userProperties {}"),
+            "без --userProperties клиенты до 1.8 не стартуют: joptsimple требует эту опцию"
+        );
         let cp = argv.iter().position(|a| a == "-cp").unwrap();
         assert!(argv[cp + 1].contains(";"), "windows classpath separator");
         assert!(

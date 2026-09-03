@@ -102,7 +102,7 @@ impl Core {
                 password.to_string(),
                 two_factor_code.to_string(),
                 facts,
-                env!("CARGO_PKG_VERSION").to_string(),
+                env!("LAMINARA_VERSION").to_string(),
             )
             .await?;
         let tokens = response.tokens.ok_or_else(|| CoreError::App {
@@ -145,7 +145,7 @@ impl Core {
         };
         let verdict = self
             .pool
-            .report_machine(facts, env!("CARGO_PKG_VERSION").to_string())
+            .report_machine(facts, env!("LAMINARA_VERSION").to_string())
             .await?;
         self.transport
             .set_machine_ticket(verdict.map(|verdict| verdict.machine_ticket));
@@ -161,10 +161,7 @@ impl Core {
         log: String,
     ) -> Result<String, CoreError> {
         let mut details = std::collections::HashMap::new();
-        details.insert(
-            "launcher".to_string(),
-            env!("CARGO_PKG_VERSION").to_string(),
-        );
+        details.insert("launcher".to_string(), env!("LAMINARA_VERSION").to_string());
         details.insert(
             "platform".to_string(),
             crate::platform::current().as_str_name().to_string(),
@@ -453,6 +450,8 @@ impl Core {
             &self.build_settings(profile).feature_selection,
         );
 
+        let authlib_jar = authlib_from(&profile_dir, authlib_jar)?;
+
         let argv = build_argv(&LaunchInputs {
             profile: &launch_profile,
             profile_dir: &profile_dir,
@@ -460,7 +459,7 @@ impl Core {
             java_bin: &java_bin,
             natives_dir: &natives_dir,
             yggdrasil_root: &yggdrasil_root,
-            authlib_jar,
+            authlib_jar: &authlib_jar,
             prefetch_b64: &prefetch,
             session,
             jvm_tuning: &jvm,
@@ -505,6 +504,18 @@ impl Core {
 
     pub fn endpoints(&self) -> Vec<EndpointConfig> {
         self.config.load().endpoints.clone()
+    }
+
+    pub fn stale_update(&self) -> Option<String> {
+        self.config.load().stale_update.clone()
+    }
+
+    pub fn remember_stale_update(&self, version: &str) -> Result<(), CoreError> {
+        let mut next = ClientConfig::clone(&self.config.load());
+        next.stale_update = Some(version.to_string());
+        next.save(&self.paths.config_file())?;
+        self.config.store(Arc::new(next));
+        Ok(())
     }
 
     pub fn build_settings(&self, profile: &str) -> crate::config::BuildSettings {
@@ -588,6 +599,21 @@ where
     }
 }
 
+pub const AUTHLIB_INJECTOR_NAME: &str = "authlib-injector.jar";
+
+fn authlib_from(profile_dir: &Path, fallback: &Path) -> Result<PathBuf, CoreError> {
+    let shipped = profile_dir.join(AUTHLIB_INJECTOR_NAME);
+    if shipped.is_file() {
+        return Ok(shipped);
+    }
+    if fallback.is_file() {
+        return Ok(fallback.to_path_buf());
+    }
+    Err(CoreError::Launch(format!(
+        "в сборке нет {AUTHLIB_INJECTOR_NAME} — без него игра не сможет войти на сервер; положите его в сборку и опубликуйте её заново"
+    )))
+}
+
 fn java_binary(profile_dir: &Path, profile: &LaunchProfile) -> PathBuf {
     if !profile.java_bin.is_empty() {
         let mut path = profile_dir.to_path_buf();
@@ -664,6 +690,7 @@ mod tests {
                 jvm_tuning: Vec::new(),
                 default_memory_mb: 4096,
                 build_settings: std::collections::HashMap::new(),
+                stale_update: None,
             },
         )
         .unwrap()
@@ -684,6 +711,25 @@ mod tests {
             ledger.insert(format!("mods/file{index}.jar"), ledger_entry(hash));
         }
         sync::save_ledger(&profile.join(".laminara").join(sync::LEDGER_FILE), &ledger).unwrap();
+    }
+
+    #[test]
+    fn the_injector_that_came_with_the_build_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("profile");
+        std::fs::create_dir_all(&profile).unwrap();
+        let fallback = tmp.path().join(AUTHLIB_INJECTOR_NAME);
+        std::fs::write(&fallback, b"local").unwrap();
+
+        assert_eq!(authlib_from(&profile, &fallback).unwrap(), fallback);
+
+        let shipped = profile.join(AUTHLIB_INJECTOR_NAME);
+        std::fs::write(&shipped, b"signed").unwrap();
+        assert_eq!(authlib_from(&profile, &fallback).unwrap(), shipped);
+
+        std::fs::remove_file(&shipped).unwrap();
+        std::fs::remove_file(&fallback).unwrap();
+        assert!(authlib_from(&profile, &fallback).is_err());
     }
 
     #[tokio::test]

@@ -650,7 +650,7 @@ pub async fn launch(
 
     let mut child = state
         .core
-        .launch(&profile, &game, &authlib, env!("CARGO_PKG_VERSION"))
+        .launch(&profile, &game, &authlib, env!("LAMINARA_VERSION"))
         .await
         .map_err(|e| player_error(&format!("launch failed for {profile}"), e))?;
 
@@ -738,7 +738,7 @@ pub fn general_settings(state: State<'_, AppState>) -> GeneralSettings {
                 base_url: e.base_url,
             })
             .collect(),
-        version: env!("CARGO_PKG_VERSION").into(),
+        version: env!("LAMINARA_VERSION").into(),
     }
 }
 
@@ -1028,14 +1028,18 @@ const UPDATED_TO: &str = "LAMINARA_UPDATED_TO";
 
 #[tauri::command]
 pub async fn check_update(state: State<'_, AppState>) -> Result<Option<UpdateDto>, String> {
-    match state.core.check_update(env!("CARGO_PKG_VERSION")).await {
+    match state.core.check_update(env!("LAMINARA_VERSION")).await {
         Ok(Some(update)) => {
-            if std::env::var(UPDATED_TO).as_deref() == Ok(update.version.as_str()) {
-                tracing::warn!(
-                    "the update to {} left the launcher on {}, not offering it again",
-                    update.version,
-                    env!("CARGO_PKG_VERSION")
-                );
+            let just_tried = std::env::var(UPDATED_TO).as_deref() == Ok(update.version.as_str());
+            if just_tried || state.core.stale_update().as_deref() == Some(update.version.as_str()) {
+                if just_tried {
+                    tracing::warn!(
+                        "the update to {} left the launcher on {}, not offering it again",
+                        update.version,
+                        env!("LAMINARA_VERSION")
+                    );
+                    let _ = state.core.remember_stale_update(&update.version);
+                }
                 return Ok(None);
             }
             tracing::info!("launcher update available: {}", update.version);
@@ -1070,7 +1074,7 @@ pub async fn apply_update(
     let channel = on_event.clone();
     let target = state
         .core
-        .apply_update(env!("CARGO_PKG_VERSION"), move |done, total| {
+        .apply_update(env!("LAMINARA_VERSION"), move |done, total| {
             let _ = channel.send(UpdateProgress {
                 bytes_done: done,
                 bytes_total: total,
