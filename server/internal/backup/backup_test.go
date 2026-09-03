@@ -1,7 +1,10 @@
 package backup_test
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +155,89 @@ func TestRestoreRefusesSomethingThatIsNotABackup(t *testing.T) {
 	}
 	if _, err := backup.Restore(path, "", false); err == nil {
 		t.Fatal("посторонний файл не должен приниматься за сохранение")
+	}
+}
+
+func TestRestoreRefusesAPathThatLeavesTheTarget(t *testing.T) {
+	cfg, configPath, dir := stand(t)
+	archive := filepath.Join(dir, "backup.tar.gz")
+	if _, err := backup.Create(cfg, configPath, archive); err != nil {
+		t.Fatal(err)
+	}
+	tampered := filepath.Join(dir, "tampered.tar.gz")
+	retarget(t, archive, tampered, "../../escaped.txt")
+
+	into := t.TempDir()
+	results, err := backup.Restore(tampered, into, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range results {
+		if result.Written && strings.Contains(filepath.ToSlash(result.Item.Path), "escaped.txt") {
+			t.Fatalf("файл записан мимо папки восстановления: %s", result.Item.Path)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(into), "escaped.txt")); err == nil {
+		t.Fatal("архив с путём наружу не должен ничего писать за пределами папки")
+	}
+}
+
+func retarget(t *testing.T, source, target, path string) {
+	t.Helper()
+	in, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	unzipped, err := gzip.NewReader(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	zipped := gzip.NewWriter(out)
+	defer zipped.Close()
+	writer := tar.NewWriter(zipped)
+	defer writer.Close()
+
+	reader := tar.NewReader(unzipped)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Name == "manifest.json" {
+			var manifest map[string]any
+			if err := json.Unmarshal(body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			items, _ := manifest["items"].([]any)
+			if len(items) == 0 {
+				t.Fatal("в бэкапе нет файлов")
+			}
+			first, _ := items[0].(map[string]any)
+			first["path"] = path
+			body, err = json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header.Size = int64(len(body))
+		}
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(body); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

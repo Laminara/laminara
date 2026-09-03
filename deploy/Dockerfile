@@ -12,8 +12,11 @@ FROM debian:12-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --uid 10001 --home-dir /var/lib/laminara --shell /usr/sbin/nologin laminara \
+    && install -d -o laminara -g laminara /var/lib/laminara /run/laminara
 COPY --from=build /out/laminara-server /usr/local/bin/laminara-server
 ENV XDG_RUNTIME_DIR=/run/laminara
 VOLUME ["/var/lib/laminara"]
+USER laminara
 ENTRYPOINT ["/usr/local/bin/laminara-server"]
 CMD ["start", "--config", "/etc/laminara/config.json"]

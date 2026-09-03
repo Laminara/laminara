@@ -86,6 +86,14 @@ func (s *Service) Accept(ctx context.Context, report Report, log *slog.Logger) e
 	return nil
 }
 
+func (s *Service) forgetStale(deadline time.Time) {
+	for name, moments := range s.recent {
+		if len(moments) == 0 || moments[len(moments)-1].Before(deadline) {
+			delete(s.recent, name)
+		}
+	}
+}
+
 func (s *Service) allow(player string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,7 +105,12 @@ func (s *Service) allow(player string) bool {
 			kept = append(kept, moment)
 		}
 	}
-	s.recent[player] = kept
+	if len(kept) == 0 {
+		delete(s.recent, player)
+	} else {
+		s.recent[player] = kept
+	}
+	s.forgetStale(deadline)
 
 	if len(kept) >= s.limit {
 		return false

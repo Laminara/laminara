@@ -45,6 +45,18 @@ func Get(name string) (Verifier, error) {
 	return verifier, nil
 }
 
+var weak = map[string]string{
+	"plain":  "пароли лежат открытым текстом",
+	"md5":    "MD5 подбирается мгновенно",
+	"sha256": "SHA-256 без соли перебирается на видеокарте",
+	"sha512": "SHA-512 без соли перебирается на видеокарте",
+}
+
+func Weakness(scheme string) (string, bool) {
+	reason, found := weak[scheme]
+	return reason, found
+}
+
 func Names() []string {
 	names := make([]string, 0, len(registry))
 	for name := range registry {

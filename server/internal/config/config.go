@@ -111,8 +111,9 @@ type BuildConfig struct {
 }
 
 type APIConfig struct {
-	Addr   string `json:"addr"`
-	XAccel bool   `json:"xAccel"`
+	Addr           string   `json:"addr"`
+	XAccel         bool     `json:"xAccel"`
+	TrustedProxies []string `json:"trustedProxies"`
 }
 
 type YggdrasilConfig struct {

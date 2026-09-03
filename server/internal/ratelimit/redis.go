@@ -30,6 +30,13 @@ func (l *RedisLimiter) Blocked(ctx context.Context, key string) (bool, error) {
 
 func (l *RedisLimiter) Allow(ctx context.Context, key string) (bool, error) {
 	full := "laminara:ratelimit:" + key
+	fresh, err := l.client.SetArgs(ctx, full, 1, redis.SetArgs{Mode: "NX", TTL: l.window}).Result()
+	if err != nil && err != redis.Nil {
+		return false, err
+	}
+	if fresh == "OK" {
+		return l.limit >= 1, nil
+	}
 	count, err := l.client.Incr(ctx, full).Result()
 	if err != nil {
 		return false, err

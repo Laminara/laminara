@@ -45,6 +45,7 @@ type sqlProvider struct {
 	hasUUID   bool
 	hasSecret bool
 	verifier  hash.Verifier
+	scheme    string
 	second    *totp.Verifier
 }
 
@@ -57,7 +58,8 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	verifier, err := hash.Get(orDefault(cfg.Hash, "sha256"))
+	scheme := orDefault(cfg.Hash, "argon2id")
+	verifier, err := verifierFor(scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +71,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &sqlProvider{db: db, query: cfg.Query, custom: true, verifier: verifier}, nil
+		return &sqlProvider{db: db, query: cfg.Query, custom: true, verifier: verifier, scheme: scheme}, nil
 	}
 	table, usernameCol, err := sqlschema.Field(cfg.Table, cfg.Fields.Username)
 	if err != nil {
@@ -102,7 +104,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	}
 	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s",
 		columns, quote(table), quote(usernameCol), placeholder)
-	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, hasSecret: hasSecret, verifier: verifier, second: totp.NewVerifier()}, nil
+	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, hasSecret: hasSecret, verifier: verifier, scheme: scheme, second: totp.NewVerifier()}, nil
 }
 
 func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {
@@ -110,7 +112,7 @@ func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) 
 	if err != nil {
 		return auth.Identity{}, err
 	}
-	valid, err := p.verifier.Verify(creds.Password, stored)
+	valid, err := verify(p.verifier, p.scheme, creds.Password, stored)
 	if err != nil {
 		return auth.Identity{}, err
 	}

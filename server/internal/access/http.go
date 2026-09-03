@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -186,10 +187,23 @@ func (h *httpSource) Allows(ctx context.Context, build string, subject Subject) 
 	select {
 	case <-entry.ready:
 	case <-ctx.Done():
+		if h.failOpen {
+			slog.Warn("источник доступа не успел ответить — пускаю по failOpen",
+				"source", "access",
+				"сборка", build,
+				"игрок", subject.Username,
+			)
+		}
 		return h.failOpen, ctx.Err()
 	}
 	if entry.err != nil {
 		if h.failOpen {
+			slog.Warn("источник доступа не ответил — пускаю по failOpen",
+				"source", "access",
+				"сборка", build,
+				"игрок", subject.Username,
+				"error", entry.err,
+			)
 			return true, nil
 		}
 		return false, entry.err
@@ -251,7 +265,7 @@ type checkResponse struct {
 func parseCheckResponse(body []byte) (bool, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return true, nil
+		return false, fmt.Errorf("access endpoint answered with an empty body, want {\"allowed\": bool}")
 	}
 	var parsed checkResponse
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {

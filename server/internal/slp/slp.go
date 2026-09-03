@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const maxStatusBytes = 4 << 20
 
 type Status struct {
 	Online  int64
@@ -71,6 +74,9 @@ func PingContext(ctx context.Context, address string, timeout time.Duration) (St
 	length, err := readVarint(reader)
 	if err != nil {
 		return Status{}, err
+	}
+	if length <= 0 || length > maxStatusBytes {
+		return Status{}, fmt.Errorf("сервер ответил пакетом на %d байт — это не статус", length)
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(conn, payload); err != nil {

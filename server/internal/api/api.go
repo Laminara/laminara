@@ -16,6 +16,7 @@ import (
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/catalog"
+	"github.com/laminara/laminara/server/internal/clientaddr"
 	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
@@ -31,6 +32,7 @@ type Service struct {
 	access   *access.Controller
 	machines *hwid.Gate
 	limits   *ratelimit.Guard
+	proxies  *clientaddr.Trust
 	news     *news.Service
 	crashes  *crash.Service
 	log      *slog.Logger
@@ -44,6 +46,7 @@ type Options struct {
 	Access   *access.Controller
 	Machines *hwid.Gate
 	Limits   *ratelimit.Guard
+	Proxies  *clientaddr.Trust
 	News     *news.Service
 	Crashes  *crash.Service
 	Log      *slog.Logger
@@ -57,6 +60,7 @@ func NewService(opts Options) *Service {
 		access:   opts.Access,
 		machines: opts.Machines,
 		limits:   opts.Limits,
+		proxies:  opts.Proxies,
 		news:     opts.News,
 		crashes:  opts.Crashes,
 		log:      opts.Log,
@@ -87,7 +91,7 @@ func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginReq
 	if s.auth == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("auth is not configured"))
 	}
-	address := clientIP(req.Header(), req.Peer().Addr)
+	address := s.proxies.Of(req.Header(), req.Peer().Addr)
 	if !s.limits.SignInAllowed(ctx, address, req.Msg.Username) {
 		return nil, connect.NewError(connect.CodeResourceExhausted, errTooManyAttempts)
 	}
@@ -106,7 +110,7 @@ func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginReq
 	if err != nil {
 		return nil, err
 	}
-	verdict, err := s.machines.Check(ctx, hwid.IdentityOf(identity), req.Msg.Machine, clientIP(req.Header(), req.Peer().Addr))
+	verdict, err := s.machines.Check(ctx, hwid.IdentityOf(identity), req.Msg.Machine, s.proxies.Of(req.Header(), req.Peer().Addr))
 	if err != nil {
 		_ = s.auth.Logout(ctx, tokens.Access)
 		return nil, machineError(err)

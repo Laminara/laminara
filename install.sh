@@ -65,17 +65,28 @@ install_binary() {
     install -m0755 "$BINARY_OVERRIDE" "$dest"
     return
   fi
-  local arch url
+  local arch base asset sums expected actual
   arch=$(detect_arch)
-  url="https://github.com/${REPO}/releases/latest/download/laminara-server-linux-${arch}"
+  asset="laminara-server-linux-${arch}"
+  base="https://github.com/${REPO}/releases/latest/download"
   note "скачиваю сервер ($arch) из релизов GitHub…"
-  curl -fSL --progress-bar "$url" -o "$dest" || die "не удалось скачать $url"
+  curl -fSL --progress-bar "$base/$asset" -o "$dest" || die "не удалось скачать $base/$asset"
+
+  sums=$(mktemp)
+  curl -fsSL "$base/checksums.txt" -o "$sums" || die "не удалось скачать checksums.txt — без него скачанное не проверить"
+  expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$sums" | head -1)
+  rm -f "$sums"
+  [ -n "$expected" ] || die "в checksums.txt нет строки про $asset"
+  actual=$(sha256sum "$dest" | awk '{ print $1 }')
+  [ "$actual" = "$expected" ] || die "контрольная сумма не сошлась: скачано $actual, в релизе $expected"
+  note "контрольная сумма сошлась"
   chmod +x "$dest"
 }
 
 main() {
   [ "$(uname -s)" = "Linux" ] || die "сервер работает только на Linux"
   command -v curl >/dev/null || die "нужен curl"
+  command -v sha256sum >/dev/null || die "нужен sha256sum"
 
   head "Laminara — установка"
   note "Соберём конфигурацию и запустим сервер. Ничего качать руками не придётся."
@@ -149,7 +160,7 @@ main() {
         [ "$admin_pass" = "$admin_pass2" ] && [ -n "$admin_pass" ] && break
         note "пароли не совпали или пусты — ещё раз"
       done
-      hashed=$("$server" hash --algo argon2id "$admin_pass")
+      hashed=$(printf '%s\n' "$admin_pass" | "$server" hash --algo argon2id)
       printf '[{ "username": "%s", "password": "%s", "uuid": "" }]\n' "$(json_escape "$admin_user")" "$hashed" > "$users"
       chmod 600 "$users"
       auth_block=$(printf '{ "provider": "jsonfile", "config": { "path": "%s", "hash": "argon2id", "fields": { "username": "username", "password": "password", "uuid": "uuid" } }, "sessions": %s }' \

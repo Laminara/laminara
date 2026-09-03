@@ -212,7 +212,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer listener.Close()
 
-	if err := os.WriteFile(control.PidPath(), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+	if err := os.WriteFile(control.PidPath(), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		return err
 	}
 	defer control.ReleasePid()

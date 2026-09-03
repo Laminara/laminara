@@ -381,13 +381,14 @@ func TestVirtualMachinePolicy(t *testing.T) {
 }
 
 func TestTicketsAreRequiredOnlyWhenAsked(t *testing.T) {
+	neo := hwid.Identity{Subject: "neo"}
 	open := gateFor(t, `{"mode": "enforce", "requireChallenge": false}`)
-	if err := open.VerifyTicket(""); err != nil {
+	if err := open.VerifyTicket("", neo); err != nil {
 		t.Fatalf("without requireLauncher an absent ticket is fine: %v", err)
 	}
 
 	strict := gateFor(t, `{"mode": "enforce", "requireChallenge": false, "requireLauncher": true}`)
-	if err := strict.VerifyTicket(""); err == nil {
+	if err := strict.VerifyTicket("", neo); err == nil {
 		t.Fatal("requireLauncher must refuse a caller with no ticket")
 	}
 	verdict, err := check(t, strict, "neo", reportOf(
@@ -398,11 +399,14 @@ func TestTicketsAreRequiredOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := strict.VerifyTicket(verdict.MachineTicket); err != nil {
+	if err := strict.VerifyTicket(verdict.MachineTicket, neo); err != nil {
 		t.Fatalf("the launcher's own ticket must pass: %v", err)
 	}
-	if err := strict.VerifyTicket(verdict.MachineTicket + "x"); err == nil {
+	if err := strict.VerifyTicket(verdict.MachineTicket+"x", neo); err == nil {
 		t.Fatal("a tampered ticket must not pass")
+	}
+	if err := strict.VerifyTicket(verdict.MachineTicket, hwid.Identity{Subject: "trinity"}); err == nil {
+		t.Fatal("чужой билет не должен пускать в игру под другим аккаунтом")
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/laminara/laminara/server/internal/authsetup"
 	"github.com/laminara/laminara/server/internal/buildsvc"
 	"github.com/laminara/laminara/server/internal/catalog"
+	"github.com/laminara/laminara/server/internal/clientaddr"
 	"github.com/laminara/laminara/server/internal/clientconfig"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/crash"
@@ -167,6 +168,14 @@ func Build(cfg *config.Config) (*Wired, error) {
 
 func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backend) (http.Handler, error) {
 	authService := wired.Auth
+	var trustedProxies []string
+	if cfg.API != nil {
+		trustedProxies = cfg.API.TrustedProxies
+	}
+	proxies, err := clientaddr.New(trustedProxies)
+	if err != nil {
+		return nil, err
+	}
 	var launcher http.Handler
 	if backend != nil && wired.Catalog != nil {
 		xAccel := cfg.API != nil && cfg.API.XAccel
@@ -183,6 +192,7 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 			Limits:   wired.Limits,
 			News:     wired.News,
 			Crashes:  wired.Crashes,
+			Proxies:  proxies,
 			Log:      slog.Default(),
 		})
 		launcher = api.Handler(service, backend, xAccel)
@@ -207,6 +217,7 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 		ServerName:  cfg.Yggdrasil.ServerName,
 		SkinDomains: cfg.Yggdrasil.SkinDomains,
 		RSAKeyPath:  cfg.Yggdrasil.RSAKeyPath,
+		Proxies:     proxies,
 	})
 	if err != nil {
 		return nil, err

@@ -24,7 +24,10 @@
   },
   "api": {
     "addr": "0.0.0.0:8099",
-    "xAccel": true
+    "xAccel": true,
+    "trustedProxies": [
+      "127.0.0.1"
+    ]
   },
   "yggdrasil": {
     "enabled": true,

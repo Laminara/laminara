@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 )
 
+const maxBody = 64 << 20
+
 func GetJSON(ctx context.Context, client *http.Client, url string, out any) error {
 	return get(ctx, client, url, func(resp *http.Response) error {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out)
 	})
 }
 
 func GetXML(ctx context.Context, client *http.Client, url string, out any) error {
 	return get(ctx, client, url, func(resp *http.Response) error {
-		return xml.NewDecoder(resp.Body).Decode(out)
+		return xml.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out)
 	})
 }
 

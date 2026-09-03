@@ -65,6 +65,7 @@ var schema = []Section{
 		Fields: []Field{
 			{Key: "addr", Label: "Адрес и порт", Kind: KindText, Default: "0.0.0.0:8099", Hint: "За nginx держите 127.0.0.1:8099 — наружу смотрит только nginx."},
 			{Key: "xAccel", Label: "Файлы отдаёт nginx", Kind: KindBool, Default: "false", Hint: "Включайте только вместе с nginx: сервер отвечает заголовком, а байты шлёт nginx."},
+			{Key: "trustedProxies", Label: "Доверенные прокси", Kind: KindList, Hint: "Чьему заголовку X-Forwarded-For верить: адреса и подсети через запятую, например 127.0.0.1 или 10.0.0.0/8. Пусто — верим локальным и частным сетям."},
 		},
 	},
 	{
@@ -88,9 +89,9 @@ var schema = []Section{
 				},
 				"sql": {
 					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlschema.Drivers},
-					{Key: "dsn", Label: "Строка подключения", Kind: KindSecret, Hint: "Например postgres://user:pass@host:5432/base?sslmode=disable"},
+					{Key: "dsn", Label: "Строка подключения", Kind: KindSecret, Hint: "Например postgres://user:pass@host:5432/base?sslmode=require. Без TLS оставляйте только базу на этой же машине."},
 					{Key: "table", Label: "Таблица", Kind: KindText, Default: "users"},
-					{Key: "hash", Label: "Как захеширован пароль", Kind: KindChoice, Default: "bcrypt", Options: hash.Names},
+					{Key: "hash", Label: "Как захеширован пароль", Kind: KindChoice, Default: "argon2id", Options: hash.Names},
 					{Key: "fields.username", Label: "Колонка логина", Kind: KindText, Default: "username"},
 					{Key: "fields.password", Label: "Колонка пароля", Kind: KindText, Default: "password"},
 					{Key: "fields.uuid", Label: "Колонка UUID", Kind: KindText},

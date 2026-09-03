@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/laminara/laminara/server/internal/auth"
+	"github.com/laminara/laminara/server/internal/clientaddr"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/ratelimit"
 	"github.com/laminara/laminara/server/internal/skin"
@@ -31,11 +31,13 @@ type Config struct {
 	ServerName  string
 	SkinDomains []string
 	RSAKeyPath  string
+	Proxies     *clientaddr.Trust
 }
 
 type Server struct {
 	auth        *auth.Service
 	machines    *hwid.Gate
+	proxies     *clientaddr.Trust
 	limits      *ratelimit.Guard
 	skin        skin.Provider
 	rsa         *rsa.PrivateKey
@@ -59,6 +61,7 @@ func NewServer(authService *auth.Service, skinProvider skin.Provider, machines *
 	return &Server{
 		auth:        authService,
 		machines:    machines,
+		proxies:     cfg.Proxies,
 		limits:      limits,
 		skin:        skinProvider,
 		rsa:         key,
@@ -108,7 +111,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	address := clientAddress(r)
+	address := s.proxies.OfRequest(r)
 	if !s.limits.SignInAllowed(r.Context(), address, req.Username) {
 		yggError(w, http.StatusTooManyRequests, "Too many attempts. Try again in a few minutes.")
 		return
@@ -125,7 +128,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusForbidden, messageFor(err))
 		return
 	}
-	if err := s.machines.VerifyTicket(r.Header.Get(MachineTicketHeader)); err != nil {
+	if err := s.machines.VerifyTicket(r.Header.Get(MachineTicketHeader), hwid.IdentityOf(identity)); err != nil {
 		yggError(w, http.StatusForbidden, err.Error())
 		return
 	}
@@ -208,7 +211,7 @@ func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	address := clientAddress(r)
+	address := s.proxies.OfRequest(r)
 	if !s.limits.SignInAllowed(r.Context(), address, req.Username) {
 		yggError(w, http.StatusTooManyRequests, "Too many attempts. Try again in a few minutes.")
 		return
@@ -340,20 +343,4 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 		return false
 	}
 	return true
-}
-
-func clientAddress(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		if trimmed := strings.TrimSpace(first); trimmed != "" {
-			return trimmed
-		}
-	}
-	if real := strings.TrimSpace(r.Header.Get("X-Real-IP")); real != "" {
-		return real
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
 }

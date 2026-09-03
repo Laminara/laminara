@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/laminara/laminara/server/internal/progress"
+	"github.com/laminara/laminara/server/internal/safepath"
 )
 
 type job struct {
@@ -54,7 +55,10 @@ func (d *downloader) run(ctx context.Context, jobs []job, phase string) error {
 }
 
 func (d *downloader) fetch(ctx context.Context, j job) error {
-	full := filepath.Join(d.root, filepath.FromSlash(j.path))
+	full, err := safepath.Join(d.root, j.path)
+	if err != nil {
+		return fmt.Errorf("метаданные просят положить файл мимо папки сборки: %w", err)
+	}
 	return downloadFile(ctx, d.http, j.url, full, j.sha1, j.executable)
 }
 

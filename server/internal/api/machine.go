@@ -3,9 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"net"
-	"net/http"
-	"strings"
 
 	"connectrpc.com/connect"
 
@@ -15,7 +12,7 @@ import (
 )
 
 func (s *Service) GetChallenge(ctx context.Context, req *connect.Request[apiv1.GetChallengeRequest]) (*connect.Response[apiv1.GetChallengeResponse], error) {
-	if !s.limits.ChallengeAllowed(ctx, clientIP(req.Header(), req.Peer().Addr)) {
+	if !s.limits.ChallengeAllowed(ctx, s.proxies.Of(req.Header(), req.Peer().Addr)) {
 		return nil, connect.NewError(connect.CodeResourceExhausted, errTooManyAttempts)
 	}
 	if !s.machines.Enabled() {
@@ -38,7 +35,7 @@ func (s *Service) ReportMachine(ctx context.Context, req *connect.Request[apiv1.
 		return nil, connect.NewError(connect.CodeUnauthenticated, errStaleSession)
 	}
 	identity := hwid.Identity{Subject: subject.Subject, Username: subject.Username}
-	verdict, err := s.machines.Check(ctx, identity, req.Msg.Machine, clientIP(req.Header(), req.Peer().Addr))
+	verdict, err := s.machines.Check(ctx, identity, req.Msg.Machine, s.proxies.Of(req.Header(), req.Peer().Addr))
 	if err != nil {
 		return nil, machineError(err)
 	}
@@ -73,20 +70,4 @@ func machineError(err error) error {
 	default:
 		return err
 	}
-}
-
-func clientIP(header http.Header, peer string) string {
-	if forwarded := header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		if trimmed := strings.TrimSpace(first); trimmed != "" {
-			return trimmed
-		}
-	}
-	if real := strings.TrimSpace(header.Get("X-Real-IP")); real != "" {
-		return real
-	}
-	if host, _, err := net.SplitHostPort(peer); err == nil {
-		return host
-	}
-	return peer
 }

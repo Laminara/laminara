@@ -49,7 +49,7 @@ func Open(options Options) (*Writer, error) {
 		options.Now = time.Now
 	}
 
-	if err := os.MkdirAll(filepath.Dir(options.Path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(options.Path), 0o750); err != nil {
 		return nil, err
 	}
 	writer := &Writer{options: options}

@@ -31,6 +31,7 @@ type jsonFileConfig struct {
 
 type jsonFileProvider struct {
 	verifier    hash.Verifier
+	scheme      string
 	usernameKey string
 	passwordKey string
 	uuidKey     string
@@ -44,7 +45,8 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, err
 	}
-	verifier, err := hash.Get(orDefault(cfg.Hash, "argon2id"))
+	scheme := orDefault(cfg.Hash, "argon2id")
+	verifier, err := verifierFor(scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +75,7 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 	}
 	return &jsonFileProvider{
 		verifier:    verifier,
+		scheme:      scheme,
 		usernameKey: usernameKey,
 		passwordKey: orDefault(cfg.Fields.Password, "password"),
 		uuidKey:     orDefault(cfg.Fields.UUID, "uuid"),
@@ -88,7 +91,7 @@ func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credential
 		return auth.Identity{}, auth.ErrInvalidCredentials
 	}
 	stored, _ := record[p.passwordKey].(string)
-	valid, err := p.verifier.Verify(creds.Password, stored)
+	valid, err := verify(p.verifier, p.scheme, creds.Password, stored)
 	if err != nil {
 		return auth.Identity{}, err
 	}

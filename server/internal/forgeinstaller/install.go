@@ -14,6 +14,7 @@ import (
 
 	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
+	"github.com/laminara/laminara/server/internal/safepath"
 )
 
 type Downloader func(ctx context.Context, url, dest, sha1 string) error
@@ -204,7 +205,10 @@ func (i *Installer) extractEmbeddedMaven(librariesDir string) error {
 		if !ok || file.FileInfo().IsDir() {
 			continue
 		}
-		dest := filepath.Join(librariesDir, filepath.FromSlash(relative))
+		dest, err := safepath.Join(librariesDir, relative)
+		if err != nil {
+			return fmt.Errorf("установщик Forge пытается записать файл мимо папки библиотек: %w", err)
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}

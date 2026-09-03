@@ -395,15 +395,21 @@ func (g *Gate) findBan(ctx context.Context, subject, machineID, clusterID string
 	return nil, nil
 }
 
-func (g *Gate) VerifyTicket(ticket string) error {
+func (g *Gate) VerifyTicket(ticket string, identity Identity) error {
 	if g == nil || !g.cfg.RequireLauncher {
 		return nil
 	}
 	if ticket == "" {
 		return errors.New("this server accepts in-game login only through its launcher")
 	}
-	_, err := g.tickets.Verify(ticket, g.now())
-	return err
+	claims, err := g.tickets.Verify(ticket, g.now())
+	if err != nil {
+		return err
+	}
+	if claims.Subject != identity.key() {
+		return errors.New("this launcher ticket belongs to another account")
+	}
+	return nil
 }
 
 func NewReference() string {

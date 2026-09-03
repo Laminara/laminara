@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/safepath"
 	"github.com/laminara/laminara/server/internal/version"
 )
 
@@ -273,9 +275,10 @@ func Restore(path, into string, force bool) ([]Restored, error) {
 			continue
 		}
 
-		target := item.Path
-		if into != "" {
-			target = filepath.Join(into, strings.TrimPrefix(filepath.ToSlash(item.Path), "/"))
+		target, err := restoreTarget(item.Path, into)
+		if err != nil {
+			results = append(results, Restored{Item: item, Reason: err.Error()})
+			continue
 		}
 		if _, err := os.Stat(target); err == nil && !force {
 			results = append(results, Restored{Item: item, Reason: "уже есть на диске"})
@@ -284,7 +287,7 @@ func Restore(path, into string, force bool) ([]Restored, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return results, err
 		}
-		mode := os.FileMode(item.Mode)
+		mode := os.FileMode(item.Mode).Perm()
 		if mode == 0 {
 			mode = 0o600
 		}
@@ -294,6 +297,27 @@ func Restore(path, into string, force bool) ([]Restored, error) {
 		results = append(results, Restored{Item: Item{Name: item.Name, Path: target, What: item.What, Mode: item.Mode}, Written: true})
 	}
 	return results, nil
+}
+
+func restoreTarget(path, into string) (string, error) {
+	slashed := filepath.ToSlash(strings.TrimSpace(path))
+	if slashed == "" {
+		return "", errors.New("в архиве нет пути к файлу")
+	}
+	if strings.Contains(slashed, "../") || strings.HasSuffix(slashed, "/..") || slashed == ".." {
+		return "", errors.New("путь в архиве уводит вверх по дереву")
+	}
+	if into == "" {
+		if !filepath.IsAbs(path) {
+			return "", errors.New("путь в архиве не абсолютный — укажите, куда восстанавливать")
+		}
+		return filepath.Clean(path), nil
+	}
+	inner := slashed
+	if len(inner) > 1 && inner[1] == ':' {
+		inner = inner[2:]
+	}
+	return safepath.Join(into, strings.TrimLeft(inner, "/"))
 }
 
 func DefaultName(now time.Time) string {

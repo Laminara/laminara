@@ -34,7 +34,7 @@ Laminara не хранит аккаунты. Логины и пароли ост
       "provider": "sql",
       "config": {
         "driver": "postgres",
-        "dsn": "postgres://ro:pass@db:5432/site?sslmode=disable",
+        "dsn": "postgres://ro:pass@db:5432/site?sslmode=require",
         "table": "users",
         "hash": "bcrypt",
         "fields": { "username": "nickname", "password": "password_hash", "uuid": "uuid" }
@@ -42,6 +42,8 @@ Laminara не хранит аккаунты. Логины и пароли ост
       "sessions": { "backend": "redis", "redisAddr": "redis:6379" }
     }
     ```
+    По этому соединению ходят хеши паролей, поэтому база за пределами машины требует TLS: `sslmode=require` у Postgres, `tls=true` у MySQL и MariaDB. Отключать шифрование можно, только когда база на том же хосте.
+
     `fields` сопоставляет логические поля с колонками вашей таблицы — подстраивать чужую схему под Laminara не нужно. Имена таблицы и колонок проверяются, произвольный SQL в них не подставить.
 
     **Если одной таблицей не обойтись** — пароли лежат отдельно, есть флаг бана, нужен вид — задайте запрос сами вместо `table` и `fields`:
@@ -51,7 +53,7 @@ Laminara не хранит аккаунты. Логины и пароли ост
       "provider": "sql",
       "config": {
         "driver": "mariadb",
-        "dsn": "laminara:pass@tcp(127.0.0.1:3306)/site?charset=utf8mb4",
+        "dsn": "laminara:pass@tcp(127.0.0.1:3306)/site?charset=utf8mb4&tls=true",
         "hash": "argon2id",
         "query": "SELECT p.hash, u.uuid FROM users u JOIN user_passwords p ON p.user_id = u.id WHERE u.username = ? AND u.is_banned = 0"
       }
@@ -87,8 +89,10 @@ Laminara не хранит аккаунты. Логины и пароли ост
 
 `argon2id` · `bcrypt` · `sha256` · `sha512` · `md5` · `plain`
 
+Без этого поля берётся `argon2id`. Схему указывают под свою базу: если она не совпадёт с настоящей, вход не пройдёт ни у кого и сервер скажет, что хранимый пароль не читается.
+
 <Aside type="caution">
-`md5` и `plain` оставлены только ради совместимости со старыми базами. Для новых проектов берите `argon2id` или `bcrypt`.
+`sha256`, `sha512`, `md5` и `plain` оставлены только ради совместимости со старыми базами: соли в них нет, и утёкшая база перебирается на видеокарте. При старте с такой схемой сервер пишет предупреждение в лог — оно снимается переводом базы на `argon2id` или `bcrypt`.
 </Aside>
 
 ## Двухфакторная аутентификация
