@@ -197,9 +197,7 @@ async fn ensure_object(
     let object_mode = if executable { 0o555 } else { 0o444 };
 
     if let Ok(meta) = std::fs::metadata(&cas_path) {
-        if executable {
-            set_mode(&cas_path, object_mode);
-        }
+        set_mode(&cas_path, object_mode);
         return Ok((cas_path, meta.len(), false));
     }
 
@@ -237,9 +235,16 @@ async fn ensure_object(
             "hash mismatch for object {expected_hex}"
         )));
     }
-    set_mode(temp.path(), object_mode);
+    settle_object(temp, &cas_path, object_mode)?;
+    Ok((cas_path, size, true))
+}
 
-    match temp.persist(&cas_path) {
+fn settle_object(
+    temp: tempfile::NamedTempFile,
+    cas_path: &Path,
+    object_mode: u32,
+) -> Result<(), CoreError> {
+    match temp.persist(cas_path) {
         Ok(_) => {}
         Err(e) => {
             if !cas_path.exists() {
@@ -247,7 +252,8 @@ async fn ensure_object(
             }
         }
     }
-    Ok((cas_path, size, true))
+    set_mode(cas_path, object_mode);
+    Ok(())
 }
 
 fn materialize_immutable(
@@ -852,6 +858,24 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         ensure_safe_parents(&root, &root.join("a/b/c/file.jar")).unwrap();
         assert!(root.join("a/b/c").is_dir());
+    }
+
+    #[test]
+    fn an_object_that_lands_in_the_cas_is_read_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let temp = tempfile::Builder::new()
+            .prefix(".lam-")
+            .tempfile_in(tmp.path())
+            .unwrap();
+        let cas_path = tmp.path().join("object");
+
+        settle_object(temp, &cas_path, 0o444).unwrap();
+
+        let meta = std::fs::metadata(&cas_path).unwrap();
+        assert!(
+            is_read_only(&meta),
+            "объект в CAS должен быть только для чтения, иначе проверка целостности назовёт битым весь клиент"
+        );
     }
 
     #[test]
