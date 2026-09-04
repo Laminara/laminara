@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${LAMINARA_REPO:-laminara/laminara}"
+REPO="${LAMINARA_REPO:-Laminara/laminara}"
 BINARY_OVERRIDE="${LAMINARA_BINARY:-}"
 
 bold=$'\e[1m'; dim=$'\e[2m'; accent=$'\e[38;5;99m'; ok=$'\e[38;5;42m'; warn=$'\e[38;5;214m'; reset=$'\e[0m'
@@ -11,6 +11,17 @@ head() { printf '\n%s%s%s\n' "$bold$accent" "$*" "$reset"; }
 note() { printf '%s%s%s\n' "$dim" "$*" "$reset"; }
 die()  { printf '%serror:%s %s\n' "$warn" "$reset" "$*" >&2; exit 1; }
 
+open_answers() {
+  if [ -t 0 ]; then
+    exec 3<&0
+    return
+  fi
+  if { exec 3</dev/tty; } 2>/dev/null; then
+    return
+  fi
+  die "установщику нужен терминал: скачайте скрипт и запустите его — curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh -o install.sh && bash install.sh"
+}
+
 ask() { # ask VAR "prompt" "default"
   local __var=$1 prompt=$2 default=${3:-} reply
   if [ -n "$default" ]; then
@@ -18,14 +29,14 @@ ask() { # ask VAR "prompt" "default"
   else
     printf '%s ' "$prompt"
   fi
-  read -r reply || true
+  read -r reply <&3 || true
   printf -v "$__var" '%s' "${reply:-$default}"
 }
 
 ask_secret() { # ask_secret VAR "prompt"
   local __var=$1 prompt=$2 reply
   printf '%s ' "$prompt"
-  read -rs reply || true
+  read -rs reply <&3 || true
   echo
   printf -v "$__var" '%s' "$reply"
 }
@@ -39,7 +50,7 @@ choose() { # choose "prompt" "opt1" "opt2" ... -> sets CHOICE to 1-based index
   done
   while :; do
     printf '%s› %s' "$dim" "$reset"
-    read -r reply || true
+    read -r reply <&3 || true
     if [[ "$reply" =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le "${#options[@]}" ]; then
       CHOICE=$reply
       return
@@ -85,6 +96,7 @@ install_binary() {
 
 main() {
   [ "$(uname -s)" = "Linux" ] || die "сервер работает только на Linux"
+  open_answers
   command -v curl >/dev/null || die "нужен curl"
   command -v sha256sum >/dev/null || die "нужен sha256sum"
 
@@ -238,8 +250,8 @@ EOF
   say "Адрес проекта:      ${bold}${endpoint}${reset}"
   say "Первая сборка:      ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
   say "Лаунчер для игроков:"
-  say "  ${bold}$server client-config --config $config --endpoint $endpoint > laminara.client.json${reset}"
-  note "  дальше — ./build-launcher.sh laminara.client.json из репозитория (нужны Rust и pnpm)"
+  say "  ${bold}$server console${reset}  →  launcher build"
+  note "  соберёт .exe и файл для Linux из готового шаблона — ни Rust, ни pnpm не нужны"
 }
 
 install_package() {
