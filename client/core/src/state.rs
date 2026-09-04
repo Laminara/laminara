@@ -377,6 +377,21 @@ impl Core {
         offload(move || Ok(sync::verify_installed(&profile_dir, &state_dir))).await
     }
 
+    pub async fn discard_broken(&self, profile: &str, deep: bool) -> Result<u64, CoreError> {
+        let profile_dir = self.profile_dir(profile);
+        let state_dir = self.state_dir(profile);
+        let cas_dir = self.cas_dir();
+        offload(move || {
+            let broken = if deep {
+                sync::verify_contents(&profile_dir, &state_dir)
+            } else {
+                sync::verify_installed(&profile_dir, &state_dir)
+            };
+            sync::discard_installed(&profile_dir, &state_dir, &cas_dir, &broken)
+        })
+        .await
+    }
+
     pub async fn sync_profile(
         &self,
         profile: &str,
@@ -702,13 +717,15 @@ mod tests {
             class: FilePolicy::Unspecified as i32,
             placement: sync::Placement::Hardlink,
             released: false,
+            size: 0,
+            algo: 0,
         }
     }
 
     fn write_ledger(profile: &Path, hashes: &[&str]) {
         let mut ledger: sync::Ledger = BTreeMap::new();
         for (index, hash) in hashes.iter().enumerate() {
-            ledger.insert(format!("mods/file{index}.jar"), ledger_entry(hash));
+            ledger.insert(format!("mods/file{index}.bin"), ledger_entry(hash));
         }
         sync::save_ledger(&profile.join(".laminara").join(sync::LEDGER_FILE), &ledger).unwrap();
     }
@@ -753,20 +770,20 @@ mod tests {
         write_ledger(&profile, &["intact", "tampered", "missing"]);
 
         for (name, contents) in [
-            ("file0.jar", &b"intact"[..]),
-            ("file1.jar", &b"tampered"[..]),
+            ("file0.bin", &b"intact"[..]),
+            ("file1.bin", &b"tampered"[..]),
         ] {
             let path = profile.join("mods").join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, contents).unwrap();
         }
-        sync::set_mode(&profile.join("mods/file0.jar"), 0o444);
+        sync::set_mode(&profile.join("mods/file0.bin"), 0o444);
 
         let mut broken = core.verify_installed("Adventure").await.unwrap();
         broken.sort();
         assert_eq!(
             broken,
-            vec!["mods/file1.jar".to_string(), "mods/file2.jar".to_string(),]
+            vec!["mods/file1.bin".to_string(), "mods/file2.bin".to_string(),]
         );
     }
 

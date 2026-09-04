@@ -66,6 +66,7 @@ interface LauncherState {
   stopGame: () => Promise<void>;
   refreshPlayers: () => Promise<void>;
   refreshBuilds: () => Promise<void>;
+  repairBuild: (name: string) => Promise<number>;
 }
 
 export const useLauncher = create<LauncherState>((set, get) => ({
@@ -316,6 +317,26 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       if (get().phase === "syncing") set({ phase: "running" });
     } catch (err) {
       set({ phase: "home", error: String(err) });
+    }
+  },
+
+  repairBuild: async (name) => {
+    set({ phase: "syncing", sync: null, error: null });
+    try {
+      const discarded = await ipc.repairBuild(name);
+      const rate = newRateMeter();
+      await ipc.syncProfile(name, (event: SyncEvent) => {
+        if (event.event === "started") {
+          set({ sync: { stage: "planning", filesDone: 0, filesTotal: event.data.filesTotal, bytesDone: 0, bytesTotal: event.data.bytesTotal } });
+        } else if (event.event === "progress") {
+          set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
+        }
+      });
+      set({ builds: await ipc.listBuilds(), phase: "home", sync: null });
+      return discarded;
+    } catch (err) {
+      set({ phase: "home", sync: null, error: String(err) });
+      return 0;
     }
   },
 

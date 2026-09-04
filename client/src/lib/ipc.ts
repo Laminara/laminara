@@ -74,6 +74,8 @@ export const ipc = {
 
   cancelJob: (job: string): Promise<void> => (isTauri ? core("cancel_job", { job }) : Promise.resolve()),
 
+  repairBuild: (profile: string): Promise<number> => (isTauri ? core("repair_build", { profile }) : Promise.resolve(0)),
+
   reportCrash: (report: {
     build: string;
     buildVersion: string;

@@ -171,6 +171,7 @@ pub fn run() {
             commands::stop,
             commands::player_counts,
             commands::general_settings,
+            commands::repair_build,
             commands::build_settings,
             commands::set_build_memory,
             commands::build_features,

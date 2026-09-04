@@ -608,6 +608,21 @@ pub async fn sync_profile(
 }
 
 #[tauri::command]
+pub async fn repair_build(state: State<'_, AppState>, profile: String) -> Result<u64, String> {
+    if state.game_token.lock().await.is_some() {
+        return Err("Сначала закройте игру".into());
+    }
+    tracing::info!("checking every file of {profile}");
+    let discarded = state
+        .core
+        .discard_broken(&profile, true)
+        .await
+        .map_err(|e| player_error(&format!("checking files of {profile}"), e))?;
+    tracing::info!("{profile}: discarded {discarded} file(s) that no longer match the manifest");
+    Ok(discarded)
+}
+
+#[tauri::command]
 pub async fn cancel_job(state: State<'_, AppState>, job: String) -> Result<(), String> {
     if let Some(token) = state.jobs.lock().await.get(&job) {
         token.cancel();
@@ -641,8 +656,14 @@ pub async fn launch(
             broken.len(),
             broken.first()
         );
+        let discarded = state
+            .core
+            .discard_broken(&profile, false)
+            .await
+            .map_err(|e| player_error(&format!("discarding broken files of {profile}"), e))?;
+        tracing::info!("discarded {discarded} broken file(s) of {profile}");
         return Err(format!(
-            "Файлы сборки повреждены ({}). Нажмите «Обновить», чтобы восстановить.",
+            "Файлы сборки повреждены ({}) и удалены. Нажмите «Обновить», чтобы скачать их заново.",
             broken.len()
         ));
     }
@@ -687,6 +708,7 @@ pub async fn launch(
             }
         };
         let code = status.and_then(|s| s.code()).unwrap_or(-1);
+        *app.state::<AppState>().game_token.lock().await = None;
         let _ = app.emit("game:exit", code);
     });
 

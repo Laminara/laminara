@@ -58,6 +58,10 @@ pub(crate) struct OwnedEntry {
     pub class: i32,
     pub placement: Placement,
     pub released: bool,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub algo: i32,
 }
 
 pub(crate) type Ledger = BTreeMap<String, OwnedEntry>;
@@ -342,6 +346,7 @@ struct PlanItem {
     algo: i32,
     hex: String,
     value: Vec<u8>,
+    size: u64,
     executable: bool,
     action: Action,
     released: bool,
@@ -482,6 +487,7 @@ pub async fn sync(
             algo: hash.algo,
             hex,
             value: hash.value.clone(),
+            size: object.size,
             executable: file.executable,
             action,
             released,
@@ -583,6 +589,8 @@ pub async fn sync(
                 class: item.policy as i32,
                 placement,
                 released,
+                size: item.size,
+                algo: item.algo,
             },
         );
     }
@@ -609,6 +617,14 @@ pub async fn sync(
 }
 
 pub fn verify_installed(profile_dir: &Path, state_dir: &Path) -> Vec<String> {
+    verify(profile_dir, state_dir, false)
+}
+
+pub fn verify_contents(profile_dir: &Path, state_dir: &Path) -> Vec<String> {
+    verify(profile_dir, state_dir, true)
+}
+
+fn verify(profile_dir: &Path, state_dir: &Path, hash_contents: bool) -> Vec<String> {
     let ledger = load_ledger(&state_dir.join(LEDGER_FILE));
     let mut broken = Vec::new();
     for (path, entry) in &ledger {
@@ -622,12 +638,58 @@ pub fn verify_installed(profile_dir: &Path, state_dir: &Path) -> Vec<String> {
             Ok(meta) => {
                 if !is_read_only(&meta) {
                     broken.push(path.clone());
+                } else if entry.size != 0 && meta.len() != entry.size {
+                    broken.push(path.clone());
+                } else if (hash_contents || carries_code(path)) && !content_matches(&target, entry)
+                {
+                    broken.push(path.clone());
                 }
             }
             Err(_) => broken.push(path.clone()),
         }
     }
     broken
+}
+
+fn carries_code(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".jar")
+        || lower.ends_with(".dll")
+        || lower.ends_with(".so")
+        || lower.ends_with(".dylib")
+}
+
+fn content_matches(path: &Path, entry: &OwnedEntry) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let mut hasher = Hasher::for_algo(entry.algo);
+    hasher.update(&bytes);
+    hasher.finalize_hex() == entry.object_hash
+}
+
+pub fn discard_installed(
+    profile_dir: &Path,
+    state_dir: &Path,
+    cas_dir: &Path,
+    paths: &[String],
+) -> Result<u64, CoreError> {
+    let ledger = load_ledger(&state_dir.join(LEDGER_FILE));
+    let mut discarded = 0u64;
+    for path in paths {
+        let target = profile_dir.join(path);
+        if remove_stubborn_file(&target).is_ok() {
+            discarded += 1;
+        }
+        let Some(entry) = ledger.get(path) else {
+            continue;
+        };
+        let Ok(value) = hex::decode(&entry.object_hash) else {
+            continue;
+        };
+        let _ = remove_stubborn_file(&cas_dir.join(object_key(entry.algo, &value)));
+    }
+    Ok(discarded)
 }
 
 pub fn gc_cas(cas_dir: &Path, install_dir: &Path) -> Result<u64, CoreError> {
@@ -892,6 +954,144 @@ mod tests {
     }
 
     #[test]
+    fn a_file_edited_in_place_is_caught() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("profile");
+        let state = profile.join(".laminara");
+        std::fs::create_dir_all(&state).unwrap();
+
+        let jar = profile.join("mods/signed.jar");
+        std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
+        let original = b"jar with a signature inside".to_vec();
+        std::fs::write(&jar, &original).unwrap();
+        set_mode(&jar, 0o444);
+
+        let mut hasher = Hasher::for_algo(HashAlgo::Blake3 as i32);
+        hasher.update(&original);
+        let mut ledger: Ledger = BTreeMap::new();
+        ledger.insert(
+            "mods/signed.jar".into(),
+            OwnedEntry {
+                object_hash: hasher.finalize_hex(),
+                class: FilePolicy::Unspecified as i32,
+                placement: Placement::Hardlink,
+                released: false,
+                size: original.len() as u64,
+                algo: HashAlgo::Blake3 as i32,
+            },
+        );
+        save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+
+        assert!(verify_installed(&profile, &state).is_empty());
+        assert!(verify_contents(&profile, &state).is_empty());
+
+        set_mode(&jar, 0o644);
+        std::fs::write(&jar, b"jar with the signature stripped").unwrap();
+        set_mode(&jar, 0o444);
+
+        assert_eq!(
+            verify_installed(&profile, &state),
+            vec!["mods/signed.jar".to_string()],
+            "антивирус переписал файл — размер разошёлся, проверка обязана это увидеть"
+        );
+
+        set_mode(&jar, 0o644);
+        let mut same_length = original.clone();
+        *same_length.last_mut().unwrap() = b'!';
+        std::fs::write(&jar, &same_length).unwrap();
+        set_mode(&jar, 0o444);
+
+        assert_eq!(
+            verify_installed(&profile, &state),
+            vec!["mods/signed.jar".to_string()],
+            "подмена той же длины ловится и быстрой проверкой: у jar всегда сверяется содержимое"
+        );
+        assert_eq!(
+            verify_contents(&profile, &state),
+            vec!["mods/signed.jar".to_string()],
+            "полная проверка обязана поймать подмену той же длины"
+        );
+    }
+
+    #[test]
+    fn an_asset_of_the_same_size_is_not_rehashed_on_every_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("profile");
+        let state = profile.join(".laminara");
+        std::fs::create_dir_all(&state).unwrap();
+
+        let asset = profile.join("assets/objects/ab/abcdef");
+        std::fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        std::fs::write(&asset, b"sound").unwrap();
+        set_mode(&asset, 0o444);
+
+        let mut ledger: Ledger = BTreeMap::new();
+        ledger.insert(
+            "assets/objects/ab/abcdef".into(),
+            OwnedEntry {
+                object_hash: "не тот хеш".into(),
+                class: FilePolicy::Unspecified as i32,
+                placement: Placement::Hardlink,
+                released: false,
+                size: 5,
+                algo: HashAlgo::Blake3 as i32,
+            },
+        );
+        save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+
+        assert!(
+            verify_installed(&profile, &state).is_empty(),
+            "ассеты перед каждым запуском не пересчитываются — иначе старт упрётся в диск"
+        );
+        assert_eq!(verify_contents(&profile, &state).len(), 1);
+    }
+
+    #[test]
+    fn discarding_a_broken_file_drops_its_object_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("profile");
+        let state = profile.join(".laminara");
+        let cas = tmp.path().join("objects");
+        std::fs::create_dir_all(&state).unwrap();
+
+        let value = vec![0xAAu8, 0xBB];
+        let hex = hex::encode(&value);
+        let object = cas.join(object_key(HashAlgo::Blake3 as i32, &value));
+        std::fs::create_dir_all(object.parent().unwrap()).unwrap();
+        std::fs::write(&object, b"payload").unwrap();
+        set_mode(&object, 0o444);
+
+        let jar = profile.join("mods/broken.jar");
+        std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
+        std::fs::write(&jar, b"payload").unwrap();
+        set_mode(&jar, 0o444);
+
+        let mut ledger: Ledger = BTreeMap::new();
+        ledger.insert(
+            "mods/broken.jar".into(),
+            OwnedEntry {
+                object_hash: hex,
+                class: FilePolicy::Unspecified as i32,
+                placement: Placement::Hardlink,
+                released: false,
+                size: 7,
+                algo: HashAlgo::Blake3 as i32,
+            },
+        );
+        save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+
+        let discarded =
+            discard_installed(&profile, &state, &cas, &["mods/broken.jar".to_string()]).unwrap();
+
+        assert_eq!(discarded, 1);
+        assert!(!jar.exists(), "испорченный файл удалён");
+        assert!(
+            !object.exists(),
+            "объект тоже удалён, иначе синхронизация снова разложит ту же порчу"
+        );
+    }
+
+    #[test]
     fn verify_installed_reports_missing_and_writable_immutables() {
         let tmp = tempfile::tempdir().unwrap();
         let profile = tmp.path().join("profile");
@@ -909,6 +1109,10 @@ mod tests {
         let user = profile.join("options.txt");
         std::fs::write(&user, b"x").unwrap();
 
+        let mut of_x = Hasher::for_algo(HashAlgo::Blake3 as i32);
+        of_x.update(b"x");
+        let hash_of_x = of_x.finalize_hex();
+
         let mut ledger: Ledger = BTreeMap::new();
         for (path, class) in [
             ("mods/ok.jar", FilePolicy::Unspecified as i32),
@@ -919,10 +1123,12 @@ mod tests {
             ledger.insert(
                 path.to_string(),
                 OwnedEntry {
-                    object_hash: "h".into(),
+                    object_hash: hash_of_x.clone(),
                     class,
                     placement: Placement::Hardlink,
                     released: false,
+                    size: 0,
+                    algo: HashAlgo::Blake3 as i32,
                 },
             );
         }
@@ -958,6 +1164,8 @@ mod tests {
                 class: 0,
                 placement: Placement::Hardlink,
                 released: false,
+                size: 0,
+                algo: 0,
             },
         );
         save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
@@ -1048,6 +1256,8 @@ mod tests {
                 class: FilePolicy::Enforced as i32,
                 placement: Placement::Copy,
                 released: false,
+                size: 0,
+                algo: 0,
             },
         );
         previous.insert(
@@ -1057,6 +1267,8 @@ mod tests {
                 class: FilePolicy::UserWritable as i32,
                 placement: Placement::Copy,
                 released: false,
+                size: 0,
+                algo: 0,
             },
         );
 
