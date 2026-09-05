@@ -629,13 +629,27 @@ fn authlib_from(profile_dir: &Path, fallback: &Path) -> Result<PathBuf, CoreErro
     )))
 }
 
+fn joined_within(root: &Path, relative: &str) -> Option<PathBuf> {
+    let mut path = root.to_path_buf();
+    for segment in relative.split('/') {
+        match segment {
+            "" | "." => continue,
+            ".." => return None,
+            _ if segment.contains('\\') => return None,
+            _ => path.push(segment),
+        }
+    }
+    if path == root {
+        return None;
+    }
+    Some(path)
+}
+
 fn java_binary(profile_dir: &Path, profile: &LaunchProfile) -> PathBuf {
     if !profile.java_bin.is_empty() {
-        let mut path = profile_dir.to_path_buf();
-        for segment in profile.java_bin.split('/') {
-            path.push(segment);
+        if let Some(path) = joined_within(profile_dir, &profile.java_bin) {
+            return path;
         }
-        return path;
     }
     let bin = profile_dir
         .join("runtime")
@@ -728,6 +742,19 @@ mod tests {
             ledger.insert(format!("mods/file{index}.bin"), ledger_entry(hash));
         }
         sync::save_ledger(&profile.join(".laminara").join(sync::LEDGER_FILE), &ledger).unwrap();
+    }
+
+    #[test]
+    fn java_path_stays_inside_the_profile() {
+        let root = Path::new("/games/Adventure");
+        assert_eq!(
+            joined_within(root, "runtime/windows-x64/bin/javaw.exe"),
+            Some(root.join("runtime/windows-x64/bin/javaw.exe"))
+        );
+        assert_eq!(joined_within(root, "../../../../usr/bin/java"), None);
+        assert_eq!(joined_within(root, "runtime/../../evil/java"), None);
+        assert_eq!(joined_within(root, r"..\windows\system32\java"), None);
+        assert_eq!(joined_within(root, ""), None);
     }
 
     #[test]
