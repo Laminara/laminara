@@ -324,6 +324,7 @@ setup_systemd() {
   id laminara >/dev/null 2>&1 || die "не удалось создать пользователя laminara. Создайте его вручную: sudo useradd --system --home-dir $data_dir --shell /usr/sbin/nologin laminara — и запустите установку снова"
   local run_group; run_group=$(id -gn laminara)
   $sudo chown -R laminara:"$run_group" "$data_dir" 2>/dev/null || true
+  $sudo chown laminara:"$run_group" "$config" 2>/dev/null || true
   $sudo tee /etc/systemd/system/laminara-server.service >/dev/null <<EOF
 [Unit]
 Description=Laminara launcher server
