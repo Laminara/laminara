@@ -316,8 +316,14 @@ setup_systemd() {
   local server=$1 config=$2 data_dir=$3
   local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
   note "ставлю systemd-сервис (нужны права)…"
-  id laminara >/dev/null 2>&1 || $sudo useradd --system --home "$data_dir" --shell /usr/sbin/nologin laminara || true
-  $sudo chown -R laminara:laminara "$data_dir" 2>/dev/null || true
+  if ! id laminara >/dev/null 2>&1; then
+    $sudo groupadd --system laminara 2>/dev/null || true
+    $sudo useradd --system --gid laminara --home-dir "$data_dir" --shell /usr/sbin/nologin laminara 2>/dev/null \
+      || $sudo useradd --system --home-dir "$data_dir" --shell /usr/sbin/nologin laminara 2>/dev/null || true
+  fi
+  id laminara >/dev/null 2>&1 || die "не удалось создать пользователя laminara. Создайте его вручную: sudo useradd --system --home-dir $data_dir --shell /usr/sbin/nologin laminara — и запустите установку снова"
+  local run_group; run_group=$(id -gn laminara)
+  $sudo chown -R laminara:"$run_group" "$data_dir" 2>/dev/null || true
   $sudo tee /etc/systemd/system/laminara-server.service >/dev/null <<EOF
 [Unit]
 Description=Laminara launcher server
@@ -327,7 +333,7 @@ Wants=network-online.target
 [Service]
 Type=notify
 User=laminara
-Group=laminara
+Group=$run_group
 ExecStart=$server start --config $config
 Restart=on-failure
 RestartSec=5
