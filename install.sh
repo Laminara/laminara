@@ -216,7 +216,7 @@ main() {
 
   # --- запись конфига ---
   mkdir -p "$data_dir/profiles" "$data_dir/objects"
-  cat > "$config" <<EOF
+  ( umask 077; cat > "$config" <<EOF
 {
   "auth": $auth_block,
   "storage": $storage_block,
@@ -224,6 +224,8 @@ main() {
   "api": { "addr": "$api_addr"$xaccel }$ygg_tail
 }
 EOF
+  )
+  chmod 600 "$config"
   section "Конфигурация записана"
   note "  бинарь:  $server"
   note "  конфиг:  $config"
