@@ -57,8 +57,15 @@ func (c *tokenCache) put(token string, subject access.Subject) {
 				delete(c.entries, key)
 			}
 		}
-		if len(c.entries) >= maxCachedTokens {
-			c.entries = map[string]cachedSubject{}
+		// Протухших не хватило — выселяем часть живых записей до 7/8 ёмкости,
+		// но не весь кэш разом: иначе все сессии одновременно уходят на
+		// перевалидацию в auth, и чистка не срабатывает на каждый put.
+		target := maxCachedTokens * 7 / 8
+		for key := range c.entries {
+			if len(c.entries) <= target {
+				break
+			}
+			delete(c.entries, key)
 		}
 	}
 	c.entries[tokenFingerprint(token)] = cachedSubject{subject: subject, expires: time.Now().Add(subjectTTL)}
