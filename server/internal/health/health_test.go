@@ -52,9 +52,12 @@ func TestReadinessFailsWhenADependencyIsDown(t *testing.T) {
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("code = %d, want 503", code)
 	}
-	checks, _ := body["checks"].(map[string]any)
-	if checks["storage"] != "хранилище недоступно" {
-		t.Fatalf("checks = %v, want the reason the operator can act on", body["checks"])
+	failed, _ := body["failed"].([]any)
+	if len(failed) != 1 || failed[0] != "storage" {
+		t.Fatalf("failed = %v, want [storage]", body["failed"])
+	}
+	if _, leaks := body["checks"]; leaks {
+		t.Fatalf("наружу не отдаём причину сбоя с адресами — это карта топологии: %v", body["checks"])
 	}
 }
 
