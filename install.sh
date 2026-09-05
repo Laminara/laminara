@@ -7,7 +7,7 @@ BINARY_OVERRIDE="${LAMINARA_BINARY:-}"
 bold=$'\e[1m'; dim=$'\e[2m'; accent=$'\e[38;5;99m'; ok=$'\e[38;5;42m'; warn=$'\e[38;5;214m'; reset=$'\e[0m'
 
 say()  { printf '%s\n' "$*"; }
-head() { printf '\n%s%s%s\n' "$bold$accent" "$*" "$reset"; }
+section() { printf '\n%s%s%s\n' "$bold$accent" "$*" "$reset"; }
 note() { printf '%s%s%s\n' "$dim" "$*" "$reset"; }
 die()  { printf '%serror:%s %s\n' "$warn" "$reset" "$*" >&2; exit 1; }
 
@@ -44,7 +44,7 @@ ask_secret() { # ask_secret VAR "prompt"
 choose() { # choose "prompt" "opt1" "opt2" ... -> sets CHOICE to 1-based index
   local prompt=$1; shift
   local options=("$@") i reply
-  head "$prompt"
+  section "$prompt"
   for i in "${!options[@]}"; do
     printf '  %s%d%s  %s\n' "$accent" "$((i + 1))" "$reset" "${options[$i]}"
   done
@@ -100,7 +100,7 @@ main() {
   command -v curl >/dev/null || die "нужен curl"
   command -v sha256sum >/dev/null || die "нужен sha256sum"
 
-  head "Laminara — установка"
+  section "Laminara — установка"
   note "Соберём конфигурацию и запустим сервер. Ничего качать руками не придётся."
 
   # --- каталоги и бинарь ---
@@ -224,7 +224,7 @@ main() {
   "api": { "addr": "$api_addr"$xaccel }$ygg_tail
 }
 EOF
-  head "Конфигурация записана"
+  section "Конфигурация записана"
   note "  бинарь:  $server"
   note "  конфиг:  $config"
   note "  данные:  $data_dir"
@@ -246,7 +246,7 @@ EOF
 
   [ "$front" = nginx ] && setup_nginx "$server" "$config" "$domain" "$email"
 
-  head "Готово ✓"
+  section "Готово ✓"
   say "Адрес проекта:      ${bold}${endpoint}${reset}"
   say "Первая сборка:      ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
   say "Лаунчер для игроков:"
@@ -272,7 +272,7 @@ install_package() {
 setup_nginx() {
   local server=$1 config=$2 domain=$3 email=$4
   local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
-  head "nginx и сертификат"
+  section "nginx и сертификат"
 
   command -v nginx >/dev/null || install_package nginx || {
     note "не смог поставить nginx — конфиг напечатан ниже, поставьте руками"
