@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,6 +52,7 @@ func newHTTP(raw json.RawMessage) (auth.Provider, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("http auth provider requires a url")
 	}
+	warnIfInsecure(cfg.URL)
 	return &httpProvider{
 		client:            &http.Client{Timeout: 10 * time.Second},
 		url:               cfg.URL,
@@ -59,6 +63,36 @@ func newHTTP(raw json.RawMessage) (auth.Provider, error) {
 		successField:      cfg.SuccessField,
 		secondFactorField: cfg.SecondFactorField,
 	}, nil
+}
+
+func warnIfInsecure(raw string) {
+	if !sendsPasswordsInClear(raw) {
+		return
+	}
+	slog.Warn("пароли игроков уходят провайдеру по незашифрованному http",
+		"source", "auth",
+		"url", raw,
+		"почему", "логин и пароль видны любому между сервером и вашим API",
+		"что делать", "поднимите TLS и укажите https, либо держите этот API на localhost за общим прокси",
+	)
+}
+
+func sendsPasswordsInClear(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" {
+		return false
+	}
+	return !isLoopbackHost(parsed.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {
