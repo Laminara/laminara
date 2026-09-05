@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sort"
 	"sync"
@@ -24,6 +25,7 @@ type Check struct {
 type Handler struct {
 	started time.Time
 	checks  []Check
+	log     *slog.Logger
 
 	mu       sync.Mutex
 	answered time.Time
@@ -31,7 +33,7 @@ type Handler struct {
 }
 
 func New(checks ...Check) *Handler {
-	return &Handler{started: time.Now(), checks: checks}
+	return &Handler{started: time.Now(), checks: checks, log: slog.Default()}
 }
 
 func (h *Handler) Mount(mux *http.ServeMux) {
@@ -59,9 +61,12 @@ func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(names)
 
+	for _, name := range names {
+		h.log.Warn("проверка готовности не прошла", "source", "health", "проверка", name, "причина", failures[name])
+	}
+
 	write(w, http.StatusServiceUnavailable, map[string]any{
 		"status": "degraded",
-		"checks": failures,
 		"failed": names,
 	})
 }
