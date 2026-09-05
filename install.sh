@@ -324,7 +324,10 @@ setup_systemd() {
   id laminara >/dev/null 2>&1 || die "не удалось создать пользователя laminara. Создайте его вручную: sudo useradd --system --home-dir $data_dir --shell /usr/sbin/nologin laminara — и запустите установку снова"
   local run_group; run_group=$(id -gn laminara)
   $sudo chown -R laminara:"$run_group" "$data_dir" 2>/dev/null || true
-  $sudo chown laminara:"$run_group" "$config" 2>/dev/null || true
+  # Каталог конфига — под сервисом: settings из консоли пишут config.json.tmp
+  # рядом и переименовывают, значит нужен доступ на запись в сам каталог.
+  $sudo chown laminara:"$run_group" "$(dirname "$config")" "$config" 2>/dev/null || true
+  $sudo chmod 750 "$(dirname "$config")" 2>/dev/null || true
   $sudo tee /etc/systemd/system/laminara-server.service >/dev/null <<EOF
 [Unit]
 Description=Laminara launcher server
@@ -342,7 +345,7 @@ RuntimeDirectory=laminara
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$data_dir /run/laminara
+ReadWritePaths=$data_dir /run/laminara $(dirname "$config")
 
 [Install]
 WantedBy=multi-user.target
