@@ -78,10 +78,7 @@ pub fn stage_payload(
     let file = std::fs::File::open(downloaded)
         .map_err(|e| CoreError::Launch(format!("open update: {e}")))?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    archive.set_preserve_permissions(true);
-    archive
-        .unpack(&unpacked)
-        .map_err(|e| CoreError::Launch(format!("unpack bundle: {e}")))?;
+    unpack_within(&mut archive, &unpacked)?;
 
     let bundle = std::fs::read_dir(&unpacked)
         .map_err(|e| CoreError::Launch(format!("read staging: {e}")))?
@@ -91,6 +88,52 @@ pub fn stage_payload(
         .ok_or_else(|| CoreError::Launch("release archive has no .app bundle".into()))?;
     let _ = std::fs::remove_file(downloaded);
     Ok(bundle)
+}
+
+fn unpack_within<R: std::io::Read>(
+    archive: &mut tar::Archive<R>,
+    dest: &Path,
+) -> Result<(), CoreError> {
+    let entries = archive
+        .entries()
+        .map_err(|e| CoreError::Launch(format!("read bundle: {e}")))?;
+    for entry in entries {
+        let mut entry = entry.map_err(|e| CoreError::Launch(format!("read bundle entry: {e}")))?;
+        let path = entry
+            .path()
+            .map_err(|e| CoreError::Launch(format!("bundle entry path: {e}")))?
+            .into_owned();
+        if path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::RootDir
+            )
+        }) {
+            return Err(CoreError::Launch(format!(
+                "bundle entry escapes the target: {}",
+                path.display()
+            )));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(mode) = entry.header().mode() {
+                entry.set_preserve_permissions(false);
+                let _ = entry.unpack_in(dest);
+                let target = dest.join(&path);
+                if target.is_file() {
+                    let keep = if mode & 0o111 != 0 { 0o755 } else { 0o644 };
+                    let _ =
+                        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(keep));
+                }
+                continue;
+            }
+        }
+        entry
+            .unpack_in(dest)
+            .map_err(|e| CoreError::Launch(format!("unpack bundle entry: {e}")))?;
+    }
+    Ok(())
 }
 
 pub fn is_newer(candidate: &str, current: &str) -> bool {
