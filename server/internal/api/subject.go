@@ -57,8 +57,12 @@ func (c *tokenCache) put(token string, subject access.Subject) {
 				delete(c.entries, key)
 			}
 		}
-		if len(c.entries) >= maxCachedTokens {
-			c.entries = map[string]cachedSubject{}
+		target := maxCachedTokens * 7 / 8
+		for key := range c.entries {
+			if len(c.entries) <= target {
+				break
+			}
+			delete(c.entries, key)
 		}
 	}
 	c.entries[tokenFingerprint(token)] = cachedSubject{subject: subject, expires: time.Now().Add(subjectTTL)}
