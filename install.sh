@@ -85,7 +85,7 @@ install_binary() {
 
   sums=$(mktemp)
   curl -fsSL "$base/checksums.txt" -o "$sums" || die "не удалось скачать checksums.txt — без него скачанное не проверить"
-  expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$sums" | head -1)
+  expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1; exit }' "$sums")
   rm -f "$sums"
   [ -n "$expected" ] || die "в checksums.txt нет строки про $asset"
   actual=$(sha256sum "$dest" | awk '{ print $1 }')
