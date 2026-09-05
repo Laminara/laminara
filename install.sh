@@ -215,13 +215,14 @@ main() {
   fi
 
   # --- запись конфига ---
-  mkdir -p "$data_dir/profiles" "$data_dir/objects"
+  mkdir -p "$data_dir/profiles" "$data_dir/objects" "$data_dir/modules"
   ( umask 077; cat > "$config" <<EOF
 {
   "auth": $auth_block,
   "storage": $storage_block,
   "build": { "profilesDir": "$data_dir/profiles", "signingKeyPath": "$data_dir/signing.key" },
-  "api": { "addr": "$api_addr"$xaccel }$ygg_tail
+  "api": { "addr": "$api_addr"$xaccel },
+  "modules": { "dir": "$data_dir/modules" }$ygg_tail
 }
 EOF
   )

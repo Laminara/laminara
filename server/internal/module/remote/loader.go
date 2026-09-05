@@ -59,6 +59,11 @@ func (l *Loader) LoadDir(dir string, configs map[string][]byte, registry *module
 		}
 		path := filepath.Join(dir, entry.Name())
 		if !executable(path) {
+			l.log.Warn("модуль пропущен: файл не исполняемый",
+				"source", "module",
+				"path", path,
+				"что делать", "дайте ему право на запуск: chmod +x "+path,
+			)
 			continue
 		}
 		if err := l.load(path, configs[entry.Name()], registry); err != nil {
