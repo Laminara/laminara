@@ -339,7 +339,6 @@ ExecStart=$server start --config $config
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=laminara
-Environment=XDG_RUNTIME_DIR=/run/laminara
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

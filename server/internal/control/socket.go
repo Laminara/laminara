@@ -14,12 +14,20 @@ const (
 	pidName    = "laminara.pid"
 )
 
+const systemRuntimeDir = "/run/laminara"
+
 func RuntimeDir() string {
-	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "laminara")
+	if dir := os.Getenv("LAMINARA_RUNTIME_DIR"); dir != "" {
+		return dir
+	}
+	if info, err := os.Stat(systemRuntimeDir); err == nil && info.IsDir() {
+		return systemRuntimeDir
 	}
 	if os.Geteuid() == 0 {
-		return "/run/laminara"
+		return systemRuntimeDir
+	}
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return filepath.Join(dir, "laminara")
 	}
 	return filepath.Join(os.TempDir(), fmt.Sprintf("laminara-%d", os.Getuid()))
 }

@@ -15,7 +15,6 @@ RUN apt-get update \
 RUN useradd --system --uid 10001 --home-dir /var/lib/laminara --shell /usr/sbin/nologin laminara \
     && install -d -o laminara -g laminara /var/lib/laminara /run/laminara
 COPY --from=build /out/laminara-server /usr/local/bin/laminara-server
-ENV XDG_RUNTIME_DIR=/run/laminara
 VOLUME ["/var/lib/laminara"]
 USER laminara
 ENTRYPOINT ["/usr/local/bin/laminara-server"]
