@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Laminara — свой лаунчер Minecraft без ручной сборки клиента</title>
 <meta name="description" content="Сервер сам качает Minecraft, Java и загрузчик, собирает клиент и подписывает его. Игрок скачивает один файл и играет.">
@@ -25,7 +26,7 @@
     <nav>
       <a href="https://docs.laminara.dev/">Документация</a>
       <a href="https://docs.laminara.dev/quickstart/">Быстрый старт</a>
-      <a class="ghost" href="https://github.com/MrLeonardosMi/Laminara">GitHub</a>
+      <a class="ghost" href="https://github.com/Laminara/laminara">GitHub</a>
     </nav>
   </div>
 </header>
@@ -52,7 +53,7 @@
 
   <div class="terminal" data-reveal style="--d:240ms" aria-label="Установка сервера">
     <div class="terminal-bar"><span></span><span></span><span></span><b>сервер, Linux</b></div>
-    <pre><code><span class="prompt">$</span> <span id="typed" data-type="curl -fsSL https://raw.githubusercontent.com/MrLeonardosMi/Laminara/main/install.sh | bash"></span>
+    <pre><code><span class="prompt">$</span> <span id="typed" data-type="curl -fsSL https://raw.githubusercontent.com/Laminara/laminara/main/install.sh | bash"></span>
 <span class="prompt">$</span> laminara-server status<span class="caret"></span></code></pre>
   </div>
 
@@ -242,7 +243,7 @@
 </main>
 
 <footer>
-  <p>© 2026 MrLeonardos · <a href="https://github.com/MrLeonardosMi/Laminara/blob/main/LICENSE">AGPL-3.0</a></p>
+  <p>© 2026 MrLeonardos · <a href="https://github.com/Laminara/laminara/blob/main/LICENSE">AGPL-3.0</a></p>
   <p>Minecraft — торговая марка Mojang Studios. Проект с ними не связан.</p>
 </footer>
 
