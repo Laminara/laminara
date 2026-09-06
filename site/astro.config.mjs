@@ -1,8 +1,16 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import { fileURLToPath } from "node:url";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 export default defineConfig({
+  markdown: {
+    rehypePlugins: [
+      rehypeSlug,
+      [rehypeAutolinkHeadings, { behavior: "wrap" }],
+    ],
+  },
   vite: {
     resolve: {
       alias: [

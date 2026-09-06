@@ -8,3 +8,12 @@
   --sl-color-accent: #a3701a;
   --sl-color-accent-high: #4a3208;
 }
+
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) > a {
+  color: inherit;
+  text-decoration: none;
+}
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) > a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
