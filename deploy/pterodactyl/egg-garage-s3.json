@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-09-06T00:00:00+00:00",
+  "name": "Garage (S3 для Laminara)",
+  "author": "mrleonardos.game8@mail.ru",
+  "description": "S3-совместимое хранилище Garage для сборок Laminara. При первом запуске назначает layout, создаёт bucket и ключ доступа, кладёт креды в creds.txt. endpoint должен смотреть наружу — лаунчер качает объекты по presigned-ссылкам напрямую.",
+  "features": null,
+  "docker_images": {
+    "Debian 12": "ghcr.io/pterodactyl/yolks:debian",
+    "Debian 12 (Pelican)": "ghcr.io/pelican-eggs/yolks:debian"
+  },
+  "file_denylist": [],
+  "startup": "bash run.sh",
+  "config": {
+    "files": "{}",
+    "startup": "{\r\n    \"done\": \"Garage S3 \\u0433\\u043e\\u0442\\u043e\\u0432\"\r\n}",
+    "logs": "{}",
+    "stop": "^C"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -euo pipefail\ncommand -v curl >/dev/null || { echo \"В образе установки нет curl\"; exit 1; }\n\nmkdir -p /mnt/server\ncd /mnt/server\n\ncase \"$(uname -m)\" in\n  x86_64|amd64) ARCH=x86_64-unknown-linux-musl ;;\n  aarch64|arm64) ARCH=aarch64-unknown-linux-musl ;;\n  *) echo \"Архитектура $(uname -m) не поддерживается\"; exit 1 ;;\nesac\n\nVERSION=\"${GARAGE_VERSION:-v2.0.0}\"\necho \"Скачиваю Garage ${VERSION} (${ARCH})\"\ncurl -fSL -o garage \"https://garagehq.deuxfleurs.fr/_releases/${VERSION}/${ARCH}/garage\"\nchmod +x garage\nmkdir -p meta data\n\nBUCKET=\"${S3_BUCKET:-laminara}\"\nif [ ! -f garage.toml ]; then\n  RPC_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n')\n  cat > garage.toml <<TOML\nmetadata_dir = \"meta\"\ndata_dir = \"data\"\ndb_engine = \"sqlite\"\nreplication_factor = 1\nrpc_bind_addr = \"127.0.0.1:3901\"\nrpc_public_addr = \"127.0.0.1:3901\"\nrpc_secret = \"${RPC_SECRET}\"\n\n[s3_api]\ns3_region = \"${S3_REGION:-garage}\"\napi_bind_addr = \"0.0.0.0:__PORT__\"\nroot_domain = \".s3.local\"\nTOML\n  echo \"Конфиг Garage создан (garage.toml)\"\nfi\n\ncat > run.sh <<'RUN'\n#!/bin/bash\nset -e\nPORT=\"${SERVER_PORT:-3900}\"\nBUCKET=\"${S3_BUCKET:-laminara}\"\nREGION=\"${S3_REGION:-garage}\"\nsed \"s/__PORT__/${PORT}/\" garage.toml > garage.run.toml\nexport GARAGE_CONFIG_FILE=\"$PWD/garage.run.toml\"\n./garage server &\nPID=$!\ntrap 'kill \"$PID\" 2>/dev/null || true' TERM INT\nuntil ./garage status >/dev/null 2>&1; do\n  sleep 1\n  kill -0 \"$PID\" 2>/dev/null || exit 1\ndone\nif [ ! -f .init-done ]; then\n  NODE=$(./garage node id -q 2>/dev/null | cut -d@ -f1)\n  ./garage layout assign -z dc1 -c 100G \"$NODE\" >/dev/null 2>&1 || true\n  ./garage layout apply --version 1 >/dev/null 2>&1 || true\n  ./garage bucket create \"$BUCKET\" >/dev/null 2>&1 || true\n  if [ -n \"${S3_ACCESS_KEY:-}\" ]; then\n    ./garage key import -n laminara-key \"$S3_ACCESS_KEY\" \"${S3_SECRET_KEY}\" --yes >/dev/null 2>&1 || true\n  else\n    ./garage key create laminara-key >/dev/null 2>&1 || true\n  fi\n  ./garage bucket allow --read --write --owner \"$BUCKET\" --key laminara-key >/dev/null 2>&1 || true\n  INFO=$(./garage key info laminara-key --show-secret 2>/dev/null)\n  AK=$(printf '%s\\n' \"$INFO\" | grep 'Key ID:' | awk '{print $NF}')\n  SK=$(printf '%s\\n' \"$INFO\" | grep 'Secret key:' | awk '{print $NF}')\n  cat > creds.txt <<TXT\nbucket       ${BUCKET}\nregion       ${REGION}\naccessKeyId  ${AK}\nsecretKey    ${SK}\nTXT\n  touch .init-done\nfi\necho \"Garage S3 готов: bucket=${BUCKET} порт=${PORT}\"\necho \"Креды S3 — в creds.txt (для конфига Laminara storage)\"\nwait \"$PID\"\nRUN\nchmod +x run.sh\n\necho\necho \"Хранилище готово. После первого запуска креды S3 будут в creds.txt.\"\necho \"В конфиге Laminara storage укажите endpoint http://ВАШ-АДРЕС:ПОРТ, region, bucket, ключи из creds.txt и pathStyle: true.\"\necho \"endpoint должен быть доступен игрокам — presigned-ссылки ведут прямо сюда.\"\n",
+      "container": "ghcr.io/pterodactyl/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Версия Garage",
+      "description": "Тег релиза Garage, например v2.0.0. Меняется переустановкой.",
+      "env_variable": "GARAGE_VERSION",
+      "default_value": "v2.0.0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Bucket",
+      "description": "Имя bucket для сборок. Его же впишите в конфиг Laminara.",
+      "env_variable": "S3_BUCKET",
+      "default_value": "laminara",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|alpha_dash|between:3,63",
+      "field_type": "text"
+    },
+    {
+      "name": "Регион",
+      "description": "Имя региона S3 (любое). Впишите то же в конфиг Laminara.",
+      "env_variable": "S3_REGION",
+      "default_value": "garage",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:32",
+      "field_type": "text"
+    },
+    {
+      "name": "Access key",
+      "description": "Пусто — Garage создаст ключ сам, креды окажутся в creds.txt.",
+      "env_variable": "S3_ACCESS_KEY",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:128",
+      "field_type": "text"
+    },
+    {
+      "name": "Secret key",
+      "description": "Нужен только вместе со своим Access key.",
+      "env_variable": "S3_SECRET_KEY",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:128",
+      "field_type": "text"
+    }
+  ]
+}

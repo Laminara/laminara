@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-09-06T00:00:00+00:00",
+  "name": "SeaweedFS (S3 для Laminara)",
+  "author": "mrleonardos.game8@mail.ru",
+  "description": "S3-совместимое хранилище SeaweedFS для сборок Laminara. Установка создаёт ключ доступа и bucket, печатает готовый блок storage для конфига Laminara. endpoint должен смотреть наружу — лаунчер качает объекты по presigned-ссылкам напрямую.",
+  "features": null,
+  "docker_images": {
+    "Debian 12": "ghcr.io/pterodactyl/yolks:debian",
+    "Debian 12 (Pelican)": "ghcr.io/pelican-eggs/yolks:debian"
+  },
+  "file_denylist": [],
+  "startup": "bash run.sh",
+  "config": {
+    "files": "{}",
+    "startup": "{\r\n    \"done\": \"SeaweedFS S3 \\u0433\\u043e\\u0442\\u043e\\u0432\"\r\n}",
+    "logs": "{}",
+    "stop": "^C"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -euo pipefail\ncommand -v curl >/dev/null || { echo \"В образе установки нет curl\"; exit 1; }\ncommand -v tar  >/dev/null || { echo \"В образе установки нет tar\"; exit 1; }\n\nmkdir -p /mnt/server\ncd /mnt/server\n\ncase \"$(uname -m)\" in\n  x86_64|amd64) ARCH=amd64 ;;\n  aarch64|arm64) ARCH=arm64 ;;\n  *) echo \"Архитектура $(uname -m) не поддерживается, нужен x86_64 или arm64\"; exit 1 ;;\nesac\n\nTAG=\"${SEAWEED_VERSION:-latest}\"\nif [ \"$TAG\" = \"latest\" ]; then\n  TAG=$(curl -fsSL https://api.github.com/repos/seaweedfs/seaweedfs/releases/latest | grep -o '\"tag_name\": *\"[^\"]*\"' | head -1 | sed 's/.*\"tag_name\": *\"//; s/\"//')\nfi\necho \"Скачиваю SeaweedFS ${TAG} (${ARCH})\"\ncurl -fSL -o weed.tar.gz \"https://github.com/seaweedfs/seaweedfs/releases/download/${TAG}/linux_${ARCH}.tar.gz\"\ntar xzf weed.tar.gz weed\nrm -f weed.tar.gz\nchmod +x weed\nmkdir -p data\n\nBUCKET=\"${S3_BUCKET:-laminara}\"\nif [ ! -f s3.json ]; then\n  AK=\"${S3_ACCESS_KEY:-}\"\n  SK=\"${S3_SECRET_KEY:-}\"\n  [ -z \"$AK\" ] && AK=$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)\n  [ -z \"$SK\" ] && SK=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)\n  cat > s3.json <<JSON\n{\"identities\":[{\"name\":\"laminara\",\"credentials\":[{\"accessKey\":\"${AK}\",\"secretKey\":\"${SK}\"}],\"actions\":[\"Admin\",\"Read\",\"Write\",\"List\",\"Tagging\"]}]}\nJSON\n  cat > creds.txt <<TXT\nbucket       ${BUCKET}\naccessKeyId  ${AK}\nsecretKey    ${SK}\nTXT\n  echo \"Ключи S3 сохранены в s3.json (сводка в creds.txt)\"\nfi\n\ncat > run.sh <<'RUN'\n#!/bin/bash\nset -e\nPORT=\"${SERVER_PORT:-8333}\"\nBUCKET=\"${S3_BUCKET:-laminara}\"\n./weed server -dir=data -s3 -s3.config=s3.json \\\n  -s3.port=\"$PORT\" -master.port=9333 -volume.port=8080 -filer.port=8888 \\\n  -ip=127.0.0.1 -volume.max=0 &\nPID=$!\ntrap 'kill \"$PID\" 2>/dev/null || true' TERM INT\nuntil curl -s \"http://127.0.0.1:${PORT}\" >/dev/null 2>&1; do\n  sleep 1\n  kill -0 \"$PID\" 2>/dev/null || exit 1\ndone\nif [ ! -f .bucket-done ]; then\n  printf 's3.bucket.create -name %s\\n' \"$BUCKET\" | ./weed shell -master 127.0.0.1:9333 >/dev/null 2>&1 || true\n  touch .bucket-done\nfi\necho \"SeaweedFS S3 готов: bucket=${BUCKET} порт=${PORT}\"\nwait \"$PID\"\nRUN\nchmod +x run.sh\n\necho\necho \"Хранилище готово. В конфиге Laminara (storage) укажите:\"\necho '  \"storage\": { \"backend\": \"s3\", \"config\": {'\necho \"    \\\"endpoint\\\": \\\"http://ВАШ-АДРЕС:ПОРТ\\\",\"\necho \"    \\\"region\\\": \\\"us-east-1\\\",\"\necho \"    \\\"bucket\\\": \\\"$(grep '^bucket' creds.txt | awk '{print $2}')\\\",\"\necho \"    \\\"accessKeyId\\\": \\\"$(grep '^accessKeyId' creds.txt | awk '{print $2}')\\\",\"\necho \"    \\\"secretAccessKey\\\": \\\"$(grep '^secretKey' creds.txt | awk '{print $2}')\\\",\"\necho '    \"pathStyle\": true } }'\necho\necho \"endpoint должен быть доступен игрокам напрямую — presigned-ссылки ведут прямо сюда.\"\n",
+      "container": "ghcr.io/pterodactyl/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Версия SeaweedFS",
+      "description": "latest или тег релиза (например 3.68). Меняется переустановкой.",
+      "env_variable": "SEAWEED_VERSION",
+      "default_value": "latest",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Bucket",
+      "description": "Имя bucket для сборок. Его же впишите в конфиг Laminara.",
+      "env_variable": "S3_BUCKET",
+      "default_value": "laminara",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|alpha_dash|between:3,63",
+      "field_type": "text"
+    },
+    {
+      "name": "Access key",
+      "description": "Пусто — установщик придумает и напечатает в журнале.",
+      "env_variable": "S3_ACCESS_KEY",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:128",
+      "field_type": "text"
+    },
+    {
+      "name": "Secret key",
+      "description": "Пусто — установщик придумает и напечатает в журнале.",
+      "env_variable": "S3_SECRET_KEY",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:128",
+      "field_type": "text"
+    }
+  ]
+}
