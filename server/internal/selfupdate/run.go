@@ -2,11 +2,13 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/laminara/laminara/server/internal/humanize"
 )
@@ -20,6 +22,9 @@ func (c *Checker) Apply(ctx context.Context, release *Release) error {
 	}
 	dir, err := os.MkdirTemp(filepath.Dir(binary), ".laminara-update-")
 	if err != nil {
+		if errors.Is(err, syscall.EROFS) {
+			return fmt.Errorf("каталог %s только для чтения — самообновление отключено защитой systemd. Обновите переустановкой (curl -fsSL https://raw.githubusercontent.com/laminara/laminara/main/install.sh | bash) или добавьте каталог бинаря в ReadWritePaths юнита", filepath.Dir(binary))
+		}
 		return fmt.Errorf("не удалось подготовить загрузку рядом с %s: %w", binary, err)
 	}
 	defer os.RemoveAll(dir)

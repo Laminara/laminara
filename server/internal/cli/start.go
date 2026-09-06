@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"path/filepath"
+
 	"github.com/spf13/cobra"
 
 	"github.com/laminara/laminara/server/internal/config"
@@ -25,7 +27,7 @@ func startCmd() *cobra.Command {
 				}
 				logging := daemon.NewLogging(cfg.Log)
 				opts.Logging = logging
-				opts.Modules = modulesetup.Build(cfg.Modules, logging.Log)
+				opts.Modules = modulesetup.Build(modulesConfig(cfg), logging.Log)
 				wired, err := serversetup.Build(cfg)
 				if err != nil {
 					return err
@@ -54,4 +56,15 @@ func startCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
 	return cmd
+}
+
+func modulesConfig(cfg *config.Config) *config.ModulesConfig {
+	out := cfg.Modules
+	if out == nil {
+		out = &config.ModulesConfig{}
+	}
+	if out.Dir == "" && cfg.Build != nil && cfg.Build.ProfilesDir != "" {
+		out.Dir = filepath.Join(filepath.Dir(cfg.Build.ProfilesDir), "modules")
+	}
+	return out
 }
