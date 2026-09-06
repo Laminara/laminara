@@ -632,20 +632,18 @@ fn verify(profile_dir: &Path, state_dir: &Path, hash_contents: bool) -> Vec<Stri
             continue;
         }
         let target = profile_dir.join(path);
-        match std::fs::symlink_metadata(&target) {
-            Ok(meta) if meta.file_type().is_symlink() => broken.push(path.clone()),
-            Ok(meta) if !meta.is_file() => broken.push(path.clone()),
+        let intact = match std::fs::symlink_metadata(&target) {
+            Ok(meta) if meta.file_type().is_symlink() => false,
+            Ok(meta) if !meta.is_file() => false,
             Ok(meta) => {
-                if !is_read_only(&meta) {
-                    broken.push(path.clone());
-                } else if entry.size != 0 && meta.len() != entry.size {
-                    broken.push(path.clone());
-                } else if (hash_contents || carries_code(path)) && !content_matches(&target, entry)
-                {
-                    broken.push(path.clone());
-                }
+                is_read_only(&meta)
+                    && (entry.size == 0 || meta.len() == entry.size)
+                    && (!(hash_contents || carries_code(path)) || content_matches(&target, entry))
             }
-            Err(_) => broken.push(path.clone()),
+            Err(_) => false,
+        };
+        if !intact {
+            broken.push(path.clone());
         }
     }
     broken

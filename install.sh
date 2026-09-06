@@ -112,8 +112,9 @@ main() {
     note "нет прав на системные каталоги — ставлю в домашний ($bin_dir)"
   fi
   mkdir -p "$bin_dir" "$data_dir" "$(dirname "$config")"
-  local server="$bin_dir/laminara-server"
+  local server="$data_dir/laminara-server"
   install_binary "$server"
+  ln -sf "$server" "$bin_dir/laminara-server"
 
   # --- как игроки приходят ---
   local front domain="" email="" api_addr endpoint
@@ -344,7 +345,7 @@ RuntimeDirectory=laminara
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$data_dir /run/laminara $(dirname "$config") $(dirname "$server")
+ReadWritePaths=$data_dir /run/laminara $(dirname "$config")
 
 [Install]
 WantedBy=multi-user.target
