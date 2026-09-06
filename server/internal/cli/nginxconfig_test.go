@@ -33,6 +33,9 @@ func TestNginxFileStorage(t *testing.T) {
 		"location /internal-objects/ {",
 		"alias /var/lib/laminara/objects/;",
 		"return 301 https://$host$request_uri;",
+		"map $http_upgrade $connection_upgrade {",
+		"proxy_set_header Upgrade $http_upgrade;",
+		"proxy_set_header Connection $connection_upgrade;",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)
