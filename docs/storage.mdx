@@ -79,3 +79,13 @@ import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
 <Aside type="caution">
 Из России часть облачных S3 и их регистрация бывают недоступны или капризны. Если сервер стоит там, надёжнее поднять self-hosted (Garage или SeaweedFS) рядом с ним.
 </Aside>
+
+## В панели Pterodactyl или Pelican
+
+Если сервер живёт под панелью, хранилище поднимается тем же способом, что и сам лаунчсервер, — импортом egg. В репозитории, в каталоге `deploy/pterodactyl`, лежат два: `egg-garage-s3.json` и `egg-seaweedfs-s3.json`. Импортируются как обычный egg (в Pterodactyl — «Nests → Import Egg», в Pelican — так же).
+
+Egg сам качает бинарь хранилища, при первом запуске заводит ключ доступа и bucket и печатает готовый блок `storage` для конфига Laminara. Создавать ключ и bucket руками не нужно — Laminara bucket не создаёт и ждёт готовый.
+
+<Aside type="caution">
+`endpoint` в конфиге Laminara — это публичный адрес хранилища, а не `localhost`: лаунчер игрока идёт за файлом по presigned-ссылке напрямую в хранилище. За панелью укажите домен или IP машины с портом хранилища (лучше за nginx с TLS). Если вписать внутренний адрес, сервер запустится, а скачивание у игроков не пойдёт.
+</Aside>
