@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -71,6 +72,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 		if err != nil {
 			return nil, err
 		}
+		tunePool(db)
 		return &sqlProvider{db: db, query: cfg.Query, custom: true, verifier: verifier, scheme: scheme}, nil
 	}
 	table, usernameCol, err := sqlschema.Field(cfg.Table, cfg.Fields.Username)
@@ -102,9 +104,17 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	tunePool(db)
 	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s",
 		columns, quote(table), quote(usernameCol), placeholder)
 	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, hasSecret: hasSecret, verifier: verifier, scheme: scheme, second: totp.NewVerifier()}, nil
+}
+
+func tunePool(db *sql.DB) {
+	db.SetConnMaxLifetime(3 * time.Minute)
+	db.SetConnMaxIdleTime(time.Minute)
+	db.SetMaxIdleConns(4)
+	db.SetMaxOpenConns(16)
 }
 
 func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -83,12 +84,14 @@ func Open(cfg Config) (*bun.DB, error) {
 		if err != nil {
 			return nil, err
 		}
+		tunePool(sqldb)
 		return bun.NewDB(sqldb, pgdialect.New()), nil
 	case sqlschema.MySQL:
 		sqldb, err := sql.Open("mysql", cfg.DSN)
 		if err != nil {
 			return nil, err
 		}
+		tunePool(sqldb)
 		return bun.NewDB(sqldb, mysqldialect.New()), nil
 	case sqlschema.SQLite:
 		dsn, err := sqliteDSN(cfg.DSN)
@@ -104,4 +107,11 @@ func Open(cfg Config) (*bun.DB, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
 	}
+}
+
+func tunePool(db *sql.DB) {
+	db.SetConnMaxLifetime(3 * time.Minute)
+	db.SetConnMaxIdleTime(time.Minute)
+	db.SetMaxIdleConns(4)
+	db.SetMaxOpenConns(16)
 }
