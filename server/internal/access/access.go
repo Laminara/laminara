@@ -226,3 +226,10 @@ func (m *Memo) Decide(ctx context.Context, build string) Decision {
 	m.mu.Unlock()
 	return decision
 }
+
+func (c *Controller) Sources() map[string]Source {
+	if c == nil {
+		return nil
+	}
+	return c.sources
+}

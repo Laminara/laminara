@@ -2,249 +2,124 @@ package doctor
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net"
-	"os"
-	"path/filepath"
-	"strings"
-	"syscall"
+	"sort"
 	"time"
 
 	"github.com/laminara/laminara/server/internal/config"
-	"github.com/laminara/laminara/server/internal/humanize"
-	"github.com/laminara/laminara/server/internal/signing"
-	"github.com/laminara/laminara/server/internal/storage"
+	"github.com/laminara/laminara/server/internal/diag"
+	"github.com/laminara/laminara/server/internal/progress"
+	"github.com/laminara/laminara/server/internal/serversetup"
 )
 
-type Verdict int
-
-const (
-	OK Verdict = iota
-	Warn
-	Fail
-)
-
-const lowDiskBytes = 5 << 30
-
-type Result struct {
-	What    string
-	Verdict Verdict
-	Detail  string
+type Options struct {
+	Config     *config.Config
+	ConfigPath string
+	Wired      *serversetup.Wired
+	BuildError error
+	Running    bool
+	Username   string
+	Password   string
+	Deep       bool
+	Endpoint   string
 }
 
-func Run(ctx context.Context, cfg *config.Config, configPath string) []Result {
-	var results []Result
-	add := func(what string, verdict Verdict, format string, args ...any) {
-		results = append(results, Result{What: what, Verdict: verdict, Detail: fmt.Sprintf(format, args...)})
+type section struct {
+	key   string
+	title string
+	run   func(ctx context.Context, opts Options, probe *diag.Probe)
+}
+
+var sections = []section{
+	{key: "config", title: "настройки", run: checkConfigFile},
+	{key: "auth", title: "аккаунты и вход", run: checkAuth},
+	{key: "storage", title: "хранилище файлов", run: checkStorage},
+	{key: "build", title: "сборки и подпись", run: checkBuild},
+	{key: "api", title: "публичный доступ", run: checkAPI},
+	{key: "yggdrasil", title: "вход в игре", run: checkYggdrasil},
+	{key: "hwid", title: "распознавание компьютеров", run: checkMachines},
+	{key: "access", title: "доступ к сборкам", run: checkAccess},
+	{key: "news", title: "новости", run: checkNews},
+	{key: "console", title: "консоль в браузере", run: checkConsole},
+	{key: "launcher", title: "лаунчер", run: checkLauncher},
+	{key: "modules", title: "модули", run: checkModules},
+	{key: "rateLimit", title: "защита от перебора", run: checkRateLimit},
+	{key: "update", title: "обновления", run: checkUpdate},
+	{key: "log", title: "журнал", run: checkLog},
+	{key: "crashReports", title: "отчёты о падениях", run: checkCrashes},
+	{key: "branding", title: "оформление", run: checkBranding},
+	{key: "flow", title: "путь игрока", run: checkFlow},
+	{key: "consistency", title: "связность настроек", run: checkConsistency},
+}
+
+const sectionTimeout = 45 * time.Second
+
+func Titles() map[string]string {
+	titles := make(map[string]string, len(sections))
+	for _, s := range sections {
+		titles[s.key] = s.title
 	}
+	return titles
+}
 
-	add("настройки", OK, "%s прочитан", configPath)
+func Sections() []string {
+	keys := make([]string, 0, len(sections))
+	for _, s := range sections {
+		keys = append(keys, s.key)
+	}
+	return keys
+}
 
-	checkSigning(cfg, add)
-	checkProfiles(cfg, add)
-	checkStorage(ctx, cfg, add)
-	checkListener(cfg, add)
-	checkYggdrasil(cfg, add)
-	checkMachines(cfg, add)
-	checkLog(cfg, add)
+func Run(ctx context.Context, opts Options) []diag.Result {
+	return RunSections(ctx, opts, nil)
+}
 
+func RunSections(ctx context.Context, opts Options, only []string) []diag.Result {
+	wanted := map[string]bool{}
+	for _, name := range only {
+		wanted[name] = true
+	}
+	var results []diag.Result
+	if opts.BuildError != nil && (len(wanted) == 0 || !wanted["config"]) {
+		probe := diag.New("config")
+		reportBuildError(opts, probe)
+		results = append(results, probe.Results()...)
+	}
+	planned := 0
+	for _, s := range sections {
+		if len(wanted) == 0 || wanted[s.key] {
+			planned++
+		}
+	}
+	done := 0
+	for _, s := range sections {
+		if len(wanted) > 0 && !wanted[s.key] {
+			continue
+		}
+		progress.Report(ctx, progress.Event{Phase: s.title, Current: int64(done), Total: int64(planned)})
+		probe := diag.New(s.key)
+		sectionCtx, cancel := context.WithTimeout(ctx, sectionTimeout)
+		s.run(sectionCtx, opts, probe)
+		cancel()
+		results = append(results, probe.Results()...)
+		done++
+	}
+	progress.Report(ctx, progress.Event{Phase: "проверка закончена", Current: int64(done), Total: int64(planned)})
 	return results
 }
 
-type reporter func(what string, verdict Verdict, format string, args ...any)
-
-func checkSigning(cfg *config.Config, add reporter) {
-	if cfg.Build == nil || cfg.Build.SigningKeyPath == "" {
-		add("ключ подписи", Fail, "не задан build.signingKeyPath — публиковать сборки нечем")
-		return
+func order(results []diag.Result) []diag.Result {
+	index := map[string]int{}
+	for i, s := range sections {
+		index[s.key] = i
 	}
-	if _, err := os.Stat(cfg.Build.SigningKeyPath); err != nil {
-		add("ключ подписи", Warn, "%s ещё не создан — появится при первом запуске", cfg.Build.SigningKeyPath)
-		return
-	}
-	ring, err := signing.NewKeyring(cfg.Build.SigningKeyPath, cfg.Build.TrustedSigningKeys)
-	if err != nil {
-		add("ключ подписи", Fail, "%v", err)
-		return
-	}
-	add("ключ подписи", OK, "активный %s…, доверенных ключей %d", ring.ActiveHex()[:16], len(ring.TrustedHex()))
-
-	if info, err := os.Stat(cfg.Build.SigningKeyPath); err == nil && info.Mode().Perm()&0o077 != 0 {
-		add("права на ключ", Warn, "%s открыт остальным (%v) — оставьте 0600", cfg.Build.SigningKeyPath, info.Mode().Perm())
-	}
+	sorted := make([]diag.Result, len(results))
+	copy(sorted, results)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return index[sorted[i].Section] < index[sorted[j].Section]
+	})
+	return sorted
 }
 
-func checkProfiles(cfg *config.Config, add reporter) {
-	if cfg.Build == nil || cfg.Build.ProfilesDir == "" {
-		add("папка сборок", Warn, "не задана build.profilesDir — готовить сборки будет негде")
-		return
-	}
-	dir := cfg.Build.ProfilesDir
-	if err := writable(dir); err != nil {
-		add("папка сборок", Fail, "%s: %v", dir, err)
-		return
-	}
-	free, err := freeBytes(dir)
-	if err != nil {
-		add("папка сборок", OK, "%s доступна на запись", dir)
-		return
-	}
-	verdict := OK
-	if free < lowDiskBytes {
-		verdict = Warn
-	}
-	add("папка сборок", verdict, "%s, свободно %s", dir, humanize.Bytes(free))
-}
-
-func checkStorage(ctx context.Context, cfg *config.Config, add reporter) {
-	if cfg.Storage == nil || cfg.Storage.Backend == "" {
-		add("хранилище", Fail, "не задан storage.backend — раздавать файлы нечем")
-		return
-	}
-	backend, err := storage.BuildBackend(cfg.Storage.Backend, cfg.Storage.Config)
-	if err != nil {
-		add("хранилище", Fail, "%s: %v", cfg.Storage.Backend, err)
-		return
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if _, _, err := backend.Stat(probeCtx, "doctor/probe"); err != nil {
-		add("хранилище", Fail, "%s не отвечает: %v", cfg.Storage.Backend, err)
-		return
-	}
-	add("хранилище", OK, "%s отвечает", cfg.Storage.Backend)
-}
-
-func checkListener(cfg *config.Config, add reporter) {
-	if cfg.API == nil || cfg.API.Addr == "" {
-		add("публичный слушатель", Fail, "не задан api.addr — лаунчеру некуда обращаться")
-		return
-	}
-	addr := cfg.API.Addr
-	listener, err := net.Listen("tcp", addr)
-	if err == nil {
-		listener.Close()
-		add("публичный слушатель", OK, "%s свободен — сервер сейчас не запущен", addr)
-		return
-	}
-	conn, dialErr := net.DialTimeout("tcp", dialable(addr), 2*time.Second)
-	if dialErr == nil {
-		conn.Close()
-		add("публичный слушатель", OK, "%s занят — похоже, сервер уже работает", addr)
-		return
-	}
-	add("публичный слушатель", Fail, "%s не занять и не достучаться: %v", addr, err)
-}
-
-func dialable(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return addr
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, port)
-}
-
-func checkYggdrasil(cfg *config.Config, add reporter) {
-	if cfg.Yggdrasil == nil || !cfg.Yggdrasil.Enabled {
-		add("вход в игре", Fail, "yggdrasil выключен — войти в игру не сможет никто")
-		return
-	}
-	if cfg.Yggdrasil.RSAKeyPath == "" {
-		add("вход в игре", Warn, "не задан yggdrasil.rsaKeyPath — ключ будет создаваться заново при каждом запуске")
-		return
-	}
-	if _, err := os.Stat(cfg.Yggdrasil.RSAKeyPath); err != nil {
-		add("вход в игре", Warn, "%s ещё не создан — появится при первом запуске", cfg.Yggdrasil.RSAKeyPath)
-		return
-	}
-	add("вход в игре", OK, "ключ %s на месте", cfg.Yggdrasil.RSAKeyPath)
-}
-
-func checkMachines(cfg *config.Config, add reporter) {
-	if cfg.HWID == nil {
-		add("распознавание компьютеров", Warn, "блока hwid нет — баны по железу работать не будут")
-		return
-	}
-	if cfg.HWID.SaltPath == "" {
-		add("соль отпечатков", Warn, "не задан hwid.saltPath — соль будет новой при каждом запуске, а с ней и все компьютеры")
-	} else if _, err := os.Stat(cfg.HWID.SaltPath); err != nil {
-		add("соль отпечатков", Warn, "%s ещё не создан — появится при первом запуске", cfg.HWID.SaltPath)
-	} else {
-		add("соль отпечатков", OK, "%s на месте", cfg.HWID.SaltPath)
-	}
-
-	var store struct {
-		Driver string `json:"driver"`
-		DSN    string `json:"dsn"`
-	}
-	if len(cfg.HWID.Store.Config) > 0 {
-		_ = json.Unmarshal(cfg.HWID.Store.Config, &store)
-	}
-	if cfg.HWID.Store.Backend == "memory" || cfg.HWID.Store.Backend == "" {
-		add("база компьютеров", Warn, "хранится в памяти — после перезапуска все машины и баны забудутся")
-		return
-	}
-	add("база компьютеров", OK, "%s", cfg.HWID.Store.Backend)
-}
-
-func checkLog(cfg *config.Config, add reporter) {
-	if cfg.Log == nil || cfg.Log.File == "" {
-		add("журнал", OK, "пишется в консоль — файл ведёт systemd или docker")
-		return
-	}
-	if err := writable(filepath.Dir(cfg.Log.File)); err != nil {
-		add("журнал", Fail, "%s: %v", cfg.Log.File, err)
-		return
-	}
-	add("журнал", OK, "%s", cfg.Log.File)
-}
-
-func writable(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	probe, err := os.CreateTemp(dir, ".doctor-*")
-	if err != nil {
-		return fmt.Errorf("нет прав на запись")
-	}
-	name := probe.Name()
-	probe.Close()
-	return os.Remove(name)
-}
-
-func freeBytes(dir string) (uint64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0, err
-	}
-	return stat.Bavail * uint64(stat.Bsize), nil
-}
-
-func Worst(results []Result) Verdict {
-	worst := OK
-	for _, result := range results {
-		if result.Verdict > worst {
-			worst = result.Verdict
-		}
-	}
-	return worst
-}
-
-func Format(results []Result) string {
-	var out strings.Builder
-	for _, result := range results {
-		mark := "  ok  "
-		switch result.Verdict {
-		case Warn:
-			mark = " важно"
-		case Fail:
-			mark = " плохо"
-		}
-		fmt.Fprintf(&out, "[%s] %-26s %s\n", mark, result.What, result.Detail)
-	}
-	return out.String()
+func Worst(results []diag.Result) diag.Verdict {
+	return diag.Worst(results)
 }

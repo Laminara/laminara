@@ -13,6 +13,7 @@ import (
 
 func hashCmd() *cobra.Command {
 	var algo string
+	var cost int
 	cmd := &cobra.Command{
 		Use:   "hash [пароль]",
 		Short: "посчитать хеш пароля для хранилища аккаунтов (без аргумента читает ввод)",
@@ -28,7 +29,10 @@ func hashCmd() *cobra.Command {
 				}
 				password = strings.TrimRight(line, "\r\n")
 			}
-			digest, err := hash.Produce(algo, password)
+			if cost > 0 && !hash.AcceptsCost(algo) {
+				return fmt.Errorf("схема %q не принимает --cost, стоимость задаётся только для bcrypt", algo)
+			}
+			digest, err := hash.ProduceCost(algo, password, cost)
 			if err != nil {
 				return err
 			}
@@ -37,5 +41,6 @@ func hashCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&algo, "algo", "argon2id", "схема хеширования (argon2id, bcrypt, sha256, sha512, md5, plain)")
+	cmd.Flags().IntVar(&cost, "cost", 0, fmt.Sprintf("стоимость bcrypt от 4 до 31 (по умолчанию %d)", hash.BcryptDefaultCost))
 	return cmd
 }

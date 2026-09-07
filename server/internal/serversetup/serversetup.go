@@ -37,6 +37,8 @@ import (
 type Wired struct {
 	Launcher      *launchersvc.Service
 	Auth          *auth.Service
+	Storage       storage.Backend
+	Skins         skin.Provider
 	Build         *buildsvc.Service
 	Catalog       *catalog.Catalog
 	Access        *access.Controller
@@ -71,6 +73,7 @@ func Build(cfg *config.Config) (*Wired, error) {
 			return nil, err
 		}
 		backend = b
+		wired.Storage = b
 	}
 
 	if backend != nil && cfg.Build != nil && cfg.Build.ProfilesDir != "" {
@@ -213,6 +216,7 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 	if err != nil {
 		return nil, err
 	}
+	wired.Skins = skinProvider
 	yggServer, err := yggdrasil.NewServer(authService, skinProvider, wired.Machines, wired.Limits, yggdrasil.Config{
 		ServerName:  cfg.Yggdrasil.ServerName,
 		SkinDomains: cfg.Yggdrasil.SkinDomains,

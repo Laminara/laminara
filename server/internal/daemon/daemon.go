@@ -38,6 +38,7 @@ import (
 	"github.com/laminara/laminara/server/internal/module"
 	"github.com/laminara/laminara/server/internal/module/remote"
 	"github.com/laminara/laminara/server/internal/modulesetup"
+	"github.com/laminara/laminara/server/internal/serversetup"
 	"github.com/laminara/laminara/server/internal/signing"
 	"github.com/laminara/laminara/server/internal/version"
 	"github.com/laminara/laminara/server/internal/webconsole"
@@ -87,6 +88,8 @@ type Options struct {
 	ConfigPath    string
 	Update        *config.UpdateConfig
 	Log           *config.LogConfig
+	Config        *config.Config
+	Wired         *serversetup.Wired
 }
 
 func New(opts Options) *Daemon {
@@ -115,6 +118,9 @@ func New(opts Options) *Daemon {
 	registry.Register(d.statusCommand())
 	registry.Register(d.versionCommand())
 	registry.Register(d.updateCommand())
+	if opts.Config != nil {
+		registry.Register(doctorCommand(opts))
+	}
 	if opts.ConfigPath != "" {
 		d.settings = &settingsStore{
 			path:    opts.ConfigPath,

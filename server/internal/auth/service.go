@@ -35,6 +35,18 @@ func NewService(provider Provider, sessions SessionStore, cfg Config) *Service {
 	return &Service{provider: provider, sessions: sessions, cfg: cfg, now: time.Now}
 }
 
+func (s *Service) Provider() Provider {
+	return s.provider
+}
+
+func (s *Service) Sessions() SessionStore {
+	return s.sessions
+}
+
+func (s *Service) Lifetimes() (access, refresh time.Duration) {
+	return s.cfg.AccessTTL, s.cfg.RefreshTTL
+}
+
 func (s *Service) Verify(ctx context.Context, username, password, twoFactorCode string) (Identity, error) {
 	return s.provider.Authenticate(ctx, Credentials{Username: username, Password: password, TwoFactorCode: twoFactorCode})
 }

@@ -3,11 +3,14 @@ package hwid
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 
 	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
 	"github.com/laminara/laminara/server/internal/store"
@@ -109,8 +112,7 @@ func (s *SQLStore) migrate(ctx context.Context) error {
 		{"hwid_ban_target", "hwid_ban", "target"},
 	}
 	for _, index := range indexes {
-		query := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", index.name, index.table, index.columns)
-		if _, err := s.db.ExecContext(ctx, query); err != nil {
+		if err := s.ensureIndex(ctx, index.name, index.table, index.columns); err != nil {
 			return err
 		}
 	}
@@ -403,6 +405,16 @@ func (s *SQLStore) Prune(ctx context.Context, idleBefore, ipBefore time.Time) (i
 	return len(stale), err
 }
 
+func (s *SQLStore) forget(ctx context.Context, id string) error {
+	for _, model := range []any{(*signalRow)(nil), (*accountRow)(nil)} {
+		if _, err := s.db.NewDelete().Model(model).Where("machine_id = ?", id).Exec(ctx); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.NewDelete().Model((*machineRow)(nil)).Where("id = ?", id).Exec(ctx)
+	return err
+}
+
 func (s *SQLStore) Close() error { return s.db.Close() }
 
 func (r machineRow) toMachine() Machine {
@@ -456,4 +468,25 @@ func toBans(rows []banRow) []Ban {
 		out = append(out, row.toBan())
 	}
 	return out
+}
+
+func (s *SQLStore) ensureIndex(ctx context.Context, name, table, columns string) error {
+	if s.db.Dialect().Name() != dialect.MySQL {
+		_, err := s.db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s)", name, table, columns))
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("CREATE INDEX %s ON %s (%s)", name, table, columns)); err != nil {
+		if !indexAlreadyThere(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func indexAlreadyThere(err error) bool {
+	var mysqlErr *mysqldriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1061
+	}
+	return false
 }

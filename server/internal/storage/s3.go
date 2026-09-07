@@ -30,8 +30,9 @@ type s3Config struct {
 }
 
 type s3Backend struct {
-	client *minio.Client
-	bucket string
+	client   *minio.Client
+	bucket   string
+	endpoint string
 }
 
 func newS3(raw json.RawMessage) (Backend, error) {
@@ -69,7 +70,7 @@ func newS3(raw json.RawMessage) (Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &s3Backend{client: client, bucket: cfg.Bucket}, nil
+	return &s3Backend{client: client, bucket: cfg.Bucket, endpoint: cfg.Endpoint}, nil
 }
 
 func (b *s3Backend) Put(ctx context.Context, key string, r io.Reader, size int64) error {

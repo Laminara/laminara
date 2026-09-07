@@ -1,46 +1,137 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/laminara/laminara/server/internal/backup"
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/doctor"
+	"github.com/laminara/laminara/server/internal/serversetup"
 )
 
 func doctorCmd() *cobra.Command {
 	var configPath string
+	var username string
+	var password string
+	var endpoint string
+	var only []string
+	var asJSON bool
+	var fix bool
+	var deep bool
 	cmd := &cobra.Command{
-		Use:   "doctor",
-		Short: "проверить, всё ли на месте до того, как что-то сломается",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:   "doctor [раздел…]",
+		Short: "проверить, что всё настроено и работает",
+		Long: "Проходит по разделам настроек и проверяет каждый в деле: базы отвечают, файлы\n" +
+			"заливаются и скачиваются, ключи на месте, подпись сходится. С флагом --as\n" +
+			"дополнительно проходит весь путь игрока — вход, продление, список сборок,\n" +
+			"манифест, скачивание файла и вход в игре.\n\n" +
+			"Разделы: " + strings.Join(doctor.Sections(), " "),
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
 			}
-			results := doctor.Run(cmd.Context(), cfg, configPath)
 			out := cmd.OutOrStdout()
-			fmt.Fprint(out, doctor.Format(results))
+			if username != "" && password == "" {
+				password, err = askPassword(cmd, username)
+				if err != nil {
+					return err
+				}
+			}
+			opts := doctor.Options{
+				Config:     cfg,
+				ConfigPath: configPath,
+				Username:   username,
+				Password:   password,
+				Endpoint:   endpoint,
+				Deep:       deep,
+			}
+			quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+			previous := slog.Default()
+			slog.SetDefault(quiet)
+			wired, buildErr := serversetup.Build(cfg)
+			slog.SetDefault(previous)
+			opts.Wired = wired
+			opts.BuildError = buildErr
+			opts.Running = serverRunning(cfg)
 
-			switch doctor.Worst(results) {
-			case doctor.Fail:
-				return errors.New("так сервер работать не будет — почините отмеченное «плохо»")
-			case doctor.Warn:
-				fmt.Fprintln(out, "\nРаботать будет, но отмеченное «важно» однажды аукнется.")
-			default:
-				fmt.Fprintln(out, "\nВсё на месте.")
+			results := doctor.RunSections(cmd.Context(), opts, append(only, args...))
+			if asJSON {
+				encoder := json.NewEncoder(out)
+				encoder.SetIndent("", "  ")
+				if err := encoder.Encode(doctor.JSON(results)); err != nil {
+					return err
+				}
+			} else {
+				doctor.Write(out, results)
+			}
+			if fix {
+				fmt.Fprintln(out)
+				doctor.Fix(cmd.Context(), out, results)
+			}
+			if doctor.Worst(results) == diag.Fail {
+				cmd.SilenceUsage = true
+				return errors.New("проверка нашла то, из-за чего сервер не будет работать как надо")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
+	cmd.Flags().StringVar(&username, "as", "", "пройти путь игрока под этим ником")
+	cmd.Flags().StringVar(&password, "password", "", "пароль к --as (по умолчанию спрашивается скрытым вводом)")
+	cmd.Flags().StringVar(&endpoint, "endpoint", "", "адрес, по которому обращаться к серверу (по умолчанию берётся из настроек)")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "проверить только эти разделы")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "вывести результат как JSON")
+	cmd.Flags().BoolVar(&fix, "fix", false, "исправить то, что чинится безопасно")
+	cmd.Flags().BoolVar(&deep, "deep", false, "проверять все файлы сборок, а не выборку")
 	_ = cmd.MarkFlagRequired("config")
 	return cmd
+}
+
+func askPassword(cmd *cobra.Command, username string) (string, error) {
+	fmt.Fprintf(cmd.ErrOrStderr(), "Пароль для %s: ", username)
+	secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(cmd.ErrOrStderr())
+	if err != nil {
+		return "", fmt.Errorf("пароль не прочитан: %w", err)
+	}
+	return strings.TrimSpace(string(secret)), nil
+}
+
+func serverRunning(cfg *config.Config) bool {
+	if cfg.API == nil || cfg.API.Addr == "" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", dialableAddr(cfg.API.Addr), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func dialableAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func backupCmd() *cobra.Command {

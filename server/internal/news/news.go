@@ -172,3 +172,10 @@ func clamp(value string, limit int) string {
 	}
 	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
+
+func (s *Service) Source() Source {
+	if s == nil {
+		return nil
+	}
+	return s.source
+}

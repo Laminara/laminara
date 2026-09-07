@@ -40,14 +40,20 @@ type sqlConfig struct {
 }
 
 type sqlProvider struct {
-	db        *sql.DB
-	query     string
-	custom    bool
-	hasUUID   bool
-	hasSecret bool
-	verifier  hash.Verifier
-	scheme    string
-	second    *totp.Verifier
+	db          *sql.DB
+	query       string
+	custom      bool
+	hasUUID     bool
+	hasSecret   bool
+	verifier    hash.Verifier
+	scheme      string
+	second      *totp.Verifier
+	driver      string
+	table       string
+	usernameCol string
+	passwordCol string
+	uuidCol     string
+	quote       func(string) string
 }
 
 func newSQL(raw json.RawMessage) (auth.Provider, error) {
@@ -73,7 +79,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 			return nil, err
 		}
 		tunePool(db)
-		return &sqlProvider{db: db, query: cfg.Query, custom: true, verifier: verifier, scheme: scheme}, nil
+		return &sqlProvider{db: db, query: cfg.Query, custom: true, verifier: verifier, scheme: scheme, driver: driver, quote: quote}, nil
 	}
 	table, usernameCol, err := sqlschema.Field(cfg.Table, cfg.Fields.Username)
 	if err != nil {
@@ -85,11 +91,13 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	}
 	columns := quote(passwordCol)
 	hasUUID := cfg.Fields.UUID != ""
+	uuidCol := ""
 	if hasUUID {
-		_, uuidCol, err := sqlschema.Field(cfg.Table, cfg.Fields.UUID)
+		_, resolved, err := sqlschema.Field(cfg.Table, cfg.Fields.UUID)
 		if err != nil {
 			return nil, err
 		}
+		uuidCol = resolved
 		columns += ", " + quote(uuidCol)
 	}
 	hasSecret := cfg.Fields.TwoFactor != ""
@@ -107,7 +115,21 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	tunePool(db)
 	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s",
 		columns, quote(table), quote(usernameCol), placeholder)
-	return &sqlProvider{db: db, query: query, hasUUID: hasUUID, hasSecret: hasSecret, verifier: verifier, scheme: scheme, second: totp.NewVerifier()}, nil
+	return &sqlProvider{
+		db:          db,
+		query:       query,
+		hasUUID:     hasUUID,
+		hasSecret:   hasSecret,
+		verifier:    verifier,
+		scheme:      scheme,
+		second:      totp.NewVerifier(),
+		driver:      driver,
+		table:       table,
+		usernameCol: usernameCol,
+		passwordCol: passwordCol,
+		uuidCol:     uuidCol,
+		quote:       quote,
+	}, nil
 }
 
 func tunePool(db *sql.DB) {

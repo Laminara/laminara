@@ -32,6 +32,7 @@ type jsonFileConfig struct {
 type jsonFileProvider struct {
 	verifier    hash.Verifier
 	scheme      string
+	path        string
 	usernameKey string
 	passwordKey string
 	uuidKey     string
@@ -76,6 +77,7 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 	return &jsonFileProvider{
 		verifier:    verifier,
 		scheme:      scheme,
+		path:        cfg.Path,
 		usernameKey: usernameKey,
 		passwordKey: orDefault(cfg.Fields.Password, "password"),
 		uuidKey:     orDefault(cfg.Fields.UUID, "uuid"),

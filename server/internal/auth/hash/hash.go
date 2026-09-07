@@ -15,16 +15,40 @@ type Hasher interface {
 	Hash(password string) (string, error)
 }
 
+type CostHasher interface {
+	HashCost(password string, cost int) (string, error)
+}
+
 func Produce(scheme, password string) (string, error) {
+	return ProduceCost(scheme, password, 0)
+}
+
+func ProduceCost(scheme, password string, cost int) (string, error) {
 	verifier, err := Get(scheme)
 	if err != nil {
 		return "", err
+	}
+	if cost > 0 {
+		tunable, ok := verifier.(CostHasher)
+		if !ok {
+			return "", fmt.Errorf("схема %q не принимает стоимость", scheme)
+		}
+		return tunable.HashCost(password, cost)
 	}
 	hasher, ok := verifier.(Hasher)
 	if !ok {
 		return "", fmt.Errorf("hash scheme %q cannot produce hashes", scheme)
 	}
 	return hasher.Hash(password)
+}
+
+func AcceptsCost(scheme string) bool {
+	verifier, err := Get(scheme)
+	if err != nil {
+		return false
+	}
+	_, ok := verifier.(CostHasher)
+	return ok
 }
 
 func hexOf(sum []byte) string {

@@ -45,6 +45,8 @@ func startCmd() *cobra.Command {
 				opts.Console = wired.Console
 				opts.Update = cfg.Update
 				opts.Log = cfg.Log
+				opts.Config = cfg
+				opts.Wired = wired
 			}
 			server := daemon.New(opts)
 			err := server.Run(cmd.Context())
