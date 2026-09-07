@@ -44,6 +44,66 @@ import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
 
 `pathStyle` включите для self-hosted хранилищ (Garage, SeaweedFS, MinIO); большинству облаков он не нужен. `secure` управляет HTTPS и по умолчанию включён.
 
+### Готовые примеры
+
+<Aside type="caution">
+`endpoint` — это адрес, который получит **лаунчер игрока** во временной ссылке. Внутреннее имя
+контейнера (`minio:9000`) или `127.0.0.1` здесь означают, что заливка на сервере пройдёт, а
+скачать сборку не сможет никто. `laminara-server doctor` проверяет это отдельной строкой.
+</Aside>
+
+MinIO, Garage или SeaweedFS на своём сервере за nginx с сертификатом:
+```json
+"config": {
+  "endpoint": "https://s3.example.com",
+  "region": "us-east-1",
+  "bucket": "laminara",
+  "accessKeyId": "…",
+  "secretAccessKey": "…",
+  "pathStyle": true
+}
+```
+
+То же хранилище на соседней машине во внутренней сети, без TLS — так можно, только если игроки
+ходят не напрямую, а через CDN или прокси, который вы поставите перед ним:
+```json
+"config": {
+  "endpoint": "http://10.0.0.5:9000",
+  "region": "us-east-1",
+  "bucket": "laminara",
+  "accessKeyId": "…",
+  "secretAccessKey": "…",
+  "pathStyle": true,
+  "secure": false
+}
+```
+
+Amazon S3 — регион обязателен, `pathStyle` не нужен:
+```json
+"config": {
+  "endpoint": "https://s3.eu-central-1.amazonaws.com",
+  "region": "eu-central-1",
+  "bucket": "laminara-builds",
+  "accessKeyId": "AKIA…",
+  "secretAccessKey": "…"
+}
+```
+
+Хранилища, где адрес бакета устроен как поддомен (Cloudflare R2, Backblaze B2, Selectel,
+Timeweb):
+```json
+"config": {
+  "endpoint": "https://<идентификатор>.r2.cloudflarestorage.com",
+  "region": "auto",
+  "bucket": "laminara",
+  "accessKeyId": "…",
+  "secretAccessKey": "…"
+}
+```
+
+Ключу доступа нужны права на чтение, запись, удаление и выдачу временных ссылок в пределах
+одного бакета — раздавать полный доступ к хранилищу не требуется.
+
 ## Место на диске сервера
 
 Сборка живёт в двух видах: папка профиля, которую оператор правит руками, и хранилище объектов,
