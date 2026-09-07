@@ -460,10 +460,11 @@ impl Core {
             Some(manifest) => manifest,
             None => self.verified_manifest(profile).await?,
         };
-        let extras = crate::features::resolve_extras(
+        let mut extras = crate::features::resolve_extras(
             &manifest.manifest.features,
             &self.build_settings(profile).feature_selection,
         );
+        extras.adopt_build(&manifest.manifest);
 
         let authlib_jar = authlib_from(&profile_dir, authlib_jar)?;
 

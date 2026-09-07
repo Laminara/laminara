@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::proto::core::v1::{FeatureGroup, FeatureModel, SelectionType};
+use crate::proto::core::v1::{FeatureGroup, FeatureModel, Manifest, SelectionType};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +45,38 @@ pub struct LaunchExtras {
     pub jvm_args: Vec<String>,
     pub game_args: Vec<String>,
     pub classpath: Vec<String>,
+    pub classpath_first: Vec<String>,
+    pub classpath_exclude: Vec<String>,
+    pub main_class: Option<String>,
+}
+
+impl LaunchExtras {
+    pub fn adopt_build(&mut self, manifest: &Manifest) {
+        self.prepend_build_args(&manifest.jvm_args, &manifest.game_args);
+        for entry in &manifest.classpath {
+            match crate::sync::validate_manifest_path(entry) {
+                Ok(()) => self.classpath_first.push(entry.clone()),
+                Err(error) => tracing::warn!("classpath entry dropped: {error}"),
+            }
+        }
+        self.classpath_exclude = manifest.classpath_exclude.clone();
+        if !manifest.main_class.is_empty() {
+            self.main_class = Some(manifest.main_class.clone());
+        }
+    }
+
+    fn prepend_build_args(&mut self, jvm_args: &[String], game_args: &[String]) {
+        self.jvm_args = jvm_args
+            .iter()
+            .cloned()
+            .chain(std::mem::take(&mut self.jvm_args))
+            .collect();
+        self.game_args = game_args
+            .iter()
+            .cloned()
+            .chain(std::mem::take(&mut self.game_args))
+            .collect();
+    }
 }
 
 fn active_options(

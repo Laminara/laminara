@@ -127,6 +127,10 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		computeAddedSizes(model.Groups, sizeByPath)
 	}
 
+	if err := validateBuildArgs(settings.JvmArgs, settings.GameArgs, settings.Classpath); err != nil {
+		return nil, err
+	}
+
 	launch := readLaunchProfile(root)
 
 	return &corev1.Manifest{
@@ -144,5 +148,10 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		Loader:               settings.Loader,
 		Features:             model,
 		Platform:             platform,
+		JvmArgs:              settings.JvmArgs,
+		GameArgs:             settings.GameArgs,
+		Classpath:            settings.Classpath,
+		ClasspathExclude:     settings.ClasspathExclude,
+		MainClass:            settings.MainClass,
 	}, nil
 }

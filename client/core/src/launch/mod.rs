@@ -25,6 +25,21 @@ pub struct LaunchInputs<'a> {
     pub client_version: &'a str,
 }
 
+fn excluded(entry: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| matches_pattern(entry, pattern))
+}
+
+fn matches_pattern(entry: &str, pattern: &str) -> bool {
+    match pattern.split_once('*') {
+        None => entry == pattern,
+        Some((head, tail)) => {
+            entry.len() >= head.len() + tail.len()
+                && entry.starts_with(head)
+                && entry.ends_with(tail)
+        }
+    }
+}
+
 fn separator(os: &str) -> &'static str {
     if os == "windows" {
         ";"
@@ -87,10 +102,13 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
         input.prefetch_b64
     ));
 
-    let classpath = profile
-        .classpath
+    let classpath = input
+        .extras
+        .classpath_first
         .iter()
+        .chain(profile.classpath.iter())
         .chain(input.extras.classpath.iter())
+        .filter(|entry| !excluded(entry, &input.extras.classpath_exclude))
         .map(|entry| join(entry))
         .collect::<Vec<_>>()
         .join(sep);
@@ -101,7 +119,13 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
         argv.push(substitute(arg, &libraries_dir, sep, &version));
     }
 
-    argv.push(profile.main_class.clone());
+    argv.push(
+        input
+            .extras
+            .main_class
+            .clone()
+            .unwrap_or_else(|| profile.main_class.clone()),
+    );
 
     let session = input.session;
     argv.extend([
@@ -338,6 +362,41 @@ mod tests {
     }
 
     #[test]
+    fn build_args_lead_the_command_and_replace_the_main_class() {
+        let mut profile = base_profile();
+        profile.classpath = vec![
+            "libraries/org/lwjgl/lwjgl/lwjgl-2.9.1.jar".into(),
+            "versions/client.jar".into(),
+        ];
+        profile.main_class = "net.minecraft.launchwrapper.Launch".into();
+        let session = session();
+        let paths = paths();
+        let extras = LaunchExtras {
+            classpath_first: vec!["libraries/patches/forgePatches.jar".into()],
+            classpath_exclude: vec!["libraries/org/lwjgl/lwjgl/*".into()],
+            main_class: Some("com.example.Boot".into()),
+            jvm_args: vec!["--add-opens".into(), "java.base/java.lang=ALL-UNNAMED".into()],
+            ..Default::default()
+        };
+        let argv = build_argv(&inputs(&profile, &session, &paths, &[], &extras));
+
+        let classpath = argv[argv.iter().position(|a| a == "-cp").expect("-cp") + 1].clone();
+        let first = classpath.split(separator(&profile.os)).next().unwrap();
+        assert!(
+            first.ends_with("forgePatches.jar"),
+            "ранний classpath не первый: {classpath}"
+        );
+        assert!(
+            !classpath.contains("lwjgl-2.9.1.jar"),
+            "исключение не сработало: {classpath}"
+        );
+        assert!(argv.contains(&"com.example.Boot".to_string()));
+        assert!(!argv.contains(&"net.minecraft.launchwrapper.Launch".to_string()));
+        let opens = argv.iter().position(|a| a == "--add-opens").expect("--add-opens");
+        assert_eq!(argv[opens + 1], "java.base/java.lang=ALL-UNNAMED");
+    }
+
+    #[test]
     fn optional_mods_extend_the_launch_command() {
         let mut profile = base_profile();
         profile.jvm_args = vec!["-Dprofile.flag=1".into()];
@@ -348,6 +407,7 @@ mod tests {
             jvm_args: vec!["-Diris.enable=true".into()],
             game_args: vec!["--zoom".into()],
             classpath: vec!["mods/iris.jar".into()],
+            ..Default::default()
         };
         let argv = build_argv(&inputs(&profile, &session, &paths, &[], &extras));
         let at = |needle: &str| {
@@ -368,3 +428,4 @@ mod tests {
         assert!(classpath[2].ends_with("mods/iris.jar"));
     }
 }
+

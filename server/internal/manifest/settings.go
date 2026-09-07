@@ -30,11 +30,16 @@ var DefaultUserWritable = []string{
 }
 
 type Settings struct {
-	UserWritable  []string     `json:"userWritable"`
-	Enforced      []string     `json:"enforced"`
-	ServerAddress string       `json:"serverAddress"`
-	Loader        string       `json:"loader"`
-	Features      *FeatureSpec `json:"features,omitempty"`
+	UserWritable     []string     `json:"userWritable"`
+	Enforced         []string     `json:"enforced"`
+	ServerAddress    string       `json:"serverAddress"`
+	Loader           string       `json:"loader"`
+	JvmArgs          []string     `json:"jvmArgs,omitempty"`
+	GameArgs         []string     `json:"gameArgs,omitempty"`
+	Classpath        []string     `json:"classpath,omitempty"`
+	ClasspathExclude []string     `json:"classpathExclude,omitempty"`
+	MainClass        string       `json:"mainClass,omitempty"`
+	Features         *FeatureSpec `json:"features,omitempty"`
 }
 
 type FeatureSpec struct {

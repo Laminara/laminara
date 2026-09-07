@@ -214,27 +214,76 @@ var reservedGameArgs = map[string]bool{
 	"--xuid":        true,
 }
 
-func validateLaunchArgs(groupID string, o *corev1.FeatureOption, policyByPath map[string]corev1.FilePolicy) error {
-	for _, arg := range o.JvmArgs {
+var valuedJvmArgs = map[string]bool{
+	"--add-opens":            true,
+	"--add-exports":          true,
+	"--add-reads":            true,
+	"--add-modules":          true,
+	"--patch-module":         true,
+	"--enable-native-access": true,
+	"--limit-modules":        true,
+}
+
+func checkJvmArgs(where string, args []string) error {
+	expectsValue := false
+	for _, arg := range args {
+		if expectsValue {
+			expectsValue = false
+			continue
+		}
 		if !strings.HasPrefix(arg, "-") {
-			return fmt.Errorf("option %q/%q: jvmArgs entry %q is not a java option — it would be taken as the main class", groupID, o.Id, arg)
+			return fmt.Errorf("%s: jvmArgs entry %q is not a java option — it would be taken as the main class", where, arg)
 		}
 		key := arg
 		if i := strings.IndexAny(arg, "=:"); i > 0 {
 			key = arg[:i]
 		}
 		if reservedJvmArgs[key] {
-			return fmt.Errorf("option %q/%q: jvmArgs must not set %q — the launcher builds the classpath from the profile and the chosen options", groupID, o.Id, key)
+			return fmt.Errorf("%s: jvmArgs must not set %q — the launcher builds the classpath from the profile and the chosen options", where, key)
 		}
+		expectsValue = valuedJvmArgs[arg]
 	}
-	for _, arg := range o.GameArgs {
+	if expectsValue {
+		return fmt.Errorf("%s: jvmArgs ends with %q and no value after it", where, args[len(args)-1])
+	}
+	return nil
+}
+
+func checkGameArgs(where string, args []string) error {
+	for _, arg := range args {
 		key := arg
 		if i := strings.Index(arg, "="); i > 0 {
 			key = arg[:i]
 		}
 		if reservedGameArgs[key] {
-			return fmt.Errorf("option %q/%q: gameArgs must not set %q — the launcher passes it itself", groupID, o.Id, key)
+			return fmt.Errorf("%s: gameArgs must not set %q — the launcher passes it itself", where, key)
 		}
+	}
+	return nil
+}
+
+func validateBuildArgs(jvmArgs, gameArgs, classpath []string) error {
+	if err := checkJvmArgs("сборка", jvmArgs); err != nil {
+		return err
+	}
+	if err := checkGameArgs("сборка", gameArgs); err != nil {
+		return err
+	}
+	for _, entry := range classpath {
+		if err := validateClasspathEntry(entry); err != nil {
+			return fmt.Errorf("сборка: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateLaunchArgs(groupID string, o *corev1.FeatureOption, policyByPath map[string]corev1.FilePolicy) error {
+	where := fmt.Sprintf("option %q/%q", groupID, o.Id)
+	if err := checkJvmArgs(where, o.JvmArgs); err != nil {
+		return err
+	}
+	if err := checkGameArgs(where, o.GameArgs); err != nil {
+		return err
 	}
 	for _, entry := range o.Classpath {
 		if err := validateClasspathEntry(entry); err != nil {
