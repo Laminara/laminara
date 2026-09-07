@@ -30,32 +30,133 @@ Yggdrasil поднимается на том же публичном порту,
 
 ## Скины — тоже адаптеры
 
-Откуда брать скины, задаёт `skinProvider`.
+Откуда брать скины, задаёт `skinProvider`. Способа три: собрать ссылку по шаблону, спросить ваш
+сайт по HTTP или прочитать колонки базы.
+
+### Из чего складывается ссылка
+
+В адресах `template` и `json` работают подстановки. Для игрока `Steve` с
+uuid `8667ba71-b85a-4004-af54-457a9734eed7` они дают:
+
+| Подстановка | Во что превращается |
+| --- | --- |
+| `%nickname%` | `Steve` |
+| `%username%` | `Steve` (то же самое, для привычки) |
+| `%uuid%` | `8667ba71-b85a-4004-af54-457a9734eed7` |
+| `%hash%` | `8667ba71b85a4004af54457a9734eed7` (uuid без дефисов) |
+
+Ник берётся ровно в том написании, в котором он лежит в вашем источнике аккаунтов, а uuid — тот,
+что Laminara выдала игроку (из колонки `uuid`, если вы её указали, иначе выведенный из ника).
 
 <Tabs>
   <TabItem label="template — прямые ссылки">
-    Ссылка на файл скина с подстановками: `%nickname%`, `%username%` и `%uuid%` заменяются на данные игрока.
+    Ссылка на файл собирается прямо из шаблона — ни база, ни ваш сайт при этом не опрашиваются.
+
+    Самый частый случай — файлы по нику:
     ```json
     "skinProvider": "template",
     "skinConfig": {
-      "skin": "https://skins.example.com/%nickname%.png",
-      "cape": "https://skins.example.com/capes/%uuid%.png",
+      "skin": "https://skins.example.com/%nickname%.png"
+    }
+    ```
+    `https://skins.example.com/Steve.png`
+
+    С плащами и тонкой моделью рук:
+    ```json
+    "skinConfig": {
+      "skin": "https://skins.example.com/skins/%nickname%.png",
+      "cape": "https://skins.example.com/capes/%nickname%.png",
       "slim": true
     }
     ```
-    `cape` и `slim` (тонкая модель рук) необязательны.
+
+    Если файлы разложены по uuid — так делают, когда ники разрешено менять:
+    ```json
+    "skinConfig": {
+      "skin": "https://cdn.example.com/textures/%hash%.png"
+    }
+    ```
+    `https://cdn.example.com/textures/8667ba71b85a4004af54457a9734eed7.png`
+
+    Годится и адрес с параметрами, если скины отдаёт скрипт:
+    ```json
+    "skinConfig": {
+      "skin": "https://site.example/api/skin.php?nick=%nickname%",
+      "cape": "https://site.example/api/cape.php?nick=%nickname%"
+    }
+    ```
+
+    `cape` и `slim` необязательны. `slim: true` включает тонкую модель рук сразу для всех —
+    выбрать её игроку по отдельности этот способ не позволяет, для этого нужен `json` или `sql`.
+
+    <Aside type="note">
+    Шаблон ничего не проверяет: ссылка отдаётся игре как есть. Если файла нет, игрок получит
+    стандартного Стива — ошибкой это не считается, и ни лаунчер, ни сервер не упадут.
+    </Aside>
   </TabItem>
   <TabItem label="json — ответ вашего сервиса">
-    Laminara запрашивает JSON у вашего эндпоинта (в URL те же подстановки) и берёт ссылки из ответа.
+    Laminara запрашивает JSON у вашего эндпоинта и берёт ссылки из ответа. В URL работают те же
+    подстановки:
     ```json
     "skinProvider": "json",
     "skinConfig": { "url": "https://site.example/skins/%nickname%" }
     ```
-    Ответ — объект с полями `skin`, `cape` и `model` (`slim` или пусто).
+    ```json
+    "skinConfig": { "url": "https://site.example/api/textures?uuid=%uuid%" }
+    ```
+    ```json
+    "skinConfig": { "url": "https://site.example/textures/%hash%.json" }
+    ```
+
+    Принимаются две формы ответа. Короткая — прямые ссылки на `.png`:
+    ```json
+    {
+      "skin": "https://site.example/skins/Steve.png",
+      "cape": "https://site.example/capes/Steve.png",
+      "model": "slim"
+    }
+    ```
+
+    Минимально достаточный ответ — только скин:
+    ```json
+    { "skin": "https://site.example/skins/Steve.png" }
+    ```
+
+    И формат GravitLauncher — чтобы уже написанный под него скрипт выдачи текстур работал без
+    переделок:
+    ```json
+    {
+      "SKIN": {
+        "url": "https://site.example/skins/Steve.png",
+        "digest": "e3b0c44298fc1c149afbf4c8996fb924…",
+        "metadata": { "model": "slim" }
+      },
+      "CAPE": {
+        "url": "https://site.example/capes/Steve.png",
+        "digest": "b94d27b9934d3e08a52e52d7da7dabfa…"
+      }
+    }
+    ```
+    `digest` Laminara не требует и игнорирует — подлинность текстур обеспечивает подпись профиля.
+
+    Игрок без текстур — обычное дело, верните пустой объект:
+    ```json
+    {}
+    ```
+
+    Модель рук берётся из `model` (короткая форма) или `metadata.model` (форма Gravit); значение
+    `slim` включает тонкие руки, любое другое или его отсутствие — обычные.
+
+    <Aside type="caution">
+    Эндпоинт должен отвечать быстро и без авторизации: его дёргает сервер при каждом входе в игру.
+    Если он молчит, игрок войдёт, но окажется без скина.
+    </Aside>
   </TabItem>
   <TabItem label="sql — колонки вашей базы">
     Берёт ссылки прямо из таблицы сайта. Подходит, когда у каждого игрока свой адрес скина
     и шаблон не подставить.
+
+    Всё в одной таблице, поиск по нику:
     ```json
     "skinProvider": "sql",
     "skinConfig": {
@@ -65,12 +166,38 @@ Yggdrasil поднимается на том же публичном порту,
       "fields": { "username": "username", "skin": "skin", "cape": "cape" }
     }
     ```
-    `driver` — `mariadb`, `mysql`, `postgres` или `sqlite`. `cape` и `model` необязательны; если колонка
-    `model` есть, значение `slim` включает тонкую модель рук, иначе берётся `slim` из конфига.
 
-    Если текстуры лежат не в одной таблице, задайте `query` вместо `table` и `fields` —
-    выборка возвращает скин, затем плащ и модель, а единственный параметр подставляется из
-    `lookup` (`username` по умолчанию, либо `uuid`):
+    С колонкой модели — тогда тонкие руки включаются каждому игроку отдельно:
+    ```json
+    "skinConfig": {
+      "driver": "mariadb",
+      "dsn": "…",
+      "table": "users",
+      "fields": {
+        "username": "username",
+        "skin": "skin_url",
+        "cape": "cape_url",
+        "model": "skin_model"
+      }
+    }
+    ```
+    В колонке `model` значение `slim` даёт тонкие руки; пусто — обычные. Без этой колонки для всех
+    берётся `slim` из конфига.
+
+    Поиск по uuid вместо ника — если ники у вас меняются:
+    ```json
+    "skinConfig": {
+      "driver": "postgres",
+      "dsn": "postgres://laminara:пароль@127.0.0.1:5432/site?sslmode=disable",
+      "table": "users",
+      "lookup": "uuid",
+      "fields": { "uuid": "uuid", "skin": "skin", "cape": "cape" }
+    }
+    ```
+
+    Если текстуры лежат отдельно от аккаунтов, задайте `query` вместо `table` и `fields` —
+    выборка возвращает скин, затем (необязательно) плащ и модель, а единственный параметр
+    подставляется по `lookup`:
     ```json
     "skinConfig": {
       "driver": "mariadb",
@@ -79,8 +206,19 @@ Yggdrasil поднимается на том же публичном порту,
       "query": "SELECT skin, cape FROM textures WHERE uuid = ?"
     }
     ```
-    Пользователю базы достаточно `SELECT` на эти колонки — записывать Laminara ничего не будет.
-    Игрок без скина не считается ошибкой: профиль просто отдаётся без текстур.
+
+    Запрос может собирать ссылку на лету, если в базе лежит только имя файла:
+    ```json
+    "skinConfig": {
+      "driver": "mariadb",
+      "dsn": "…",
+      "query": "SELECT CONCAT('https://cdn.example.com/skins/', file), NULL, model FROM textures WHERE nick = ?"
+    }
+    ```
+
+    `driver` — `mariadb`, `mysql`, `postgres` или `sqlite`. В `postgres` параметр пишется как `$1`,
+    в остальных — `?`. Пользователю базы достаточно `SELECT` на эти колонки: записывать Laminara
+    ничего не будет. Игрок без скина не считается ошибкой — профиль просто отдаётся без текстур.
   </TabItem>
 </Tabs>
 

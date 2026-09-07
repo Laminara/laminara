@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -63,6 +64,7 @@ func newSQL(raw json.RawMessage) (Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	tunePool(db)
 	if cfg.Query != "" {
 		return &sqlProvider{db: db, query: cfg.Query, byUUID: byUUID, slim: cfg.Slim, capePos: 1, modelPos: 2}, nil
 	}
@@ -156,4 +158,11 @@ func lookupByUUID(name string) (bool, error) {
 	default:
 		return false, fmt.Errorf("unsupported skin lookup %q", name)
 	}
+}
+
+func tunePool(db *sql.DB) {
+	db.SetConnMaxLifetime(3 * time.Minute)
+	db.SetConnMaxIdleTime(time.Minute)
+	db.SetMaxIdleConns(4)
+	db.SetMaxOpenConns(16)
 }

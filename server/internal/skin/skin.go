@@ -48,5 +48,6 @@ func substitute(template, username, uuid string) string {
 		"%nickname%", username,
 		"%username%", username,
 		"%uuid%", uuid,
+		"%hash%", strings.ReplaceAll(uuid, "-", ""),
 	).Replace(template)
 }
