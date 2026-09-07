@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"path/filepath"
 
 	"google.golang.org/protobuf/proto"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
+	"github.com/laminara/laminara/server/internal/authlib"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -42,6 +44,7 @@ func checkPublished(ctx context.Context, opts Options, probe *diag.Probe) {
 		if !checkManifest(ctx, opts, probe, name) {
 			broken++
 		}
+		checkAuthlib(opts, probe, name)
 	}
 	if broken == 0 {
 		probe.OK("файлы сборок", "на месте")
@@ -114,4 +117,18 @@ func checkObjects(ctx context.Context, opts Options, probe *diag.Probe, name str
 	}
 	probe.OK("сборка "+name, "выборка из %d файлов на месте, всего %s", checked, humanize.Bytes(parsed.TotalSize))
 	return true
+}
+
+func checkAuthlib(opts Options, probe *diag.Probe, name string) {
+	if opts.Config.Build == nil || opts.Config.Build.ProfilesDir == "" {
+		return
+	}
+	dir := filepath.Join(opts.Config.Build.ProfilesDir, name)
+	if authlib.Present(dir) {
+		return
+	}
+	probe.Fail("вход в игре: "+name, fmt.Sprintf("в сборке нет %s", authlib.FileName), diag.Remedy{
+		Hint:    "без него игра не сможет войти на сервер; сервер добавляет этот файл сам при подготовке — пересоберите сборку и опубликуйте заново",
+		Command: fmt.Sprintf("laminara-server exec \"install %s\"", name),
+	})
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/laminara/laminara/server/internal/authlib"
 	"github.com/laminara/laminara/server/internal/jre"
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -144,7 +146,24 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	if err := manifest.SetLoader(opts.ProfileDir, loaderName); err != nil {
 		return nil, err
 	}
+	if err := p.ensureAuthlib(ctx, opts.ProfileDir); err != nil {
+		return nil, err
+	}
 	return profile, nil
+}
+
+func (p *Preparer) ensureAuthlib(ctx context.Context, dir string) error {
+	progress.Phase(ctx, "Вход в игре")
+	version, err := authlib.Ensure(ctx, p.http, dir, func(ctx context.Context, url, dest, sha1 string) error {
+		return downloadFile(ctx, p.http, url, dest, sha1, false)
+	})
+	if err != nil {
+		return fmt.Errorf("не удалось получить %s, без него игрок не войдёт на сервер: %w", authlib.FileName, err)
+	}
+	if version != "" {
+		slog.Info("authlib-injector добавлен в сборку", "source", "build", "версия", version)
+	}
+	return nil
 }
 
 func (p *Preparer) runInstaller(ctx context.Context, opts Options, mcVersion, javaComponent, clientJarPath string) (*loader.InstallResult, error) {
