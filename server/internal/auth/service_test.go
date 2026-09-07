@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -89,5 +90,45 @@ func TestLogoutRevokes(t *testing.T) {
 	}
 	if _, err := svc.ValidateAccess(ctx, tokens.Access); !errors.Is(err, auth.ErrInvalidToken) {
 		t.Fatalf("access after logout should fail, got %v", err)
+	}
+}
+
+type brokenProvider struct{}
+
+func (brokenProvider) Authenticate(context.Context, auth.Credentials) (auth.Identity, error) {
+	return auth.Identity{}, errors.New("write: broken pipe")
+}
+
+type brokenSessions struct {
+	auth.SessionStore
+}
+
+func (brokenSessions) Create(context.Context, *auth.Session) error {
+	return errors.New("write: broken pipe")
+}
+
+func TestUnreachableSourceIsNotAWrongPassword(t *testing.T) {
+	svc := auth.NewService(brokenProvider{}, auth.NewMemorySessionStore(), auth.DefaultConfig())
+	_, err := svc.Login(context.Background(), "neo", "matrix", "")
+	if errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatal("сломанный источник аккаунтов выдаётся за неверный пароль")
+	}
+	if !errors.Is(err, auth.ErrSourceUnavailable) {
+		t.Fatalf("ждали ErrSourceUnavailable, получили %v", err)
+	}
+	if !strings.Contains(err.Error(), "broken pipe") {
+		t.Fatalf("исходная причина потерялась: %v", err)
+	}
+}
+
+func TestUnreachableSessionsAreNamed(t *testing.T) {
+	provider := stubProvider{users: map[string]string{"neo": "matrix"}}
+	svc := auth.NewService(provider, brokenSessions{auth.NewMemorySessionStore()}, auth.DefaultConfig())
+	_, err := svc.Login(context.Background(), "neo", "matrix", "")
+	if !errors.Is(err, auth.ErrSessionsUnavailable) {
+		t.Fatalf("ждали ErrSessionsUnavailable, получили %v", err)
+	}
+	if errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatal("недоступное хранилище сессий выдаётся за неверный пароль")
 	}
 }

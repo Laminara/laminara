@@ -87,6 +87,19 @@ func Handler(service *Service, backend storage.Backend, xAccel bool) http.Handle
 	return mux
 }
 
+var errSignInUnavailable = errors.New("сервер входа сейчас недоступен, попробуйте позже")
+
+func brokenPart(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrSourceUnavailable):
+		return "источник аккаунтов"
+	case errors.Is(err, auth.ErrSessionsUnavailable):
+		return "хранилище сессий"
+	default:
+		return ""
+	}
+}
+
 func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginRequest]) (*connect.Response[apiv1.LoginResponse], error) {
 	if s.auth == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("auth is not configured"))
@@ -99,6 +112,15 @@ func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginReq
 	if err != nil {
 		if errors.Is(err, auth.ErrTwoFactorRequired) {
 			return nil, twoFactorError()
+		}
+		if broken := brokenPart(err); broken != "" {
+			s.log.Error("вход не дошёл до проверки пароля",
+				"source", "api",
+				"кто", req.Msg.Username,
+				"что не отвечает", broken,
+				"ошибка", err,
+			)
+			return nil, connect.NewError(connect.CodeUnavailable, errSignInUnavailable)
 		}
 		s.limits.SignInFailed(ctx, address, req.Msg.Username)
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,10 +55,10 @@ func (s *Service) Verify(ctx context.Context, username, password, twoFactorCode 
 func (s *Service) Login(ctx context.Context, username, password, twoFactorCode string) (*Tokens, error) {
 	identity, err := s.provider.Authenticate(ctx, Credentials{Username: username, Password: password, TwoFactorCode: twoFactorCode})
 	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) {
-			return nil, ErrInvalidCredentials
+		if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrTwoFactorRequired) {
+			return nil, err
 		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrSourceUnavailable, err)
 	}
 	return s.issue(ctx, identity)
 }
@@ -147,7 +148,7 @@ func (s *Service) issue(ctx context.Context, identity Identity) (*Tokens, error)
 		ExpiresAt:        now.Add(s.cfg.RefreshTTL),
 	}
 	if err := s.sessions.Create(ctx, session); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrSessionsUnavailable, err)
 	}
 	return &Tokens{
 		Access:         accessToken,

@@ -2,6 +2,7 @@ package authsetup
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -39,7 +40,11 @@ func buildSessions(cfg *config.AuthConfig) (auth.SessionStore, error) {
 		if cfg.RefreshTTL > 0 {
 			ttl = cfg.RefreshTTL.Duration()
 		}
-		client := redis.NewClient(&redis.Options{Addr: cfg.Sessions.RedisAddr})
+		client := redis.NewClient(&redis.Options{
+			Addr:            cfg.Sessions.RedisAddr,
+			ConnMaxIdleTime: time.Minute,
+			ConnMaxLifetime: 3 * time.Minute,
+		})
 		return redisstore.NewSessionStore(client, ttl), nil
 	default:
 		return nil, fmt.Errorf("unknown session backend %q", cfg.Sessions.Backend)

@@ -12,6 +12,9 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrTwoFactorRequired  = errors.New("two-factor code required")
+
+	ErrSourceUnavailable   = errors.New("источник аккаунтов недоступен")
+	ErrSessionsUnavailable = errors.New("хранилище сессий недоступно")
 )
 
 type Provider interface {

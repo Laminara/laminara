@@ -64,7 +64,11 @@ func New(cfg *Config) (*Guard, error) {
 		if resolved.RedisAddr == "" {
 			return nil, fmt.Errorf("rateLimit.backend is redis but rateLimit.redisAddr is empty")
 		}
-		client := redis.NewClient(&redis.Options{Addr: resolved.RedisAddr})
+		client := redis.NewClient(&redis.Options{
+			Addr:            resolved.RedisAddr,
+			ConnMaxIdleTime: time.Minute,
+			ConnMaxLifetime: 3 * time.Minute,
+		})
 		build = func(bucket Bucket) Limiter { return NewRedisLimiter(client, bucket.Limit, bucket.Per.Duration()) }
 	default:
 		return nil, fmt.Errorf("unknown rateLimit.backend %q (want memory or redis)", resolved.Backend)

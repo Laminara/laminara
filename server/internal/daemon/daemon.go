@@ -319,7 +319,18 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 		registered, known := d.registry.Lookup(name)
 		quiet := known && (registered.Secret || registered.SecretArgs)
 		var out bytes.Buffer
-		if err := d.registry.Dispatch(ctx, line, &out); err != nil {
+		err := d.registry.Dispatch(ctx, line, &out)
+		reply := strings.TrimRight(out.String(), "\n")
+		switch {
+		case known && registered.Secret && reply != "":
+			fmt.Fprintln(d.console, reply)
+			d.log.Info("ответ секретной команды показан в терминале", "source", "console", "command", name)
+		case !(known && registered.Secret) && reply != "":
+			for _, line := range strings.Split(reply, "\n") {
+				d.log.Info(line, "source", "console")
+			}
+		}
+		if err != nil {
 			if quiet {
 				d.log.Error("command failed", "source", "console", "command", name, "error", err)
 			} else {
@@ -327,20 +338,8 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 			}
 			continue
 		}
-		reply := strings.TrimRight(out.String(), "\n")
 		if known && registered.Secret {
 			d.log.Info("command succeeded", "source", "console", "command", name)
-			if reply != "" {
-				fmt.Fprintln(d.console, reply)
-				d.log.Info("ответ секретной команды показан в терминале", "source", "console", "command", name)
-			}
-			continue
-		}
-		if reply == "" {
-			continue
-		}
-		for _, line := range strings.Split(reply, "\n") {
-			d.log.Info(line, "source", "console")
 		}
 	}
 }

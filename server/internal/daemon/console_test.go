@@ -150,3 +150,27 @@ func TestSecretCommandFailureKeepsTheTypedLineOutOfTheJournal(t *testing.T) {
 		t.Fatalf("the journal must name the command and the reason: %s", journal.String())
 	}
 }
+
+func TestFailedCommandStillShowsItsOutput(t *testing.T) {
+	daemon := New(Options{})
+	var journal bytes.Buffer
+	daemon.log = slog.New(slog.NewTextHandler(&journal, nil))
+	daemon.console = &bytes.Buffer{}
+	daemon.registry.Register(command.Command{
+		Name: "doctor",
+		Run: func(_ context.Context, _ []string, out io.Writer) error {
+			fmt.Fprintln(out, "плохо  хранилище  не отвечает")
+			return errors.New("проверка нашла то, из-за чего сервер не работает как надо")
+		},
+	})
+
+	daemon.dispatchLines(context.Background(), strings.NewReader("doctor\n"))
+
+	written := journal.String()
+	if !strings.Contains(written, "не отвечает") {
+		t.Fatalf("отчёт команды потерялся, в журнале только: %s", written)
+	}
+	if !strings.Contains(written, "command failed") {
+		t.Fatalf("ошибка команды не записана: %s", written)
+	}
+}

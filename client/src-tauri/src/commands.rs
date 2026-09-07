@@ -166,6 +166,22 @@ fn player_message(error: &laminara_core::CoreError) -> String {
                     "Слишком много попыток. Подождите несколько минут",
                 ),
                 ("session expired", "Сессия истекла, войдите заново"),
+                (
+                    "broken pipe",
+                    "Сервер входа сейчас недоступен. Попробуйте позже",
+                ),
+                (
+                    "connection reset",
+                    "Сервер входа сейчас недоступен. Попробуйте позже",
+                ),
+                (
+                    "connection refused",
+                    "Сервер входа сейчас недоступен. Попробуйте позже",
+                ),
+                (
+                    "i/o timeout",
+                    "Сервер входа сейчас недоступен. Попробуйте позже",
+                ),
             ] {
                 if message.to_lowercase().contains(sentinel) {
                     return russian.into();
