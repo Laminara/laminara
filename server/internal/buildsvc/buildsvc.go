@@ -324,6 +324,14 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	if layout.flat && (len(targets) > 1 || !samePlatformAsFlat(layout, targets[0])) {
 		return fmt.Errorf("сборка «%s» сделана по старой схеме с одной платформой — удалите её и соберите заново, чтобы добавить платформы", name)
 	}
+	if !layout.flat && !layout.shared && len(layout.platforms) > 0 {
+		freed, err := shareCommonFiles(filepath.Join(s.profilesDir, name), layout.platforms)
+		if err != nil {
+			return fmt.Errorf("не вышло свести общие файлы платформ в одну папку: %w", err)
+		}
+		fmt.Fprintf(out, "Общие файлы платформ сведены в одну папку, освобождено %s.\n", humanize.Bytes(freed))
+		layout = s.layout(name)
+	}
 
 	var failures []string
 	for _, target := range targets {
@@ -334,13 +342,15 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 			continue
 		}
 
-		profileDir := filepath.Join(s.profilesDir, name, key)
+		placed := sharedPlacement(filepath.Join(s.profilesDir, name), target)
 		if layout.flat {
-			profileDir = filepath.Join(s.profilesDir, name)
+			root := filepath.Join(s.profilesDir, name)
+			placed = placement{shared: root, platform: root}
 		}
 		fmt.Fprintf(out, "Собираю «%s»: Minecraft %s, загрузчик %s %s, платформа %s…\n", name, id, buildview.LoaderWord(loaderName), loaderVersion, key)
 		if _, err := s.preparer.Prepare(ctx, prepare.Options{
-			ProfileDir:    profileDir,
+			ProfileDir:    placed.shared,
+			PlatformDir:   placed.platform,
 			VersionURL:    versionURL,
 			OS:            goos,
 			Arch:          arch,
@@ -361,7 +371,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 				return err
 			}
 		}
-		fmt.Fprintf(out, "Готово: %s\n", profileDir)
+		fmt.Fprintf(out, "Готово: %s\n", placed.platform)
 	}
 	prepared := s.layout(name)
 	if !prepared.exists() {
@@ -374,7 +384,9 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	if prepared.flat {
 		fmt.Fprintf(out, "Правьте сборку в %s, потом опубликуйте: publish %s\n", prepared.root, name)
 	} else {
-		fmt.Fprintf(out, "Настройки сборки — в %s, моды и файлы — в папке каждой платформы. Потом опубликуйте: publish %s\n", filepath.Join(s.profilesDir, name, manifest.SettingsFileName), name)
+		fmt.Fprintf(out, "Моды и файлы кладите в %s — они пойдут на все платформы.\n", prepared.root)
+		fmt.Fprintf(out, "Что нужно только одной платформе — в %s.\n", filepath.Join(prepared.root, platformsDir, "<платформа>"))
+		fmt.Fprintf(out, "Настройки сборки — в %s. Потом опубликуйте: publish %s\n", filepath.Join(prepared.root, manifest.SettingsFileName), name)
 	}
 	return nil
 }
@@ -436,8 +448,10 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 		variants = []corev1.Platform{corev1.Platform_PLATFORM_UNSPECIFIED}
 	}
 	for _, variant := range variants {
-		dir, settingsRoot := layout.dir(variant)
-		published, err := prepare.PublishVariant(ctx, s.cas, s.signer, dir, settingsRoot, name, "1", variant)
+		placed := layout.place(variant)
+		published, err := prepare.PublishPlatform(ctx, s.cas, s.signer,
+			manifest.Sources{Shared: placed.shared, Platform: placed.platform},
+			layout.root, name, "1", variant)
 		if err != nil {
 			return err
 		}

@@ -22,7 +22,18 @@ func PublishVariant(
 	profileDir, settingsRoot, name, version string,
 	platform corev1.Platform,
 ) (*Published, error) {
-	built, err := manifest.NewBuilder(cas).BuildVariant(ctx, profileDir, settingsRoot, name, version, platform)
+	return PublishPlatform(ctx, cas, signer, manifest.Sources{Shared: profileDir, Platform: profileDir}, settingsRoot, name, version, platform)
+}
+
+func PublishPlatform(
+	ctx context.Context,
+	cas *storage.CAS,
+	signer *manifest.Signer,
+	sources manifest.Sources,
+	settingsRoot, name, version string,
+	platform corev1.Platform,
+) (*Published, error) {
+	built, err := manifest.NewBuilder(cas).BuildPlatform(ctx, sources, settingsRoot, name, version, platform)
 	if err != nil {
 		return nil, err
 	}

@@ -58,56 +58,91 @@ func (b *Builder) Build(ctx context.Context, root, modpack, version string) (*co
 }
 
 func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack, version string, platform corev1.Platform) (*corev1.Manifest, error) {
+	return b.BuildPlatform(ctx, Sources{Shared: root, Platform: root}, settingsRoot, modpack, version, platform)
+}
+
+type Sources struct {
+	Shared   string
+	Platform string
+}
+
+func (b *Builder) BuildPlatform(ctx context.Context, sources Sources, settingsRoot, modpack, version string, platform corev1.Platform) (*corev1.Manifest, error) {
 	settings, err := LoadSettings(settingsRoot)
 	if err != nil {
 		return nil, err
 	}
 
-	var files []*corev1.ManifestFile
-	var total uint64
+	needed := neededLibraries(sources.Platform, settings)
+	collected := map[string]*corev1.ManifestFile{}
+	var order []string
 	var indexed int
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			if d.Name() == internalDir {
-				return filepath.SkipDir
+
+	take := func(root string, skipShared bool) error {
+		return filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
+			if d.IsDir() {
+				if d.Name() == internalDir {
+					return filepath.SkipDir
+				}
+				if skipShared && p != root && d.Name() == platformsDirName && filepath.Dir(p) == root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if d.Name() == SettingsFileName {
+				return nil
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			slashPath := filepath.ToSlash(rel)
+			if skipShared && needed != nil && strings.HasPrefix(slashPath, librariesDir+"/") && !needed[slashPath] {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			ref, err := b.cas.PutFile(ctx, p)
+			if err != nil {
+				return err
+			}
+			if _, seen := collected[slashPath]; !seen {
+				order = append(order, slashPath)
+			}
+			collected[slashPath] = &corev1.ManifestFile{
+				Path:       slashPath,
+				Object:     ref,
+				Executable: info.Mode()&0o111 != 0,
+				Policy:     pathpolicy.Resolve(slashPath, settings.UserWritable, settings.Enforced),
+			}
+			indexed++
+			progress.Report(ctx, progress.Event{
+				Phase:   "Индексация файлов",
+				Message: humanize.Count(indexed, "файл", "файла", "файлов"),
+			})
 			return nil
-		}
-		if d.Name() == SettingsFileName {
-			return nil
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		ref, err := b.cas.PutFile(ctx, p)
-		if err != nil {
-			return err
-		}
-		slashPath := filepath.ToSlash(rel)
-		files = append(files, &corev1.ManifestFile{
-			Path:       slashPath,
-			Object:     ref,
-			Executable: info.Mode()&0o111 != 0,
-			Policy:     pathpolicy.Resolve(slashPath, settings.UserWritable, settings.Enforced),
 		})
-		total += ref.Size
-		indexed++
-		progress.Report(ctx, progress.Event{
-			Phase:   "Индексация файлов",
-			Message: humanize.Count(indexed, "файл", "файла", "файлов"),
-		})
-		return nil
-	})
-	if err != nil {
+	}
+
+	if err := take(sources.Shared, true); err != nil {
 		return nil, err
+	}
+	if sources.Platform != sources.Shared {
+		if err := take(sources.Platform, false); err != nil {
+			return nil, err
+		}
+	}
+
+	files := make([]*corev1.ManifestFile, 0, len(order))
+	var total uint64
+	for _, path := range order {
+		file := collected[path]
+		files = append(files, file)
+		total += file.Object.Size
 	}
 	if err := validatePolicies(files); err != nil {
 		return nil, err
@@ -131,7 +166,7 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		return nil, err
 	}
 
-	launch := readLaunchProfile(root)
+	launch := readLaunchProfile(sources.Platform)
 
 	return &corev1.Manifest{
 		SchemaVersion:        SchemaVersion,
@@ -154,4 +189,23 @@ func (b *Builder) BuildVariant(ctx context.Context, root, settingsRoot, modpack,
 		ClasspathExclude:     settings.ClasspathExclude,
 		MainClass:            settings.MainClass,
 	}, nil
+}
+
+const (
+	platformsDirName = "platforms"
+	librariesDir     = "libraries"
+)
+
+func neededLibraries(platformDir string, settings Settings) map[string]bool {
+	launch := readLaunchProfile(platformDir)
+	needed := make(map[string]bool, len(launch.Classpath)+len(launch.Natives))
+	for _, group := range [][]string{launch.Classpath, launch.Natives, settings.Classpath} {
+		for _, path := range group {
+			needed[path] = true
+		}
+	}
+	if len(needed) == 0 {
+		return nil
+	}
+	return needed
 }

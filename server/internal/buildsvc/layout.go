@@ -9,10 +9,18 @@ import (
 	"github.com/laminara/laminara/server/internal/platform"
 )
 
+const platformsDir = "platforms"
+
 type buildLayout struct {
 	root      string
 	flat      bool
+	shared    bool
 	platforms []corev1.Platform
+}
+
+type placement struct {
+	shared   string
+	platform string
 }
 
 func (s *Service) layout(name string) buildLayout {
@@ -22,10 +30,21 @@ func (s *Service) layout(name string) buildLayout {
 		layout.flat = true
 		return layout
 	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
+	if found := platformsUnder(filepath.Join(root, platformsDir)); len(found) > 0 {
+		layout.shared = true
+		layout.platforms = found
 		return layout
 	}
+	layout.platforms = platformsUnder(root)
+	return layout
+}
+
+func platformsUnder(dir string) []corev1.Platform {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []corev1.Platform
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -34,22 +53,35 @@ func (s *Service) layout(name string) buildLayout {
 		if !ok {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(root, entry.Name(), manifest.LaunchProfileName)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, entry.Name(), manifest.LaunchProfileName)); err != nil {
 			continue
 		}
-		layout.platforms = append(layout.platforms, p)
+		found = append(found, p)
 	}
-	return layout
+	return found
 }
 
 func (l buildLayout) exists() bool {
 	return l.flat || len(l.platforms) > 0
 }
 
-func (l buildLayout) dir(p corev1.Platform) (string, string) {
+func (l buildLayout) place(p corev1.Platform) placement {
 	if l.flat {
-		return l.root, l.root
+		return placement{shared: l.root, platform: l.root}
 	}
 	key, _ := platform.Key(p)
-	return filepath.Join(l.root, key), l.root
+	if l.shared {
+		return placement{shared: l.root, platform: filepath.Join(l.root, platformsDir, key)}
+	}
+	return placement{shared: filepath.Join(l.root, key), platform: filepath.Join(l.root, key)}
+}
+
+func (l buildLayout) dir(p corev1.Platform) (string, string) {
+	placed := l.place(p)
+	return placed.platform, l.root
+}
+
+func sharedPlacement(root string, p corev1.Platform) placement {
+	key, _ := platform.Key(p)
+	return placement{shared: root, platform: filepath.Join(root, platformsDir, key)}
 }

@@ -53,6 +53,7 @@ func NewPreparerWith(httpClient *http.Client, assetsBaseURL, jreAllURL string, w
 
 type Options struct {
 	ProfileDir    string
+	PlatformDir   string
 	VersionURL    string
 	OS            string
 	Arch          string
@@ -63,6 +64,9 @@ type Options struct {
 }
 
 func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile, error) {
+	if opts.PlatformDir == "" {
+		opts.PlatformDir = opts.ProfileDir
+	}
 	progress.Phase(ctx, "Метаданные версии")
 	detail, err := p.mojang.FetchVersion(ctx, opts.VersionURL)
 	if err != nil {
@@ -113,7 +117,7 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	if err := p.downloadAssets(ctx, opts.ProfileDir, profile.AssetIndexID, profile.AssetIndexURL); err != nil {
 		return nil, err
 	}
-	javaBin, err := p.downloadRuntime(ctx, opts.ProfileDir, opts.PlatformKey, javaComponent)
+	javaBin, err := p.downloadRuntime(ctx, opts.PlatformDir, opts.PlatformKey, javaComponent)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +148,7 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 }
 
 func (p *Preparer) runInstaller(ctx context.Context, opts Options, mcVersion, javaComponent, clientJarPath string) (*loader.InstallResult, error) {
-	javaBin, err := p.serverJavaBin(ctx, opts.ProfileDir, javaComponent)
+	javaBin, err := p.serverJavaBin(ctx, opts.PlatformDir, javaComponent)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +286,10 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(opts.ProfileDir, manifest.LaunchProfileName), data, 0o644)
+	if err := os.MkdirAll(opts.PlatformDir, 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(opts.PlatformDir, manifest.LaunchProfileName), data, 0o644)
 }
 
 func mergeUnique(base, extra []string) []string {
