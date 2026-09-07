@@ -176,7 +176,7 @@ func New(opts Options) *Daemon {
 		d.moduleLoader.Subscribe(opts.Events)
 	}
 	if err := runtime.Registry.Load(module.CommandHost{Registry: registry}); err != nil {
-		log.Error("module load failed", "error", err)
+		log.Error("модуль не загрузился", "ошибка", err)
 	}
 	d.modules = runtime.Registry
 	return d
@@ -247,11 +247,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.watchUpdates(ctx)
 	go d.launcher.Catch(ctx, d.log)
 
-	d.log.Info("laminara-server started",
+	d.log.Info("сервер запущен",
 		"source", "daemon",
-		"version", version.Current,
-		"socket", control.SocketPath(),
-		"api", d.publicAddr,
+		"версия", version.Current,
+		"сокет", control.SocketPath(),
+		"адрес", d.publicAddr,
 	)
 	_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
 
@@ -273,7 +273,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return stop("shutting down", shutdownTimeout)
+		return stop("останавливаюсь", shutdownTimeout)
 	case <-d.quit:
 		if err := stop("перезапускаюсь с новыми настройками", restartTimeout); err != nil {
 			d.log.Info("закрыл открытые подключения", "source", "daemon")
@@ -321,25 +321,20 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 		var out bytes.Buffer
 		err := d.registry.Dispatch(ctx, line, &out)
 		reply := strings.TrimRight(out.String(), "\n")
-		switch {
-		case known && registered.Secret && reply != "":
+		if reply != "" {
 			fmt.Fprintln(d.console, reply)
-			d.log.Info("ответ секретной команды показан в терминале", "source", "console", "command", name)
-		case !(known && registered.Secret) && reply != "":
-			for _, line := range strings.Split(reply, "\n") {
-				d.log.Info(line, "source", "console")
-			}
+			d.bus.Echo(reply)
 		}
 		if err != nil {
+			shown := line
 			if quiet {
-				d.log.Error("command failed", "source", "console", "command", name, "error", err)
-			} else {
-				d.log.Error("command failed", "source", "console", "command", line, "error", err)
+				shown = name
 			}
+			d.log.Error(fmt.Sprintf("%s: %v", shown, err), "source", "console")
 			continue
 		}
 		if known && registered.Secret {
-			d.log.Info("command succeeded", "source", "console", "command", name)
+			d.log.Info("команда выполнена", "source", "console", "команда", name)
 		}
 	}
 }

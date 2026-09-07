@@ -3,13 +3,14 @@ package cli
 import (
 	"fmt"
 	"io"
-	"sort"
+	"log/slog"
 	"strings"
 	"time"
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
 	"github.com/laminara/laminara/server/internal/control"
+	"github.com/laminara/laminara/server/internal/logbus"
 )
 
 func adminClient() adminv1connect.AdminServiceClient {
@@ -47,19 +48,24 @@ func levelName(level adminv1.LogLevel) string {
 }
 
 func writeLine(w io.Writer, line *adminv1.LogLine) {
-	timestamp := time.Unix(0, line.TimeUnixNanos).Format("15:04:05")
-	source := line.Source
-	if source == "" {
-		source = "-"
+	fmt.Fprintln(w, logbus.Render(logbus.Line{
+		Time:    time.Unix(0, line.TimeUnixNanos),
+		Level:   levelOf(line.Level),
+		Source:  line.Source,
+		Message: line.Message,
+		Fields:  line.Fields,
+	}, logbus.ColorAllowed(), false))
+}
+
+func levelOf(level adminv1.LogLevel) slog.Level {
+	switch level {
+	case adminv1.LogLevel_LOG_LEVEL_DEBUG:
+		return slog.LevelDebug
+	case adminv1.LogLevel_LOG_LEVEL_WARN:
+		return slog.LevelWarn
+	case adminv1.LogLevel_LOG_LEVEL_ERROR:
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
-	fmt.Fprintf(w, "%s %-5s %s: %s", timestamp, levelName(line.Level), source, line.Message)
-	keys := make([]string, 0, len(line.Fields))
-	for k := range line.Fields {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		fmt.Fprintf(w, " %s=%s", k, line.Fields[k])
-	}
-	fmt.Fprintln(w)
 }

@@ -6,12 +6,13 @@ import (
 	"os"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/logbus"
 	"github.com/laminara/laminara/server/internal/logfile"
 )
 
-func logSink(cfg *config.LogConfig) (io.Writer, io.Closer) {
+func logTargets(cfg *config.LogConfig) ([]logbus.Target, io.Closer) {
 	if cfg == nil || cfg.File == "" {
-		return os.Stdout, nil
+		return []logbus.Target{logbus.Stdout()}, nil
 	}
 
 	writer, err := logfile.Open(logfile.Options{
@@ -22,7 +23,7 @@ func logSink(cfg *config.LogConfig) (io.Writer, io.Closer) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "журнал пишется только в консоль: файл %s открыть не удалось (%v)\n", cfg.File, err)
-		return os.Stdout, nil
+		return []logbus.Target{logbus.Stdout()}, nil
 	}
-	return io.MultiWriter(os.Stdout, writer), writer
+	return []logbus.Target{logbus.Stdout(), logbus.Plain(writer)}, writer
 }

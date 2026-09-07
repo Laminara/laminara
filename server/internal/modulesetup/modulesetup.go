@@ -29,9 +29,9 @@ func Build(cfg *config.ModulesConfig, log *slog.Logger) *Runtime {
 		configs[name] = raw
 	}
 	runtime.Loader = remote.NewLoader(log)
-	log.Info("ищу модули", "source", "module", "dir", cfg.Dir)
+	log.Debug("ищу модули", "source", "module", "папка", cfg.Dir)
 	if err := runtime.Loader.LoadDir(cfg.Dir, configs, registry); err != nil {
-		log.Error("modules dir scan failed", "dir", cfg.Dir, "error", err)
+		log.Error("папку модулей прочитать не вышло", "папка", cfg.Dir, "ошибка", err)
 	}
 	return runtime
 }

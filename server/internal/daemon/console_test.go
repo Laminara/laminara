@@ -102,15 +102,17 @@ func TestSecretCommandAnswersTheOperatorNotTheJournal(t *testing.T) {
 	if strings.Contains(journal.String(), "TOPSECRET") {
 		t.Fatalf("the answer must stay out of the journal: %s", journal.String())
 	}
-	if !strings.Contains(journal.String(), "command=auth") || !strings.Contains(journal.String(), "command succeeded") {
+	if !strings.Contains(journal.String(), "команда=auth") || !strings.Contains(journal.String(), "команда выполнена") {
 		t.Fatalf("the journal must keep the fact of the run: %s", journal.String())
 	}
 }
 
-func TestPlainCommandStillAnswersThroughTheJournal(t *testing.T) {
+func TestPlainCommandAnswersWithoutJournalDressing(t *testing.T) {
 	daemon := quietDaemon()
 	journal := &bytes.Buffer{}
 	daemon.log = slog.New(slog.NewTextHandler(journal, nil))
+	console := &bytes.Buffer{}
+	daemon.console = console
 	daemon.registry.Register(command.Command{
 		Name: "status",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
@@ -121,11 +123,11 @@ func TestPlainCommandStillAnswersThroughTheJournal(t *testing.T) {
 
 	daemon.dispatchLines(context.Background(), strings.NewReader("status\n"))
 
-	if !strings.Contains(journal.String(), "версия 1.2.3") {
-		t.Fatalf("a plain answer belongs in the journal: %s", journal.String())
+	if strings.TrimSpace(console.String()) != "версия 1.2.3" {
+		t.Fatalf("ответ команды должен печататься как есть, получили %q", console.String())
 	}
-	if console, ok := daemon.console.(*bytes.Buffer); ok && console.Len() != 0 {
-		t.Fatalf("a plain answer must not bypass the journal: %q", console.String())
+	if strings.Contains(journal.String(), "версия 1.2.3") {
+		t.Fatalf("ответ команды не должен обёртываться в строку журнала: %s", journal.String())
 	}
 }
 
@@ -146,16 +148,17 @@ func TestSecretCommandFailureKeepsTheTypedLineOutOfTheJournal(t *testing.T) {
 	if strings.Contains(journal.String(), "password123") {
 		t.Fatalf("the typed line must stay out of the journal: %s", journal.String())
 	}
-	if !strings.Contains(journal.String(), "command=auth") || !strings.Contains(journal.String(), "пароль не подошёл") {
+	if !strings.Contains(journal.String(), "auth") || !strings.Contains(journal.String(), "пароль не подошёл") {
 		t.Fatalf("the journal must name the command and the reason: %s", journal.String())
 	}
 }
 
 func TestFailedCommandStillShowsItsOutput(t *testing.T) {
-	daemon := New(Options{})
+	daemon := quietDaemon()
 	var journal bytes.Buffer
 	daemon.log = slog.New(slog.NewTextHandler(&journal, nil))
-	daemon.console = &bytes.Buffer{}
+	console := &bytes.Buffer{}
+	daemon.console = console
 	daemon.registry.Register(command.Command{
 		Name: "doctor",
 		Run: func(_ context.Context, _ []string, out io.Writer) error {
@@ -166,11 +169,10 @@ func TestFailedCommandStillShowsItsOutput(t *testing.T) {
 
 	daemon.dispatchLines(context.Background(), strings.NewReader("doctor\n"))
 
-	written := journal.String()
-	if !strings.Contains(written, "не отвечает") {
-		t.Fatalf("отчёт команды потерялся, в журнале только: %s", written)
+	if !strings.Contains(console.String(), "не отвечает") {
+		t.Fatalf("отчёт команды потерялся: %q", console.String())
 	}
-	if !strings.Contains(written, "command failed") {
-		t.Fatalf("ошибка команды не записана: %s", written)
+	if !strings.Contains(journal.String(), "проверка нашла") {
+		t.Fatalf("причина ошибки не записана: %s", journal.String())
 	}
 }

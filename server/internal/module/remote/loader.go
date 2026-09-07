@@ -67,7 +67,7 @@ func (l *Loader) LoadDir(dir string, configs map[string][]byte, registry *module
 			continue
 		}
 		if err := l.load(path, configs[entry.Name()], registry); err != nil {
-			l.log.Error("module load failed", "path", path, "error", err)
+			l.log.Error("модуль не загрузился", "файл", path, "ошибка", err)
 		}
 	}
 	return nil
@@ -126,7 +126,7 @@ func (l *Loader) load(path string, config []byte, registry *module.Registry) err
 		})
 	}
 	l.registerProviders(manifest.Info.Name, manifest.Providers, svc)
-	l.log.Info("module loaded",
+	l.log.Info("модуль загружен",
 		"name", manifest.Info.Name,
 		"version", manifest.Info.Version,
 		"commands", len(manifest.Commands),
@@ -152,7 +152,7 @@ func (l *Loader) Subscribe(bus *events.Bus) {
 			case target.queue <- e:
 			case <-l.done:
 			default:
-				l.log.Warn("module event queue full, dropping", "module", target.name, "topic", e.Topic)
+				l.log.Warn("очередь событий модуля переполнена, событие потеряно", "модуль", target.name, "событие", e.Topic)
 			}
 		}
 	})
@@ -173,10 +173,10 @@ func (l *Loader) dispatch(target *eventTarget, e events.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), eventDispatchTimeout)
 	defer cancel()
 	if err := target.svc.Emit(ctx, e.Topic, e.Data); err != nil {
-		l.log.Error("module event dispatch failed", "module", target.name, "topic", e.Topic, "error", err)
+		l.log.Error("модуль не принял событие", "модуль", target.name, "событие", e.Topic, "ошибка", err)
 		return
 	}
-	l.log.Info("module event dispatched", "module", target.name, "topic", e.Topic)
+	l.log.Debug("событие доставлено модулю", "модуль", target.name, "событие", e.Topic)
 }
 
 func (l *Loader) Close() {

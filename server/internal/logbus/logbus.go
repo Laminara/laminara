@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,21 +80,26 @@ func (b *Bus) Subscribe(backscroll int) (history []Line, live chan Line, cancel 
 }
 
 type Handler struct {
-	inner slog.Handler
+	out   *printer
+	level slog.Leveler
 	bus   *Bus
 	attrs []slog.Attr
 	group string
 }
 
 func NewHandler(w io.Writer, level slog.Leveler, bus *Bus) *Handler {
-	return &Handler{
-		inner: slog.NewTextHandler(w, &slog.HandlerOptions{Level: level}),
-		bus:   bus,
-	}
+	return NewHandlerTo([]Target{Plain(w)}, level, bus)
 }
 
-func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
+func NewHandlerTo(targets []Target, level slog.Leveler, bus *Bus) *Handler {
+	return &Handler{out: &printer{targets: targets}, level: level, bus: bus}
+}
+
+func (h *Handler) Enabled(_ context.Context, level slog.Level) bool {
+	if h.level == nil {
+		return true
+	}
+	return level >= h.level.Level()
 }
 
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
@@ -117,19 +123,22 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		collect(a)
 		return true
 	})
-	h.bus.publish(Line{
+	line := Line{
 		Time:    r.Time,
 		Level:   r.Level,
 		Source:  source,
 		Message: r.Message,
 		Fields:  fields,
-	})
-	return h.inner.Handle(ctx, r)
+	}
+	h.bus.publish(line)
+	h.out.write(line)
+	return nil
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &Handler{
-		inner: h.inner.WithAttrs(attrs),
+		out:   h.out,
+		level: h.level,
 		bus:   h.bus,
 		attrs: append(append([]slog.Attr{}, h.attrs...), attrs...),
 		group: h.group,
@@ -142,9 +151,20 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		group = h.group + "." + name
 	}
 	return &Handler{
-		inner: h.inner.WithGroup(name),
+		out:   h.out,
+		level: h.level,
 		bus:   h.bus,
 		attrs: h.attrs,
 		group: group,
+	}
+}
+
+func (b *Bus) Echo(text string) {
+	if b == nil || text == "" {
+		return
+	}
+	now := time.Now()
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		b.publish(Line{Time: now, Level: slog.LevelInfo, Source: "console", Message: line})
 	}
 }
