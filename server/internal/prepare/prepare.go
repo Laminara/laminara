@@ -91,8 +91,12 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 		return nil, err
 	}
 	javaComponent := profile.JavaComponent
+	javaMajor := profile.JavaMajor
 	if opts.JavaComponent != "" {
 		javaComponent = opts.JavaComponent
+		if major, known := componentMajors[javaComponent]; known {
+			javaMajor = major
+		}
 	}
 
 	dl := &downloader{http: p.http, root: opts.ProfileDir, workers: p.workers}
@@ -123,7 +127,7 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 		}
 	}
 
-	if err := p.writeLaunchProfile(opts, profile, javaComponent, javaBin, detail.ID, installResult); err != nil {
+	if err := p.writeLaunchProfile(opts, profile, javaComponent, javaMajor, javaBin, detail.ID, installResult); err != nil {
 		return nil, err
 	}
 	if err := manifest.EnsureDefaultSettings(opts.ProfileDir); err != nil {
@@ -234,7 +238,7 @@ func resolveJavaBin(files []jre.RuntimeFile, platformKey string) (string, error)
 	return "", fmt.Errorf("no java executable in the %s runtime", platformKey)
 }
 
-func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, javaComponent, javaBin, versionID string, install *loader.InstallResult) error {
+func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, javaComponent string, javaMajor int, javaBin, versionID string, install *loader.InstallResult) error {
 	classpath := make([]string, 0, len(profile.Libraries)+1)
 	for _, lib := range profile.Libraries {
 		classpath = append(classpath, lib.Path)
@@ -260,7 +264,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	launch := manifest.LaunchProfile{
 		MainClass:     mainClass,
 		JavaComponent: javaComponent,
-		JavaMajor:     profile.JavaMajor,
+		JavaMajor:     javaMajor,
 		OS:            opts.OS,
 		Arch:          opts.Arch,
 		PlatformKey:   opts.PlatformKey,
@@ -304,4 +308,13 @@ func artifactOf(path string) string {
 		return filepath.ToSlash(path)
 	}
 	return strings.Join(parts[:len(parts)-2], "/")
+}
+
+var componentMajors = map[string]int{
+	"jre-legacy":                  8,
+	"java-runtime-alpha":          16,
+	"java-runtime-beta":           17,
+	"java-runtime-gamma":          17,
+	"java-runtime-gamma-snapshot": 17,
+	"java-runtime-delta":          21,
 }

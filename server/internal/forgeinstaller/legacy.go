@@ -14,9 +14,10 @@ import (
 )
 
 type legacyLibrary struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	ClientReq *bool  `json:"clientreq"`
+	Name      string            `json:"name"`
+	URL       string            `json:"url"`
+	ClientReq *bool             `json:"clientreq"`
+	Natives   map[string]string `json:"natives"`
 }
 
 type legacyProfile struct {
@@ -71,6 +72,9 @@ func (i *Installer) legacyInstall(ctx context.Context, req Request) (*LaunchInfo
 			continue
 		}
 		if library.Name == profile.Install.Path {
+			continue
+		}
+		if len(library.Natives) > 0 {
 			continue
 		}
 		path, err := maven.Path(library.Name)
