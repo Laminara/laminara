@@ -24,18 +24,21 @@ func init() {
 }
 
 type httpConfig struct {
-	URL               string `json:"url"`
-	UsernameField     string `json:"usernameField"`
-	PasswordField     string `json:"passwordField"`
-	CodeField         string `json:"codeField"`
-	UUIDField         string `json:"uuidField"`
-	SuccessField      string `json:"successField"`
-	SecondFactorField string `json:"secondFactorField"`
+	URL               string            `json:"url"`
+	Headers           map[string]string `json:"headers"`
+	Timeout           string            `json:"timeout"`
+	UsernameField     string            `json:"usernameField"`
+	PasswordField     string            `json:"passwordField"`
+	CodeField         string            `json:"codeField"`
+	UUIDField         string            `json:"uuidField"`
+	SuccessField      string            `json:"successField"`
+	SecondFactorField string            `json:"secondFactorField"`
 }
 
 type httpProvider struct {
 	client            *http.Client
 	url               string
+	headers           map[string]string
 	usernameField     string
 	passwordField     string
 	codeField         string
@@ -53,9 +56,18 @@ func newHTTP(raw json.RawMessage) (auth.Provider, error) {
 		return nil, errors.New("http auth provider requires a url")
 	}
 	warnIfInsecure(cfg.URL)
+	timeout := 10 * time.Second
+	if cfg.Timeout != "" {
+		parsed, err := time.ParseDuration(cfg.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("http auth provider timeout: %w", err)
+		}
+		timeout = parsed
+	}
 	return &httpProvider{
-		client:            &http.Client{Timeout: 10 * time.Second},
+		client:            &http.Client{Timeout: timeout},
 		url:               cfg.URL,
+		headers:           cfg.Headers,
 		usernameField:     orDefault(cfg.UsernameField, "username"),
 		passwordField:     orDefault(cfg.PasswordField, "password"),
 		codeField:         orDefault(cfg.CodeField, "totp"),
@@ -109,6 +121,9 @@ func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials)
 		return auth.Identity{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for name, value := range p.headers {
+		req.Header.Set(name, value)
+	}
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return auth.Identity{}, err

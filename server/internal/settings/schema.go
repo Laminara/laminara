@@ -106,6 +106,8 @@ var schema = []Section{
 					{Key: "uuidField", Label: "Поле UUID в ответе", Kind: KindText, Default: "uuid", Hint: "Путь с точкой достаёт из вложенности: user.uuid."},
 					{Key: "successField", Label: "Поле успеха в ответе", Kind: KindText, Default: "ok"},
 					{Key: "secondFactorField", Label: "Признак запроса кода в ответе", Kind: KindText, Hint: "Ваш сайт поднимает его, когда пароль верный, а код не пришёл, — тогда лаунчер спросит код."},
+					{Key: "headers", Label: "Заголовки запроса", Kind: KindPairs, Hint: "Через запятую: Authorization=Bearer …"},
+					{Key: "timeout", Label: "Сколько ждать ответа", Kind: KindDuration, Default: "10s"},
 				},
 			}},
 		},
@@ -160,7 +162,10 @@ var schema = []Section{
 					{Key: "slim", Label: "Тонкие руки", Kind: KindBool, Default: "false"},
 				},
 				"json": {
-					{Key: "url", Label: "Адрес JSON со скинами", Kind: KindText, Hint: "Подставляются %nickname% и %uuid%."},
+					{Key: "url", Label: "Адрес JSON со скинами", Kind: KindText, Hint: "Подставляются %nickname%, %uuid% и %hash%."},
+					{Key: "headers", Label: "Заголовки запроса", Kind: KindPairs, Hint: "Через запятую: Authorization=Bearer …"},
+					{Key: "timeout", Label: "Сколько ждать ответа", Kind: KindDuration, Default: "10s"},
+					{Key: "cacheTTL", Label: "Сколько помнить ответ", Kind: KindDuration, Default: "1m", Hint: "Скины спрашиваются при каждом входе в игру; кэш бережёт ваш сайт."},
 				},
 				"sql": {
 					{Key: "driver", Label: "СУБД", Kind: KindChoice, Options: sqlschema.Drivers},

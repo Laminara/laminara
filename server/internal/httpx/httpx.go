@@ -12,21 +12,28 @@ import (
 const maxBody = 64 << 20
 
 func GetJSON(ctx context.Context, client *http.Client, url string, out any) error {
-	return get(ctx, client, url, func(resp *http.Response) error {
+	return GetJSONWithHeaders(ctx, client, url, nil, out)
+}
+
+func GetJSONWithHeaders(ctx context.Context, client *http.Client, url string, headers map[string]string, out any) error {
+	return get(ctx, client, url, headers, func(resp *http.Response) error {
 		return json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out)
 	})
 }
 
 func GetXML(ctx context.Context, client *http.Client, url string, out any) error {
-	return get(ctx, client, url, func(resp *http.Response) error {
+	return get(ctx, client, url, nil, func(resp *http.Response) error {
 		return xml.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out)
 	})
 }
 
-func get(ctx context.Context, client *http.Client, url string, decode func(*http.Response) error) error {
+func get(ctx context.Context, client *http.Client, url string, headers map[string]string, decode func(*http.Response) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

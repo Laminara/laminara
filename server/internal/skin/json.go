@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/laminara/laminara/server/internal/httpx"
@@ -15,12 +17,25 @@ func init() {
 }
 
 type jsonConfig struct {
-	URL string `json:"url"`
+	URL      string            `json:"url"`
+	Headers  map[string]string `json:"headers"`
+	Timeout  string            `json:"timeout"`
+	CacheTTL string            `json:"cacheTTL"`
 }
 
 type jsonProvider struct {
-	http *http.Client
-	url  string
+	http    *http.Client
+	url     string
+	headers map[string]string
+	ttl     time.Duration
+
+	mu    sync.Mutex
+	cache map[string]cachedTextures
+}
+
+type cachedTextures struct {
+	textures Textures
+	fetched  time.Time
 }
 
 func newJSON(raw json.RawMessage) (Provider, error) {
@@ -31,7 +46,28 @@ func newJSON(raw json.RawMessage) (Provider, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("json skin provider requires a url")
 	}
-	return &jsonProvider{http: &http.Client{Timeout: 10 * time.Second}, url: cfg.URL}, nil
+	timeout, err := parseDuration(cfg.Timeout, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("json skin provider timeout: %w", err)
+	}
+	ttl, err := parseDuration(cfg.CacheTTL, time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("json skin provider cacheTTL: %w", err)
+	}
+	return &jsonProvider{
+		http:    &http.Client{Timeout: timeout},
+		url:     cfg.URL,
+		headers: cfg.Headers,
+		ttl:     ttl,
+		cache:   map[string]cachedTextures{},
+	}, nil
+}
+
+func parseDuration(value string, fallback time.Duration) (time.Duration, error) {
+	if value == "" {
+		return fallback, nil
+	}
+	return time.ParseDuration(value)
 }
 
 type textureRef struct {
@@ -83,9 +119,40 @@ func (d skinDocument) textures() Textures {
 }
 
 func (p *jsonProvider) Textures(ctx context.Context, username, uuid string) (Textures, error) {
+	target := substitute(p.url, username, uuid)
+	if textures, ok := p.cached(target); ok {
+		return textures, nil
+	}
 	var document skinDocument
-	if err := httpx.GetJSON(ctx, p.http, substitute(p.url, username, uuid), &document); err != nil {
+	if err := httpx.GetJSONWithHeaders(ctx, p.http, target, p.headers, &document); err != nil {
 		return Textures{}, err
 	}
-	return document.textures(), nil
+	textures := document.textures()
+	p.remember(target, textures)
+	return textures, nil
+}
+
+func (p *jsonProvider) cached(key string) (Textures, bool) {
+	if p.ttl <= 0 {
+		return Textures{}, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, ok := p.cache[key]
+	if !ok || time.Since(entry.fetched) > p.ttl {
+		return Textures{}, false
+	}
+	return entry.textures, true
+}
+
+func (p *jsonProvider) remember(key string, textures Textures) {
+	if p.ttl <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.cache) > 4096 {
+		p.cache = map[string]cachedTextures{}
+	}
+	p.cache[key] = cachedTextures{textures: textures, fetched: time.Now()}
 }

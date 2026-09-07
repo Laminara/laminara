@@ -213,7 +213,43 @@ func render(kind Kind, raw any) string {
 			return SecretMask
 		}
 	}
+	if kind == KindPairs {
+		return renderPairs(raw)
+	}
 	return renderTree("", raw, nil)
+}
+
+var secretishNames = []string{"authorization", "token", "secret", "password", "cookie", "api-key", "apikey"}
+
+func renderPairs(raw any) string {
+	pairs, ok := raw.(map[string]any)
+	if !ok {
+		return renderTree("", raw, nil)
+	}
+	keys := make([]string, 0, len(pairs))
+	for key := range pairs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := renderTree("", pairs[key], nil)
+		if value != "" && carriesSecret(key) {
+			value = SecretMask
+		}
+		parts = append(parts, key+"="+value)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func carriesSecret(name string) bool {
+	lowered := strings.ToLower(name)
+	for _, marker := range secretishNames {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func renderTree(path string, raw any, secrets map[string]bool) string {

@@ -88,3 +88,23 @@ func TestHTTPProviderTwoFactor(t *testing.T) {
 		t.Fatalf("a dotted uuidField must reach into nested objects, got %s", identity.UUID)
 	}
 }
+
+func TestHTTPProviderSendsHeaders(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	provider, err := auth.BuildProvider("http", json.RawMessage(`{"url":"`+server.URL+`","headers":{"X-Api-Key":"секрет"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Authenticate(context.Background(), auth.Credentials{Username: "neo", Password: "matrix"}); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("ждали отказ, получили %v", err)
+	}
+	if got != "секрет" {
+		t.Fatalf("заголовок не ушёл вашему API: %q", got)
+	}
+}
