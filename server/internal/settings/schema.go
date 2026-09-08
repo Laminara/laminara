@@ -307,6 +307,7 @@ var schema = []Section{
 			{Key: "backgroundColor", Label: "Цвет фона", Kind: KindText, Default: "#0d0a09"},
 			{Key: "logoPath", Label: "Логотип", Kind: KindText, Hint: "PNG или SVG рядом с сервером — уедет в лаунчер картинкой."},
 			{Key: "heroMediaPath", Label: "Фон окна", Kind: KindText, Hint: "Картинка или видео. Видео тяжелее и заметно греет слабые машины."},
+			{Key: "folderName", Label: "Папка на компьютере игрока", Kind: KindText, Hint: "Куда лаунчер кладёт сборки и настройки. По умолчанию — название проекта."},
 			{Key: "siteUrl", Label: "Сайт проекта", Kind: KindText},
 		},
 	},

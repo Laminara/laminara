@@ -41,6 +41,7 @@ type Document struct {
 	ServerPublicKeyHex   string     `json:"serverPublicKeyHex"`
 	TrustedPublicKeysHex []string   `json:"trustedPublicKeysHex,omitempty"`
 	HWIDSaltHex          string     `json:"hwidSaltHex,omitempty"`
+	StorageName          string     `json:"storageName,omitempty"`
 	Branding             *Branding  `json:"branding,omitempty"`
 }
 
@@ -64,6 +65,7 @@ func Build(cfg *config.Config, endpoints []string) (Document, error) {
 		ServerPublicKeyHex:   ring.ActiveHex(),
 		TrustedPublicKeysHex: ring.TrustedHex(),
 		HWIDSaltHex:          salt,
+		StorageName:          StorageNameFor(cfg),
 		Branding:             branding,
 	}
 	for _, endpoint := range endpoints {
@@ -74,6 +76,39 @@ func Build(cfg *config.Config, endpoints []string) (Document, error) {
 
 func (d Document) JSON() ([]byte, error) {
 	return json.MarshalIndent(d, "", "  ")
+}
+
+func StorageNameFor(cfg *config.Config) string {
+	if cfg != nil && cfg.Branding != nil {
+		if chosen := folderName(cfg.Branding.FolderName); chosen != "" {
+			return chosen
+		}
+		if chosen := folderName(cfg.Branding.Name); chosen != "" {
+			return chosen
+		}
+		if chosen := folderName(cfg.Branding.WindowTitle); chosen != "" {
+			return chosen
+		}
+	}
+	return "laminara"
+}
+
+func folderName(raw string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		switch {
+		case r < 0x20, r == 0x7f:
+			return -1
+		case strings.ContainsRune(`/\:*?"<>|`, r):
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(raw))
+	cleaned = strings.Trim(cleaned, " .")
+	if len([]rune(cleaned)) > 48 {
+		cleaned = string([]rune(cleaned)[:48])
+		cleaned = strings.Trim(cleaned, " .")
+	}
+	return cleaned
 }
 
 func (d Document) LauncherName() string {

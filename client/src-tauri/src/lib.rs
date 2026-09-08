@@ -44,7 +44,53 @@ struct EmbeddedConfig {
     #[serde(default)]
     hwid_salt_hex: String,
     #[serde(default)]
+    storage_name: String,
+    #[serde(default)]
     branding: serde_json::Value,
+}
+
+const LEGACY_STORAGE_NAME: &str = "laminara";
+
+fn storage_name() -> String {
+    if let Ok(name) = std::env::var("LAMINARA_STORAGE_NAME") {
+        if !name.trim().is_empty() {
+            return sanitise_folder(&name);
+        }
+    }
+    serde_json::from_str::<EmbeddedConfig>(client_config())
+        .ok()
+        .map(|config| sanitise_folder(&config.storage_name))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| LEGACY_STORAGE_NAME.to_string())
+}
+
+fn sanitise_folder(raw: &str) -> String {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control() && !r#"/\:*?"<>|"#.contains(*c))
+        .take(48)
+        .collect();
+    cleaned.trim_matches(|c| c == ' ' || c == '.').to_string()
+}
+
+fn adopt_legacy(parent: Option<PathBuf>, name: &str) -> Option<PathBuf> {
+    let parent = parent?;
+    let target = parent.join(name);
+    if name == LEGACY_STORAGE_NAME || target.exists() {
+        return Some(target);
+    }
+    let legacy = parent.join(LEGACY_STORAGE_NAME);
+    if legacy.is_dir() {
+        match std::fs::rename(&legacy, &target) {
+            Ok(()) => tracing::info!(from = %legacy.display(), to = %target.display(), "папка лаунчера переехала под имя проекта"),
+            Err(error) => {
+                tracing::warn!(%error, "не вышло перенести старую папку лаунчера — начинаю с чистой");
+                return Some(target);
+            }
+        }
+    }
+    Some(target)
 }
 
 pub fn embedded_branding() -> serde_json::Value {
@@ -111,8 +157,9 @@ fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientCon
 }
 
 fn init_state() -> Result<AppState, String> {
-    let config_dir = dirs::config_dir().ok_or("no config dir")?.join("laminara");
-    let data_dir = dirs::data_dir().ok_or("no data dir")?.join("laminara");
+    let name = storage_name();
+    let config_dir = adopt_legacy(dirs::config_dir(), &name).ok_or("no config dir")?;
+    let data_dir = adopt_legacy(dirs::data_dir(), &name).ok_or("no data dir")?;
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
@@ -137,7 +184,7 @@ fn init_state() -> Result<AppState, String> {
 }
 
 pub fn run() {
-    let log_dir = dirs::data_dir().map(|d| d.join("laminara").join("logs"));
+    let log_dir = dirs::data_dir().map(|d| d.join(storage_name()).join("logs"));
     let _log_guard = log_dir.as_ref().and_then(|dir| logging::init(dir));
     tracing::info!(
         version = env!("LAMINARA_VERSION"),
@@ -187,4 +234,65 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Laminara");
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::{adopt_legacy, sanitise_folder, LEGACY_STORAGE_NAME};
+
+    #[test]
+    fn folder_name_survives_real_project_names() {
+        assert_eq!(sanitise_folder("Мир Приключений"), "Мир Приключений");
+        assert_eq!(sanitise_folder("  MagicWorld  "), "MagicWorld");
+    }
+
+    #[test]
+    fn folder_name_drops_path_tricks() {
+        for raw in ["../../etc", "a/b", r"c\d", "имя:двоеточие", "звёзды*?", "кавычки\"", "труба|"] {
+            let cleaned = sanitise_folder(raw);
+            assert!(
+                !cleaned.contains('/')
+                    && !cleaned.contains('\\')
+                    && !cleaned.contains(':')
+                    && !cleaned.contains('*')
+                    && !cleaned.contains('?')
+                    && !cleaned.contains('"')
+                    && !cleaned.contains('|'),
+                "имя {raw:?} превратилось в {cleaned:?}"
+            );
+        }
+        assert_eq!(sanitise_folder("...."), "");
+        assert_eq!(sanitise_folder(""), "");
+    }
+
+    #[test]
+    fn old_folder_moves_under_the_project_name() {
+        let parent = tempfile::tempdir().unwrap();
+        let legacy = parent.path().join(LEGACY_STORAGE_NAME);
+        std::fs::create_dir_all(legacy.join("games")).unwrap();
+        std::fs::write(legacy.join("config.json"), "{}").unwrap();
+
+        let moved = adopt_legacy(Some(parent.path().to_path_buf()), "МойПроект").unwrap();
+
+        assert_eq!(moved, parent.path().join("МойПроект"));
+        assert!(moved.join("games").is_dir(), "сборки игрока потерялись при переезде");
+        assert!(moved.join("config.json").is_file(), "настройки потерялись при переезде");
+        assert!(!legacy.exists(), "старая папка осталась дублировать данные");
+    }
+
+    #[test]
+    fn existing_project_folder_is_left_alone() {
+        let parent = tempfile::tempdir().unwrap();
+        let legacy = parent.path().join(LEGACY_STORAGE_NAME);
+        let mine = parent.path().join("МойПроект");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join("config.json"), "{\"свой\":true}").unwrap();
+
+        let chosen = adopt_legacy(Some(parent.path().to_path_buf()), "МойПроект").unwrap();
+
+        assert_eq!(chosen, mine);
+        assert_eq!(std::fs::read_to_string(mine.join("config.json")).unwrap(), "{\"свой\":true}");
+        assert!(legacy.exists(), "чужую папку трогать не нужно");
+    }
 }

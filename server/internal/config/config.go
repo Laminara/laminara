@@ -43,6 +43,7 @@ type BrandingConfig struct {
 	LogoPath        string `json:"logoPath"`
 	HeroMediaPath   string `json:"heroMediaPath"`
 	SiteURL         string `json:"siteUrl"`
+	FolderName      string `json:"folderName"`
 }
 
 type LogConfig struct {

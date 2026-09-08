@@ -102,6 +102,7 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="logoPath" type="string">Файл логотипа (`.svg`/`.png`). Встраивается в конфиг лаунчера как data-URI.</ParamField>
 <ParamField path="heroMediaPath" type="string">Фон главного экрана: картинка (`.jpg`, `.png`, `.webp`) или видео (`.mp4`, `.webm`). Картинка показывается везде одинаково, видео на Linux зависит от кодеков в системе игрока — если их нет, фон останется пустым. Пусто — фон по умолчанию.</ParamField>
 <ParamField path="siteUrl" type="string">Ссылка на сайт проекта.</ParamField>
+<ParamField path="folderName" type="string">Имя папки, в которой лаунчер хранит сборки и настройки на компьютере игрока. По умолчанию берётся из `name`, а если его нет — из `windowTitle`. Задавайте, только если название проекта не годится для имени папки.</ParamField>
 
 Блок отдаётся командой `client-config` и записывается в лаунчер при сборке.
 
