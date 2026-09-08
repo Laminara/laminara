@@ -1,4 +1,4 @@
-.PHONY: generate lint tidy build test run clean
+.PHONY: generate lint tidy build test flows run clean
 
 VERSION := $(shell cat VERSION)
 LDFLAGS := -X github.com/laminara/laminara/server/internal/version.Current=$(VERSION)
@@ -24,6 +24,9 @@ build: generate
 test: generate
 	go test ./...
 	cd sdk/go && go test ./...
+
+flows: generate
+	LAMINARA_FLOWS=1 go test ./server/internal/e2e/... -count=1 -timeout 600s
 
 run: generate
 	go run ./server/cmd/laminara-server start

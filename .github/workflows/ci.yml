@@ -29,6 +29,8 @@ jobs:
       - run: buf lint
       - run: go vet ./...
       - run: go test ./...
+      - name: Сквозной прогон флоу
+        run: LAMINARA_FLOWS=1 go test ./server/internal/e2e/... -count=1 -timeout 600s
 
   frontend:
     name: Фронтенд
