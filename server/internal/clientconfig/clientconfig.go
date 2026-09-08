@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/laminara/laminara/server/internal/config"
@@ -146,10 +147,20 @@ func inlineAsset(path string) (string, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("картинки оформления %s нет на диске — положите файл на место или уберите настройку: laminara-server settings clear %s", path, settingOf(path))
+		}
 		return "", fmt.Errorf("картинка оформления %s: %w", path, err)
 	}
 	if len(data) > maxInlineAsset {
 		return "", fmt.Errorf("картинка %s весит %s — оставьте под %s", path, humanize.Bytes(uint64(len(data))), humanize.Bytes(uint64(maxInlineAsset)))
 	}
 	return "data:" + mediatype.Guess(path, "") + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func settingOf(path string) string {
+	if strings.Contains(strings.ToLower(filepath.Base(path)), "hero") {
+		return "branding.heroMediaPath"
+	}
+	return "branding.logoPath"
 }

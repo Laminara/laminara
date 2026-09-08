@@ -40,7 +40,8 @@ func (s *Service) build(ctx context.Context, args []string, out io.Writer) error
 	if s.bakery == nil || s.bakery.Document == nil {
 		return fmt.Errorf("сборка лаунчера не настроена: нужны build.signingKeyPath и launcher.dir")
 	}
-	target := strings.TrimPrefix(strings.TrimSpace(s.bakery.Version), "v")
+	shipped := strings.TrimPrefix(strings.TrimSpace(s.bakery.Version), "v")
+	target := shipped
 	if len(args) > 0 {
 		target = strings.TrimPrefix(strings.TrimSpace(args[0]), "v")
 	}
@@ -77,7 +78,7 @@ func (s *Service) build(ctx context.Context, args []string, out io.Writer) error
 		{linuxTemplate, ""},
 		{windowsTemplate, ".exe"},
 	} {
-		source, err := s.bakery.template(ctx, target, template.asset, s.dir, out)
+		source, err := s.bakery.template(ctx, shipped, template.asset, s.dir, out)
 		if err != nil {
 			return err
 		}

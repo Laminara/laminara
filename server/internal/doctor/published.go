@@ -10,6 +10,7 @@ import (
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/authlib"
+	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -23,12 +24,16 @@ func checkPublished(ctx context.Context, opts Options, probe *diag.Probe) {
 	if wired == nil || wired.Catalog == nil {
 		return
 	}
-	names, err := wired.Catalog.List()
+	summaries, err := wired.Catalog.Summaries(corev1.Platform_PLATFORM_UNSPECIFIED)
 	if err != nil {
 		probe.Warn("опубликованные сборки", fmt.Sprintf("список не читается: %v", err), diag.Remedy{
 			Hint: "проверьте права на каталог сборок",
 		})
 		return
+	}
+	names := make([]string, 0, len(summaries))
+	for _, summary := range summaries {
+		names = append(names, summary.Name)
 	}
 	if len(names) == 0 {
 		probe.Warn("опубликованные сборки", "ни одной — лаунчеру нечего показывать", diag.Remedy{
@@ -40,20 +45,29 @@ func checkPublished(ctx context.Context, opts Options, probe *diag.Probe) {
 	probe.OK("опубликованные сборки", "%s", humanize.Count(len(names), "сборка", "сборки", "сборок"))
 
 	broken := 0
-	for _, name := range names {
-		if !checkManifest(ctx, opts, probe, name) {
-			broken++
+	for _, summary := range summaries {
+		for _, target := range platformsOf(summary) {
+			if !checkManifest(ctx, opts, probe, summary.Name, target) {
+				broken++
+			}
 		}
-		checkAuthlib(opts, probe, name)
+		checkAuthlib(opts, probe, summary.Name)
 	}
 	if broken == 0 {
 		probe.OK("файлы сборок", "на месте")
 	}
 }
 
-func checkManifest(ctx context.Context, opts Options, probe *diag.Probe, name string) bool {
+func platformsOf(summary catalog.Summary) []corev1.Platform {
+	if len(summary.Platforms) == 0 {
+		return []corev1.Platform{corev1.Platform_PLATFORM_UNSPECIFIED}
+	}
+	return summary.Platforms
+}
+
+func checkManifest(ctx context.Context, opts Options, probe *diag.Probe, name string, target corev1.Platform) bool {
 	wired := opts.Wired
-	canonical, signature, err := wired.Catalog.Get(name, corev1.Platform_PLATFORM_UNSPECIFIED)
+	canonical, signature, err := wired.Catalog.Get(name, target)
 	if err != nil {
 		probe.Fail("сборка "+name, fmt.Sprintf("манифест не читается: %v", err), diag.Remedy{
 			Hint: "опубликуйте сборку заново",

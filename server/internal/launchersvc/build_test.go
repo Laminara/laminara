@@ -249,3 +249,25 @@ func TestBakedLauncherStarts(t *testing.T) {
 		_ = command.Process.Kill()
 	}
 }
+
+func TestOperatorVersionDoesNotChooseTheTemplateRelease(t *testing.T) {
+	templates := map[string][]byte{
+		linuxTemplate:   []byte("linux launcher template"),
+		windowsTemplate: []byte("windows launcher template"),
+	}
+	releases := fakeReleases(t, "v1.2.3", templates)
+	service, dir := bakingService(t, releases, demoDocument())
+
+	var first bytes.Buffer
+	if err := service.build(context.Background(), nil, &first); err != nil {
+		t.Fatalf("первая сборка: %v\n%s", err, first.String())
+	}
+
+	var second bytes.Buffer
+	if err := service.build(context.Background(), []string{"9.9.9"}, &second); err != nil {
+		t.Fatalf("сборку своей версии не дали выпустить: %v\n%s", err, second.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "9.9.9")); err != nil {
+		t.Fatalf("версия оператора не собралась: %v", err)
+	}
+}

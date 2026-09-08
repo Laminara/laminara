@@ -44,7 +44,16 @@ func checkFlow(ctx context.Context, opts Options, probe *diag.Probe) {
 	if tokens == nil {
 		return
 	}
-	checkRefresh(ctx, probe, client, tokens)
+	if checkRefresh(ctx, probe, client, tokens) {
+		fresh := signIn(ctx, opts, client)
+		if fresh == nil {
+			probe.Fail("повторный вход", "после проверки защиты от кражи войти заново не вышло", diag.Remedy{
+				Hint: "сессия отзывается намеренно, но следующий вход обязан проходить — смотрите разделы аккаунтов выше",
+			})
+			return
+		}
+		tokens = fresh
+	}
 	checkCatalogFlow(ctx, opts, probe, client, tokens)
 	checkYggdrasilFlow(ctx, opts, probe, base)
 }
@@ -104,19 +113,30 @@ func loginHint(err error) string {
 	return "сервер не довёл вход до конца; смотрите разделы аккаунтов и публичного доступа выше"
 }
 
-func checkRefresh(ctx context.Context, probe *diag.Probe, client apiv1connect.LauncherServiceClient, tokens *apiv1.Tokens) {
+func signIn(ctx context.Context, opts Options, client apiv1connect.LauncherServiceClient) *apiv1.Tokens {
+	response, err := client.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{
+		Username: opts.Username,
+		Password: opts.Password,
+	}))
+	if err != nil || response.Msg.Tokens == nil {
+		return nil
+	}
+	return response.Msg.Tokens
+}
+
+func checkRefresh(ctx context.Context, probe *diag.Probe, client apiv1connect.LauncherServiceClient, tokens *apiv1.Tokens) bool {
 	if tokens.Refresh == "" {
 		probe.Warn("продление входа", "сервер не выдал токен продления", diag.Remedy{
 			Hint: "игрока будет выкидывать из лаунчера, как только истечёт короткий токен",
 		})
-		return
+		return false
 	}
 	refreshed, err := client.Refresh(ctx, connect.NewRequest(&apiv1.RefreshRequest{Refresh: tokens.Refresh}))
 	if err != nil {
 		probe.Fail("продление входа", fmt.Sprintf("не работает: %v", err), diag.Remedy{
 			Hint: "долгая установка сборки оборвётся на середине, когда истечёт короткий токен",
 		})
-		return
+		return false
 	}
 	probe.OK("продление входа", "работает")
 
@@ -124,15 +144,16 @@ func checkRefresh(ctx context.Context, probe *diag.Probe, client apiv1connect.La
 		probe.Fail("защита от кражи токена", "старый токен продления приняли второй раз", diag.Remedy{
 			Hint: "украденный токен останется рабочим навсегда; так быть не должно — сообщите об этом разработчику",
 		})
-		return
+		tokens.Access = refreshed.Msg.Tokens.Access
+		tokens.Refresh = refreshed.Msg.Tokens.Refresh
+		return false
 	}
 	probe.OK("защита от кражи токена", "повторное продление старым токеном отклонено")
-	tokens.Access = refreshed.Msg.Tokens.Access
-	tokens.Refresh = refreshed.Msg.Tokens.Refresh
+	return true
 }
 
 func checkCatalogFlow(ctx context.Context, opts Options, probe *diag.Probe, client apiv1connect.LauncherServiceClient, tokens *apiv1.Tokens) {
-	request := connect.NewRequest(&apiv1.ListProfilesRequest{Platform: corev1.Platform_PLATFORM_LINUX})
+	request := connect.NewRequest(&apiv1.ListProfilesRequest{Platform: corev1.Platform_PLATFORM_UNSPECIFIED})
 	request.Header().Set("Authorization", "Bearer "+tokens.Access)
 	profiles, err := client.ListProfiles(ctx, request)
 	if err != nil {
@@ -149,10 +170,15 @@ func checkCatalogFlow(ctx context.Context, opts Options, probe *diag.Probe, clie
 	}
 	probe.OK("список сборок", "игрок видит %d", len(profiles.Msg.Profiles))
 
-	name := profiles.Msg.Profiles[0].Name
+	profile := profiles.Msg.Profiles[0]
+	name := profile.Name
+	target := corev1.Platform_PLATFORM_UNSPECIFIED
+	if len(profile.Platforms) > 0 {
+		target = profile.Platforms[0]
+	}
 	manifestRequest := connect.NewRequest(&apiv1.GetManifestRequest{
 		Profile:  name,
-		Platform: corev1.Platform_PLATFORM_LINUX,
+		Platform: target,
 	})
 	manifestRequest.Header().Set("Authorization", "Bearer "+tokens.Access)
 	got, err := client.GetManifest(ctx, manifestRequest)
