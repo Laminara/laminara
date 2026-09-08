@@ -21,7 +21,7 @@ func startCmd() *cobra.Command {
 			var opts daemon.Options
 			opts.ConfigPath = configPath
 			if configPath != "" {
-				cfg, err := config.Load(configPath)
+				cfg, err := config.LoadChecked(configPath)
 				if err != nil {
 					return err
 				}

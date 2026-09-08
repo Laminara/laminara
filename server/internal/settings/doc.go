@@ -178,6 +178,9 @@ func (d *Doc) Save() error {
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return fmt.Errorf("так настройки не читаются: %w", err)
 	}
+	if err := config.Validate(&parsed); err != nil {
+		return fmt.Errorf("с такой настройкой сервер не поднимется — %w", err)
+	}
 	temp := d.path + ".tmp"
 	if err := os.WriteFile(temp, data, d.mode); err != nil {
 		return err

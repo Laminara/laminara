@@ -341,6 +341,7 @@ Group=$run_group
 ExecStart=$server start --config $config
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=78
 RuntimeDirectory=laminara
 NoNewPrivileges=true
 ProtectSystem=strict

@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/laminara-server start --config /etc/laminara/config.jso
 ExecStop=/usr/local/bin/laminara-server stop
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=78
 TimeoutStopSec=30
 
 RuntimeDirectory=laminara

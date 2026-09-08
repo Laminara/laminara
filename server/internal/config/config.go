@@ -140,6 +140,17 @@ type SessionConfig struct {
 
 type Duration = duration.Duration
 
+func LoadChecked(path string) (*Config, error) {
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := Validate(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

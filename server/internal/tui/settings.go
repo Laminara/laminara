@@ -148,6 +148,7 @@ func (m *Model) fillSettings(page *adminv1.ListSettingsResponse) {
 }
 
 func settingItem(entry *adminv1.SettingEntry) menuItem {
+	stored := entry.Value
 	shown := entry.Display
 	if shown == "" {
 		shown = entry.Value
@@ -164,6 +165,7 @@ func settingItem(entry *adminv1.SettingEntry) menuItem {
 		id:      "field:" + entry.Path,
 		label:   entry.Label,
 		value:   shown,
+		raw:     &stored,
 		hint:    entry.Hint,
 		tone:    tone,
 		editor:  editorOf(entry.Kind),

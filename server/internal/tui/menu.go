@@ -32,6 +32,7 @@ type menuItem struct {
 	id      string
 	label   string
 	value   string
+	raw     *string
 	note    string
 	hint    string
 	tone    menuTone
@@ -205,13 +206,20 @@ func (m *menu) startEditing() {
 		if item.editor == editSecret {
 			m.input.SetValue("")
 		} else {
-			m.input.SetValue(item.value)
+			m.input.SetValue(item.editable())
 		}
 		m.input.Width = max(m.width/2, 24)
 		m.input.CursorEnd()
 		m.input.Focus()
 	}
 	m.scroll()
+}
+
+func (i menuItem) editable() string {
+	if i.raw != nil {
+		return *i.raw
+	}
+	return i.value
 }
 
 func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
