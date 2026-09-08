@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,6 +85,8 @@ func Handler(service *Service, backend storage.Backend, xAccel bool) http.Handle
 	mux := http.NewServeMux()
 	mux.Handle(apiv1connect.NewLauncherServiceHandler(service))
 	mux.Handle("/objects/", service.ObjectHandler(backend, xAccel))
+	mux.Handle(downloadPrefix, service.DownloadHandler())
+	mux.Handle(downloadPrefix+"/", service.DownloadHandler())
 	return mux
 }
 
@@ -268,10 +271,17 @@ func ObjectHandler(backend storage.Backend, xAccel bool) http.Handler {
 			http.Error(w, "bad object key", http.StatusBadRequest)
 			return
 		}
-		location, err := backend.Locate(r.Context(), key, time.Hour)
+		filename := sanitiseName(r.URL.Query().Get("filename"))
+		if r.URL.Query().Get("filename") == "" {
+			filename = ""
+		}
+		location, err := storage.LocateNamed(r.Context(), backend, key, time.Hour, filename)
 		if err == nil && location.Kind == storage.LocationURL {
 			http.Redirect(w, r, location.URL, http.StatusFound)
 			return
+		}
+		if filename != "" {
+			w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
 		}
 		if xAccel && err == nil && location.Kind == storage.LocationInternal && location.InternalPath != "" {
 			w.Header().Set("Cache-Control", "public, immutable, max-age=31536000")
@@ -296,4 +306,17 @@ func toTokens(tokens *auth.Tokens) *apiv1.Tokens {
 		Refresh:                 tokens.Refresh,
 		RefreshExpiresUnixNanos: tokens.RefreshExpires.UnixNano(),
 	}
+}
+
+func sanitiseName(name string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`/\"`, r) {
+			return -1
+		}
+		return r
+	}, name)
+	if cleaned == "" {
+		return "laminara"
+	}
+	return cleaned
 }

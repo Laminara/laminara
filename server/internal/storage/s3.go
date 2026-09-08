@@ -99,10 +99,18 @@ func (b *s3Backend) Delete(ctx context.Context, key string) error {
 }
 
 func (b *s3Backend) Locate(ctx context.Context, key string, ttl time.Duration) (Location, error) {
+	return b.LocateNamed(ctx, key, ttl, "")
+}
+
+func (b *s3Backend) LocateNamed(ctx context.Context, key string, ttl time.Duration, filename string) (Location, error) {
 	if ttl <= 0 {
 		ttl = time.Hour
 	}
-	signed, err := b.client.PresignedGetObject(ctx, b.bucket, key, ttl, url.Values{})
+	params := url.Values{}
+	if filename != "" {
+		params.Set("response-content-disposition", "attachment; filename=\""+filename+"\"")
+	}
+	signed, err := b.client.PresignedGetObject(ctx, b.bucket, key, ttl, params)
 	if err != nil {
 		return Location{}, err
 	}

@@ -30,6 +30,17 @@ type Backend interface {
 	Locate(ctx context.Context, key string, ttl time.Duration) (Location, error)
 }
 
+type NamedLocator interface {
+	LocateNamed(ctx context.Context, key string, ttl time.Duration, filename string) (Location, error)
+}
+
+func LocateNamed(ctx context.Context, backend Backend, key string, ttl time.Duration, filename string) (Location, error) {
+	if named, ok := backend.(NamedLocator); ok && filename != "" {
+		return named.LocateNamed(ctx, key, ttl, filename)
+	}
+	return backend.Locate(ctx, key, ttl)
+}
+
 type BackendFactory func(config json.RawMessage) (Backend, error)
 
 var backendFactories = map[string]BackendFactory{}

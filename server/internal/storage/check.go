@@ -21,20 +21,20 @@ import (
 
 const probeSize = 1 << 10
 
-func roundtrip(ctx context.Context, backend Backend, probe *diag.Probe) string {
+func roundtrip(ctx context.Context, backend Backend, probe *diag.Probe, whileAlive func(key string)) bool {
 	key := "doctor/probe-" + uuid.NewString()
 	payload := make([]byte, probeSize)
 	if _, err := rand.Read(payload); err != nil {
 		probe.Warn("заливка", fmt.Sprintf("не удалось подготовить пробу: %v", err), diag.Remedy{
 			Hint: "повторите проверку",
 		})
-		return ""
+		return false
 	}
 	if err := backend.Put(ctx, key, bytes.NewReader(payload), int64(len(payload))); err != nil {
 		probe.Fail("заливка", fmt.Sprintf("записать не удалось: %v", err), diag.Remedy{
 			Hint: "проверьте права на запись: для файлового хранилища — владельца каталога, для S3 — политику ключа доступа",
 		})
-		return ""
+		return false
 	}
 	defer func() {
 		if err := backend.Delete(context.WithoutCancel(ctx), key); err != nil {
@@ -50,17 +50,17 @@ func roundtrip(ctx context.Context, backend Backend, probe *diag.Probe) string {
 		probe.Fail("заливка", fmt.Sprintf("записанный объект не читается: %v", err), diag.Remedy{
 			Hint: "хранилище приняло запись, но не отдаёт её обратно — проверьте права на чтение",
 		})
-		return ""
+		return false
 	case !exists:
 		probe.Fail("заливка", "записанный объект тут же исчез", diag.Remedy{
 			Hint: "хранилище подтверждает запись, но не хранит её — проверьте, что бакет или каталог тот самый",
 		})
-		return ""
+		return false
 	case size != int64(len(payload)):
 		probe.Fail("заливка", fmt.Sprintf("размер не сходится: записали %d, хранилище отдаёт %d", len(payload), size), diag.Remedy{
 			Hint: "объекты портятся при записи — проверьте прокси или файловую систему между сервером и хранилищем",
 		})
-		return ""
+		return false
 	}
 
 	reader, err := backend.Get(ctx, key)
@@ -68,7 +68,7 @@ func roundtrip(ctx context.Context, backend Backend, probe *diag.Probe) string {
 		probe.Fail("заливка", fmt.Sprintf("скачать обратно не удалось: %v", err), diag.Remedy{
 			Hint: "проверьте права на чтение",
 		})
-		return ""
+		return false
 	}
 	got, err := io.ReadAll(reader)
 	reader.Close()
@@ -76,16 +76,19 @@ func roundtrip(ctx context.Context, backend Backend, probe *diag.Probe) string {
 		probe.Fail("заливка", fmt.Sprintf("чтение оборвалось: %v", err), diag.Remedy{
 			Hint: "связь с хранилищем рвётся на середине файла — проверьте сеть и таймауты прокси",
 		})
-		return ""
+		return false
 	}
 	if !bytes.Equal(got, payload) {
 		probe.Fail("заливка", "скачанные байты не совпали с записанными", diag.Remedy{
 			Hint: "хранилище портит содержимое; игроки будут получать битые файлы и вечно перекачивать сборку",
 		})
-		return ""
+		return false
 	}
 	probe.OK("заливка", "%d байт записаны, прочитаны и совпали", len(payload))
-	return key
+	if whileAlive != nil {
+		whileAlive(key)
+	}
+	return true
 }
 
 func (b *fsBackend) Check(ctx context.Context, probe *diag.Probe) {
@@ -107,7 +110,7 @@ func (b *fsBackend) Check(ctx context.Context, probe *diag.Probe) {
 		return
 	}
 	probe.OK("каталог объектов", "%s", b.root)
-	roundtrip(ctx, b, probe)
+	roundtrip(ctx, b, probe, nil)
 	b.checkReadable(probe)
 }
 
@@ -179,11 +182,9 @@ func (b *s3Backend) Check(ctx context.Context, probe *diag.Probe) {
 	}
 	probe.OK("бакет", "%s доступен за %s", b.bucket, time.Since(started).Round(time.Millisecond))
 
-	key := roundtrip(ctx, b, probe)
-	if key == "" {
-		return
-	}
-	b.checkPresign(ctx, key, probe)
+	roundtrip(ctx, b, probe, func(key string) {
+		b.checkPresign(ctx, key, probe)
+	})
 }
 
 func (b *s3Backend) checkPresign(ctx context.Context, key string, probe *diag.Probe) {
