@@ -9,6 +9,7 @@ bold=$'\e[1m'; dim=$'\e[2m'; accent=$'\e[38;5;99m'; ok=$'\e[38;5;42m'; warn=$'\e
 say()  { printf '%s\n' "$*"; }
 section() { printf '\n%s%s%s\n' "$bold$accent" "$*" "$reset"; }
 note() { printf '%s%s%s\n' "$dim" "$*" "$reset"; }
+good() { printf '%s%s%s\n' "$ok" "$*" "$reset"; }
 die()  { printf '%serror:%s %s\n' "$warn" "$reset" "$*" >&2; exit 1; }
 
 open_answers() {
@@ -98,8 +99,47 @@ install_binary() {
   chmod +x "$dest"
 }
 
+redis_only() {
+  local config="" server="" candidate
+  section "Laminara — настройка Redis"
+  open_answers
+
+  for candidate in /etc/laminara/config.json "$HOME/.config/laminara/config.json"; do
+    [ -f "$candidate" ] && { config="$candidate"; break; }
+  done
+  ask config "Файл настроек:" "${config:-/etc/laminara/config.json}"
+  [ -f "$config" ] || die "файл настроек $config не найден — сначала поставьте сервер"
+
+  for candidate in /usr/local/bin/laminara-server "$HOME/.local/bin/laminara-server" /var/lib/laminara/laminara-server; do
+    [ -x "$candidate" ] && { server="$candidate"; break; }
+  done
+  [ -n "$server" ] || die "не нашёл laminara-server — укажите его в PATH и повторите"
+
+  local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+  setup_redis
+  if [ -z "$REDIS_ADDR" ]; then
+    $sudo "$server" settings --config "$config" auth.sessions.backend memory
+    note "сессии оставлены в памяти"
+  else
+    $sudo "$server" settings --config "$config" auth.sessions.backend redis
+    $sudo "$server" settings --config "$config" auth.sessions.redis.addr "$REDIS_ADDR"
+    $sudo "$server" settings --config "$config" auth.sessions.redis.password "$REDIS_PASSWORD"
+    good "сессии переведены в Redis: $REDIS_ADDR"
+  fi
+
+  if systemctl list-unit-files laminara-server.service >/dev/null 2>&1; then
+    $sudo systemctl restart laminara-server && note "сервер перезапущен с новыми настройками"
+  else
+    note "перезапустите сервер, чтобы настройки вступили в силу"
+  fi
+}
+
 main() {
   [ "$(uname -s)" = "Linux" ] || die "сервер работает только на Linux"
+  if [ "${1:-}" = "--redis" ]; then
+    redis_only
+    return
+  fi
   open_answers
   command -v curl >/dev/null || die "нужен curl"
   command -v sha256sum >/dev/null || die "нужен sha256sum"
@@ -169,9 +209,16 @@ main() {
   if [ "$CHOICE" = 1 ]; then
     sessions_block='{ "backend": "memory" }'
   else
-    local redis_addr
-    ask redis_addr "  Адрес Redis:" "127.0.0.1:6379"
-    sessions_block=$(printf '{ "backend": "redis", "redisAddr": "%s" }' "$(json_escape "$redis_addr")")
+    setup_redis
+    if [ -z "$REDIS_ADDR" ]; then
+      sessions_block='{ "backend": "memory" }'
+      note "сессии оставлены в памяти — Redis можно подключить позже: laminara-server settings auth.sessions.backend redis"
+    elif [ -n "$REDIS_PASSWORD" ]; then
+      sessions_block=$(printf '{ "backend": "redis", "redis": { "addr": "%s", "password": "%s" } }' \
+        "$(json_escape "$REDIS_ADDR")" "$(json_escape "$REDIS_PASSWORD")")
+    else
+      sessions_block=$(printf '{ "backend": "redis", "redis": { "addr": "%s" } }' "$(json_escape "$REDIS_ADDR")")
+    fi
   fi
 
   # --- аутентификация ---
@@ -274,6 +321,179 @@ EOF
   note "  соберёт .exe и файл для Linux из готового шаблона — ни Rust, ни pnpm не нужны"
 }
 
+redis_answer() { # redis_answer host port [password] — печатает ответ Redis на PING
+  local host=$1 port=$2 pass=${3:-} line reply=""
+  if ! { exec 4<>"/dev/tcp/$host/$port"; } 2>/dev/null; then
+    printf 'нет связи'
+    return
+  fi
+  if [ -n "$pass" ]; then
+    printf 'AUTH %s\r\nPING\r\n' "$pass" >&4
+  else
+    printf 'PING\r\n' >&4
+  fi
+  while read -r -t 2 line <&4; do
+    reply="$reply $line"
+    case "$reply" in *PONG*) break ;; esac
+  done
+  exec 4<&- 2>/dev/null || true
+  exec 4>&- 2>/dev/null || true
+  printf '%s' "$reply"
+}
+
+redis_state() { # redis_state host port [password] -> ok | пароль | нет связи
+  local reply; reply=$(redis_answer "$@")
+  case "$reply" in
+    *PONG*)                       printf 'ok' ;;
+    *NOAUTH*|*WRONGPASS*|*"without any password"*) printf 'пароль' ;;
+    *)                            printf 'нет связи' ;;
+  esac
+}
+
+random_secret() {
+  if command -v openssl >/dev/null; then
+    openssl rand -hex 24
+  else
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40
+  fi
+}
+
+redis_conf_path() {
+  local candidate
+  for candidate in /etc/redis/redis.conf /etc/redis.conf /etc/valkey/valkey.conf; do
+    [ -f "$candidate" ] && { printf '%s' "$candidate"; return; }
+  done
+}
+
+REDIS_MARK='# Laminara: настройки от установщика'
+
+start_redis_service() { # start_redis_service password
+  local pass=$1 conf unit
+  local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+  install_package redis-server >/dev/null 2>&1 || install_package redis >/dev/null 2>&1 || return 1
+
+  conf=$(redis_conf_path)
+  if [ -n "$conf" ] && [ -n "$pass" ]; then
+    $sudo sed -i "\\|^$REDIS_MARK\$|,+2d" "$conf" 2>/dev/null || true
+    printf '%s\nbind 127.0.0.1 ::1\nrequirepass %s\n' "$REDIS_MARK" "$pass" | $sudo tee -a "$conf" >/dev/null
+  elif [ -n "$pass" ]; then
+    note "конфиг redis не нашёлся — оставляю Redis без пароля, доступ только с этой машины"
+    return 2
+  fi
+
+  for unit in redis-server redis valkey; do
+    if $sudo systemctl enable --now "$unit" >/dev/null 2>&1; then
+      $sudo systemctl restart "$unit" >/dev/null 2>&1 || true
+      return 0
+    fi
+  done
+  return 1
+}
+
+start_redis_container() { # start_redis_container password
+  local pass=$1
+  local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+  if $sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx laminara-redis; then
+    note "контейнер laminara-redis уже есть — пересоздаю его с новым паролем"
+    $sudo docker rm -f laminara-redis >/dev/null 2>&1 || true
+  fi
+  $sudo docker run -d --name laminara-redis --restart unless-stopped \
+    -p 127.0.0.1:6379:6379 redis:alpine \
+    redis-server --requirepass "$pass" --appendonly yes >/dev/null 2>&1
+}
+
+wait_for_redis() { # wait_for_redis host port [password]
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    [ "$(redis_state "$@")" = "ok" ] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+settle_redis() { # settle_redis host port — ждёт наш свежепоставленный Redis и уточняет, взялся ли пароль
+  local host=$1 port=$2
+  if [ "$(redis_state "$host" "$port")" = "ok" ]; then
+    REDIS_PASSWORD=""
+    note "Redis отвечает без пароля — он слушает только эту машину"
+    return 0
+  fi
+  if wait_for_redis "$host" "$port" "$REDIS_PASSWORD"; then
+    good "Redis поднят, пароль задан и записан в конфиг"
+    return 0
+  fi
+  note "Redis поставлен, но не отвечает на $host:$port"
+  REDIS_PASSWORD=""
+  return 1
+}
+
+setup_redis() { # заполняет REDIS_ADDR и REDIS_PASSWORD; пустой REDIS_ADDR = отказались
+  REDIS_ADDR=""; REDIS_PASSWORD=""
+  local addr host port state tries
+  ask addr "  Адрес Redis:" "127.0.0.1:6379"
+  while :; do
+    host=${addr%:*}; port=${addr##*:}
+    [ "$host" = "$port" ] && port=6379
+    state=$(redis_state "$host" "$port")
+
+    if [ "$state" = "пароль" ]; then
+      tries=0
+      while [ "$tries" -lt 3 ]; do
+        ask_secret REDIS_PASSWORD "  Пароль Redis:"
+        state=$(redis_state "$host" "$port" "$REDIS_PASSWORD")
+        [ "$state" = "ok" ] && break
+        note "Redis не принял этот пароль"
+        REDIS_PASSWORD=""
+        tries=$((tries + 1))
+      done
+    fi
+
+    if [ "$state" = "ok" ]; then
+      REDIS_ADDR="$host:$port"
+      good "Redis отвечает: $REDIS_ADDR"
+      return
+    fi
+
+    note "Redis по адресу $host:$port не отвечает."
+    local options=() local_host=0
+    case "$host" in 127.0.0.1|localhost|::1|"") local_host=1 ;; esac
+    if [ "$local_host" = 1 ]; then
+      command -v systemctl >/dev/null && options+=("Поставить Redis на этот сервер (пакет + служба)")
+      command -v docker >/dev/null && options+=("Запустить Redis в Docker (контейнер laminara-redis)")
+    fi
+    options+=("Указать другой адрес")
+    options+=("Обойтись без Redis — держать сессии в памяти")
+
+    choose "Что делаем с Redis?" "${options[@]}"
+    case "${options[$((CHOICE - 1))]}" in
+      "Поставить Redis"*)
+        REDIS_PASSWORD=$(random_secret)
+        note "ставлю redis, задаю пароль и закрываю его от сети…"
+        start_redis_service "$REDIS_PASSWORD"
+        case $? in
+          0) ;;
+          2) REDIS_PASSWORD="" ;;
+          *) note "поставить не вышло — поставьте Redis сами или выберите другой вариант"; REDIS_PASSWORD=""; continue ;;
+        esac
+        settle_redis "$host" "$port" || continue
+        ;;
+      "Запустить Redis в Docker"*)
+        REDIS_PASSWORD=$(random_secret)
+        note "поднимаю контейнер laminara-redis с паролем…"
+        start_redis_container "$REDIS_PASSWORD" || { note "контейнер не поднялся — посмотрите docker logs laminara-redis"; REDIS_PASSWORD=""; continue; }
+        settle_redis "$host" "$port" || continue
+        ;;
+      "Указать другой адрес")
+        ask addr "  Адрес Redis:" "$addr"
+        REDIS_PASSWORD=""
+        ;;
+      *)
+        return
+        ;;
+    esac
+  done
+}
+
 install_package() {
   local sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
   if command -v apt-get >/dev/null; then
@@ -344,29 +564,11 @@ setup_systemd() {
   $sudo chown -R laminara:"$run_group" "$data_dir" 2>/dev/null || true
   $sudo chown laminara:"$run_group" "$(dirname "$config")" "$config" 2>/dev/null || true
   $sudo chmod 750 "$(dirname "$config")" 2>/dev/null || true
-  $sudo tee /etc/systemd/system/laminara-server.service >/dev/null <<EOF
-[Unit]
-Description=Laminara launcher server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=notify
-User=laminara
-Group=$run_group
-ExecStart=$server start --config $config
-Restart=on-failure
-RestartSec=5
-RestartPreventExitStatus=78
-RuntimeDirectory=laminara
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$data_dir /run/laminara $(dirname "$config")
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  local unit; unit=$(mktemp)
+  $sudo "$server" systemd-config --config "$config" --binary "$server" --user laminara --group "$run_group" > "$unit" \
+    || die "версия сервера не умеет печатать unit systemd — обновите install.sh или сервер"
+  $sudo tee /etc/systemd/system/laminara-server.service >/dev/null < "$unit"
+  rm -f "$unit"
   $sudo systemctl daemon-reload
   $sudo systemctl enable --now laminara-server
   note "сервис запущен: systemctl status laminara-server"

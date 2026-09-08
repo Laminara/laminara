@@ -2,9 +2,6 @@ package authsetup
 
 import (
 	"fmt"
-	"time"
-
-	"github.com/redis/go-redis/v9"
 
 	"github.com/laminara/laminara/server/internal/auth"
 	_ "github.com/laminara/laminara/server/internal/auth/providers"
@@ -40,12 +37,10 @@ func buildSessions(cfg *config.AuthConfig) (auth.SessionStore, error) {
 		if cfg.RefreshTTL > 0 {
 			ttl = cfg.RefreshTTL.Duration()
 		}
-		client := redis.NewClient(&redis.Options{
-			Addr:            cfg.Sessions.RedisAddr,
-			ConnMaxIdleTime: time.Minute,
-			ConnMaxLifetime: 3 * time.Minute,
-		})
-		return redisstore.NewSessionStore(client, ttl), nil
+		if !cfg.Sessions.Redis.Set() {
+			return nil, fmt.Errorf("сессии в redis, но не задан auth.sessions.redis.addr")
+		}
+		return redisstore.NewSessionStore(cfg.Sessions.Redis.Client(), ttl), nil
 	default:
 		return nil, fmt.Errorf("unknown session backend %q", cfg.Sessions.Backend)
 	}

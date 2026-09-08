@@ -455,8 +455,8 @@ func checkRateLimit(_ context.Context, opts Options, probe *diag.Probe) {
 		probe.OK("защита от перебора", "включена с настройками по умолчанию")
 		return
 	}
-	if cfg.RateLimit.Backend == "redis" && cfg.RateLimit.RedisAddr == "" {
-		probe.Fail("защита от перебора", "выбран redis, но не задан rateLimit.redisAddr", diag.Remedy{
+	if cfg.RateLimit.Backend == "redis" && !cfg.RateLimit.Redis.Set() {
+		probe.Fail("защита от перебора", "выбран redis, но не задан rateLimit.redis.addr", diag.Remedy{
 			Hint: "сервер не поднимется с такими настройками",
 		})
 		return

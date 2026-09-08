@@ -20,6 +20,7 @@ import (
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/diag"
+	"github.com/laminara/laminara/server/internal/tempdir"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/signing"
@@ -219,6 +220,27 @@ func checkStorage(ctx context.Context, opts Options, probe *diag.Probe) {
 	if cfg.Storage.Backend == "fs" {
 		checkFreeSpace(probe, storageRoot(cfg), "каталог объектов")
 	}
+	checkScratch(opts, probe)
+}
+
+func checkScratch(opts Options, probe *diag.Probe) {
+	system := tempdir.System()
+	if err := tempdir.Writable(system); err == nil {
+		probe.OK("временные файлы", "%s", system)
+		return
+	}
+	spare, err := tempdir.Fallback(tempdir.Candidates(opts.Config, opts.ConfigPath)...)
+	if err != nil {
+		probe.Fail("временные файлы", fmt.Sprintf("%s только для чтения, запасного каталога тоже нет", system), diag.Remedy{
+			Hint:    "публикация, сборка лаунчера и модули пишут временные файлы; без них сервер работать не будет",
+			Command: "laminara-server systemd-config --config " + opts.ConfigPath + " | sudo tee /etc/systemd/system/laminara-server.service && sudo systemctl daemon-reload && sudo systemctl restart laminara-server",
+		})
+		return
+	}
+	probe.Warn("временные файлы", fmt.Sprintf("%s только для чтения, сервер пишет в %s", system, spare), diag.Remedy{
+		Hint:    "работать будет, но правильнее вернуть системный каталог: в unit systemd нужен PrivateTmp=true",
+		Command: "laminara-server systemd-config --config " + opts.ConfigPath + " | sudo tee /etc/systemd/system/laminara-server.service && sudo systemctl daemon-reload && sudo systemctl restart laminara-server",
+	})
 }
 
 func storageRoot(cfg *config.Config) string {

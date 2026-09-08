@@ -77,7 +77,10 @@ var schema = []Section{
 			{Key: "accessTTL", Label: "Срок токена доступа", Kind: KindDuration, Default: "15m", Hint: "Через сколько лаунчер обновляет доступ. Больше срок — реже запросы, дольше живёт украденный токен."},
 			{Key: "refreshTTL", Label: "Срок токена обновления", Kind: KindDuration, Default: "720h", Hint: "Сколько игрок остаётся в лаунчере без ввода пароля."},
 			{Key: "sessions.backend", Label: "Где хранить сессии", Kind: KindChoice, Default: "memory", Options: func() []string { return []string{"memory", "redis"} }, Hint: "memory — сессии теряются при перезапуске; redis — переживают его."},
-			{Key: "sessions.redisAddr", Label: "Адрес Redis", Kind: KindText, Default: "127.0.0.1:6379", Hint: "Нужен, только когда сессии в Redis."},
+			{Key: "sessions.redis.addr", Label: "Адрес Redis", Kind: KindText, Default: "127.0.0.1:6379", Hint: "Нужен, только когда сессии в Redis."},
+			{Key: "sessions.redis.password", Label: "Пароль Redis", Kind: KindSecret, Hint: "Пусто, если Redis без requirepass."},
+			{Key: "sessions.redis.db", Label: "Номер базы Redis", Kind: KindInt, Default: "0"},
+			{Key: "sessions.redis.tls", Label: "Redis через TLS", Kind: KindBool, Default: "false", Hint: "Для облачного Redis. Локальному не нужно."},
 			{Key: "config", Label: "Настройки источника", VariantOf: "provider", Variants: map[string][]Field{
 				"jsonfile": {
 					{Key: "path", Label: "Файл с аккаунтами", Kind: KindText, Hint: "JSON-массив записей вида {\"username\":\"…\",\"password\":\"…\"}."},
@@ -151,7 +154,7 @@ var schema = []Section{
 		Hint:  "Игра проверяет вход через authlib-injector на этом же адресе.",
 		Fields: []Field{
 			{Key: "enabled", Label: "Вход в игре включён", Kind: KindBool, Default: "false", Hint: "Без него игроки не смогут войти даже в лаунчер."},
-			{Key: "serverName", Label: "Имя в окне игры", Kind: KindText, Default: "Laminara"},
+			{Key: "serverName", Label: "Как сервер зовётся в игре", Kind: KindText, Default: "Laminara", Hint: "Этим именем сервер представляется authlib-injector: игра показывает его при входе и пишет в свои логи. На сборки, лаунчер и папки игрока не влияет."},
 			{Key: "rsaKeyPath", Label: "Ключ подписи скинов", Kind: KindText, Hint: "Создаётся сам при первом запуске."},
 			{Key: "skinDomains", Label: "Домены скинов", Kind: KindList, Hint: "Откуда игре разрешено брать картинки скинов. Через запятую."},
 			{Key: "skinProvider", Label: "Откуда брать скины", Kind: KindChoice, Default: "template", Options: skin.ProviderNames},
@@ -265,7 +268,10 @@ var schema = []Section{
 		Fields: []Field{
 			{Key: "disabled", Label: "Выключить защиту", Kind: KindBool, Default: "false"},
 			{Key: "backend", Label: "Где считать", Kind: KindChoice, Default: "memory", Options: func() []string { return []string{"memory", "redis"} }},
-			{Key: "redisAddr", Label: "Адрес Redis", Kind: KindText, Default: "127.0.0.1:6379"},
+			{Key: "redis.addr", Label: "Адрес Redis", Kind: KindText, Default: "127.0.0.1:6379", Hint: "Нужен, только когда счётчики в Redis."},
+			{Key: "redis.password", Label: "Пароль Redis", Kind: KindSecret, Hint: "Пусто, если Redis без requirepass."},
+			{Key: "redis.db", Label: "Номер базы Redis", Kind: KindInt, Default: "0"},
+			{Key: "redis.tls", Label: "Redis через TLS", Kind: KindBool, Default: "false", Hint: "Для облачного Redis. Локальному не нужно."},
 			{Key: "login.limit", Label: "Попыток с адреса", Kind: KindInt, Default: "10"},
 			{Key: "login.per", Label: "За время", Kind: KindDuration, Default: "1m"},
 			{Key: "account.limit", Label: "Попыток на аккаунт", Kind: KindInt, Default: "30", Hint: "Тесный лимит позволил бы закрыть вход названному игроку."},

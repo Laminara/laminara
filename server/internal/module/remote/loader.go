@@ -266,6 +266,9 @@ func (s *saidAloud) text() string {
 }
 
 func withPluginOutput(err error, said string) error {
+	if reason := knownReason(said); reason != nil {
+		return reason
+	}
 	if !strings.Contains(err.Error(), "Unrecognized remote plugin message") {
 		if said == "" {
 			return err
@@ -278,4 +281,18 @@ func withPluginOutput(err error, said string) error {
 	return fmt.Errorf("модуль не поздоровался с сервером и ничего не сказал — обычно это значит, " +
 		"что файл не модуль Laminara, собран под другую версию SDK или падает молча; " +
 		"запустите его руками, чтобы увидеть причину")
+}
+
+func knownReason(said string) error {
+	if !strings.Contains(said, "plugin init error") {
+		return nil
+	}
+	if !strings.Contains(said, "permission denied") && !strings.Contains(said, "read-only file system") {
+		return nil
+	}
+	return fmt.Errorf("модулю негде создать свой сокет: временный каталог %s только для чтения. "+
+		"Так бывает, когда в unit systemd стоит ProtectSystem=strict без PrivateTmp — добавьте "+
+		"строку PrivateTmp=true в /etc/systemd/system/laminara-server.service (или перепишите unit "+
+		"командой laminara-server systemd-config), затем systemctl daemon-reload && systemctl restart laminara-server",
+		os.TempDir())
 }

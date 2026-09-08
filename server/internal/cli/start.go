@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"log/slog"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -9,6 +10,7 @@ import (
 	"github.com/laminara/laminara/server/internal/daemon"
 	"github.com/laminara/laminara/server/internal/modulesetup"
 	"github.com/laminara/laminara/server/internal/serversetup"
+	"github.com/laminara/laminara/server/internal/tempdir"
 )
 
 func startCmd() *cobra.Command {
@@ -27,6 +29,7 @@ func startCmd() *cobra.Command {
 				}
 				logging := daemon.NewLogging(cfg.Log)
 				opts.Logging = logging
+				useScratchDir(cfg, configPath, logging.Log)
 				opts.Modules = modulesetup.Build(modulesConfig(cfg), logging.Log)
 				wired, err := serversetup.Build(cfg)
 				if err != nil {
@@ -58,6 +61,26 @@ func startCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
 	return cmd
+}
+
+func useScratchDir(cfg *config.Config, configPath string, log *slog.Logger) {
+	dir, moved, err := tempdir.Ensure(tempdir.Candidates(cfg, configPath)...)
+	if err != nil {
+		log.Error("временные файлы негде держать",
+			"source", "server",
+			"каталог", dir,
+			"ошибка", err,
+			"что делать", "дайте серверу право писать во временный каталог: в unit systemd это PrivateTmp=true (см. laminara-server systemd-config)",
+		)
+		return
+	}
+	if moved {
+		log.Warn("временный каталог системы только для чтения",
+			"source", "server",
+			"пишу в", dir,
+			"что делать", "перепишите unit командой laminara-server systemd-config — в нём есть PrivateTmp=true",
+		)
+	}
 }
 
 func modulesConfig(cfg *config.Config) *config.ModulesConfig {

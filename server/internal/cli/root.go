@@ -51,6 +51,8 @@ func Root() *cobra.Command {
 		hashCmd(),
 		clientConfigCmd(),
 		nginxConfigCmd(),
+		systemdConfigCmd(),
+		settingsCmd(),
 		updateCmd(),
 		versionCmd(),
 		doctorCmd(),

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/laminara/laminara/server/internal/tempdir"
 )
 
 const (
@@ -29,7 +31,7 @@ func RuntimeDir() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
 		return filepath.Join(dir, "laminara")
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("laminara-%d", os.Getuid()))
+	return filepath.Join(tempdir.System(), fmt.Sprintf("laminara-%d", os.Getuid()))
 }
 
 func SocketPath() string { return filepath.Join(RuntimeDir(), socketName) }

@@ -40,6 +40,8 @@ func TestOperatorAndPlayerFlows(t *testing.T) {
 	t.Run("лаунчер публикуется и качается по ссылке", s.launcherServed)
 	t.Run("вторая версия лаунчера выпускается", s.secondLauncherVersion)
 	t.Run("весь путь игрока проходит", s.playerPath)
+	t.Run("модуль поднимается и приносит свою команду", s.modulePluginRuns)
+	t.Run("сервер объясняет, почему модуль не поднялся", s.moduleFailureIsExplained)
 	t.Run("диагностика не находит поломок", s.doctorIsClean)
 	t.Run("испорченный конфиг останавливает перезапуски", s.badConfigStopsRestarts)
 }
@@ -86,6 +88,11 @@ func write(t *testing.T, path, body string) {
 
 func (s *server) writeConfig(extra map[string]any) {
 	s.t.Helper()
+	s.writeConfigAt(s.config, extra)
+}
+
+func (s *server) writeConfigAt(path string, extra map[string]any) {
+	s.t.Helper()
 	cfg := map[string]any{
 		"auth": map[string]any{
 			"provider": "jsonfile",
@@ -101,6 +108,7 @@ func (s *server) writeConfig(extra map[string]any) {
 			"endpoints": []string{"http://" + s.address},
 		},
 		"api":       map[string]any{"addr": s.address},
+		"modules":   map[string]any{"dir": filepath.Join(s.root, "modules"), "config": map[string]any{"greeter": map[string]any{"greeting": "Здорово"}}},
 		"console":   map[string]any{"enabled": false},
 		"update":    map[string]any{"check": false},
 		"branding":  map[string]any{"name": "ПРОГОН", "windowTitle": "Прогон"},
@@ -113,7 +121,7 @@ func (s *server) writeConfig(extra map[string]any) {
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	write(s.t, s.config, string(encoded))
+	write(s.t, path, string(encoded))
 }
 
 func (s *server) launch() {
@@ -283,6 +291,79 @@ func (s *server) playerPath(t *testing.T) {
 	if strings.Contains(out, "плохо") {
 		t.Fatalf("путь игрока прерывается:\n%s", out)
 	}
+}
+
+func (s *server) buildGreeter(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(s.root, "modules", "greeter")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", path, "../../../examples/modules/greeter")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("модуль-пример не собрался: %v\n%s", err, out)
+	}
+	return path
+}
+
+func (s *server) modulePluginRuns(t *testing.T) {
+	s.buildGreeter(t)
+	s.exec("restart")
+	time.Sleep(4 * time.Second)
+
+	if out := s.exec("modules"); !strings.Contains(out, "greeter") {
+		t.Fatalf("модуль не поднялся:\n%s\n%s", out, s.logs())
+	}
+	out := s.exec("greet Игрок")
+	if !strings.Contains(out, "Здорово, Игрок!") {
+		t.Fatalf("команда модуля не отработала или до модуля не доехали его настройки: %s", out)
+	}
+}
+
+func (s *server) moduleFailureIsExplained(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root пишет и туда, куда запись запрещена — подменить временный каталог не выйдет")
+	}
+	locked := filepath.Join(s.root, "locked-tmp")
+	if err := os.Mkdir(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(s.root, "second.json")
+	runtime := filepath.Join(s.root, "second-run")
+	s.writeConfigAt(config, map[string]any{"api": map[string]any{"addr": "127.0.0.1:" + freePort(t)}})
+
+	log := filepath.Join(s.root, "second.log")
+	file, err := os.Create(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	command := exec.Command(s.binary, "start", "--config", config)
+	command.Env = append(os.Environ(), "TMPDIR="+locked, "XDG_RUNTIME_DIR="+runtime)
+	command.Stdout = file
+	command.Stderr = file
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		body, _ := os.ReadFile(log)
+		if strings.Contains(string(body), "временный каталог") {
+			if strings.Contains(string(body), "Unrecognized remote plugin") {
+				t.Fatalf("оператору показали внутреннюю ошибку go-plugin вместо причины:\n%s", body)
+			}
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	body, _ := os.ReadFile(log)
+	t.Fatalf("модуль не поднялся, но сервер не сказал, что виноват временный каталог:\n%s", body)
 }
 
 func (s *server) doctorIsClean(t *testing.T) {

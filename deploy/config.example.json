@@ -7,7 +7,7 @@
     },
     "sessions": {
       "backend": "redis",
-      "redisAddr": "redis:6379"
+      "redis": { "addr": "redis:6379", "password": "", "db": 0, "tls": false }
     }
   },
   "storage": {

@@ -2,13 +2,13 @@ package ratelimit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
 	"github.com/laminara/laminara/server/internal/duration"
+	"github.com/laminara/laminara/server/internal/redisconf"
 )
 
 type Guard struct {
@@ -23,13 +23,27 @@ type Bucket struct {
 }
 
 type Config struct {
-	Disabled  bool   `json:"disabled"`
-	Backend   string `json:"backend"`
-	RedisAddr string `json:"redisAddr"`
+	Disabled bool             `json:"disabled"`
+	Backend  string           `json:"backend"`
+	Redis    redisconf.Config `json:"redis"`
 
 	Login     Bucket `json:"login"`
 	Account   Bucket `json:"account"`
 	Challenge Bucket `json:"challenge"`
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type plain Config
+	var raw struct {
+		plain
+		RedisAddr string `json:"redisAddr"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*c = Config(raw.plain)
+	c.Redis = c.Redis.WithFallbackAddr(raw.RedisAddr)
+	return nil
 }
 
 type Duration = duration.Duration
@@ -61,14 +75,10 @@ func New(cfg *Config) (*Guard, error) {
 	switch strings.ToLower(resolved.Backend) {
 	case "", "memory":
 	case "redis":
-		if resolved.RedisAddr == "" {
-			return nil, fmt.Errorf("rateLimit.backend is redis but rateLimit.redisAddr is empty")
+		if !resolved.Redis.Set() {
+			return nil, fmt.Errorf("rateLimit.backend is redis but rateLimit.redis.addr is empty")
 		}
-		client := redis.NewClient(&redis.Options{
-			Addr:            resolved.RedisAddr,
-			ConnMaxIdleTime: time.Minute,
-			ConnMaxLifetime: 3 * time.Minute,
-		})
+		client := resolved.Redis.Client()
 		build = func(bucket Bucket) Limiter { return NewRedisLimiter(client, bucket.Limit, bucket.Per.Duration()) }
 	default:
 		return nil, fmt.Errorf("unknown rateLimit.backend %q (want memory or redis)", resolved.Backend)

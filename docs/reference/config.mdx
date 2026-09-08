@@ -12,7 +12,10 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="provider" type="string" required>`jsonfile`, `sql` или `http`.</ParamField>
 <ParamField path="config" type="object" required>Настройки выбранного провайдера (см. ниже).</ParamField>
 <ParamField path="sessions.backend" type="string">`memory` или `redis`.</ParamField>
-<ParamField path="sessions.redisAddr" type="string">Адрес Redis при `backend: redis`.</ParamField>
+<ParamField path="sessions.redis.addr" type="string">Адрес Redis при `backend: redis`.</ParamField>
+<ParamField path="sessions.redis.password" type="string">Пароль Redis (`requirepass`). Пусто — без пароля.</ParamField>
+<ParamField path="sessions.redis.db" type="int">Номер базы Redis. По умолчанию 0.</ParamField>
+<ParamField path="sessions.redis.tls" type="bool">Подключаться к Redis по TLS.</ParamField>
 <ParamField path="accessTTL" type="duration">Время жизни токена доступа, например `15m`.</ParamField>
 <ParamField path="refreshTTL" type="duration">Время жизни токена обновления, например `720h`.</ParamField>
 
@@ -134,7 +137,10 @@ import ParamField from "@site/components/ParamField.astro";
 
 <ParamField path="disabled" type="boolean">Выключить все бюджеты. Только для сервера, недоступного из интернета.</ParamField>
 <ParamField path="backend" type="string">`memory` (по умолчанию) или `redis` — общий счётчик на несколько экземпляров.</ParamField>
-<ParamField path="redisAddr" type="string">Адрес Redis для `backend: redis`.</ParamField>
+<ParamField path="redis.addr" type="string">Адрес Redis для `backend: redis`.</ParamField>
+<ParamField path="redis.password" type="string">Пароль Redis (`requirepass`).</ParamField>
+<ParamField path="redis.db" type="int">Номер базы Redis.</ParamField>
+<ParamField path="redis.tls" type="bool">Подключаться к Redis по TLS.</ParamField>
 <ParamField path="login" type="object">Бюджет на один адрес: `{ "limit": 10, "per": "5m" }`.</ParamField>
 <ParamField path="account" type="object">Бюджет на один ник, намеренно щедрый: `{ "limit": 50, "per": "15m" }`. Жёсткий лимит здесь дал бы любому способ заблокировать конкретного игрока чужими неудачными попытками.</ParamField>
 <ParamField path="challenge" type="object">Бюджет на запросы nonce: `{ "limit": 60, "per": "1m" }`.</ParamField>

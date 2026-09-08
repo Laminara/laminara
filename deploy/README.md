@@ -13,7 +13,7 @@ nginx.
 | --- | --- |
 | `Dockerfile` | Многоступенчатая сборка в `debian:12-slim`. Именно glibc, а не distroless: скачанная Java должна запускать процессоры установщика Forge и NeoForge. |
 | `docker-compose.yml` | Сервер и Redis; Postgres и своё S3 закомментированы до того момента, когда понадобятся. |
-| `systemd/laminara-server.service` | Юнит `Type=notify` — демон сам сообщает systemd о готовности. |
+| — | Юнит systemd печатает сам сервер: `laminara-server systemd-config`. Отдельного файла здесь нет намеренно — копия рано или поздно разойдётся с тем, что действительно нужно серверу. |
 | `config.example.json` | Конфиг со всеми разделами. |
 
 ## Docker
@@ -32,9 +32,12 @@ sudo install -m0755 bin/laminara-server /usr/local/bin/laminara-server
 sudo useradd --system --home /var/lib/laminara --shell /usr/sbin/nologin laminara
 sudo install -d -o laminara -g laminara /var/lib/laminara /etc/laminara
 sudo install -m0640 -o laminara -g laminara deploy/config.example.json /etc/laminara/config.json
-sudo install -m0644 deploy/systemd/laminara-server.service /etc/systemd/system/
+laminara-server systemd-config --config /etc/laminara/config.json \
+  | sudo tee /etc/systemd/system/laminara-server.service
 sudo systemctl enable --now laminara-server
 ```
+
+Unit тоже печатает сам сервер: он знает, в какие каталоги пишет, и перечисляет их в `ReadWritePaths`.
 
 ## nginx и TLS
 

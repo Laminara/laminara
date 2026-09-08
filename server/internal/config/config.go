@@ -11,6 +11,7 @@ import (
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
+	"github.com/laminara/laminara/server/internal/redisconf"
 	"github.com/laminara/laminara/server/internal/webconsole"
 )
 
@@ -135,8 +136,22 @@ type AuthConfig struct {
 }
 
 type SessionConfig struct {
-	Backend   string `json:"backend"`
-	RedisAddr string `json:"redisAddr"`
+	Backend string           `json:"backend"`
+	Redis   redisconf.Config `json:"redis"`
+}
+
+func (s *SessionConfig) UnmarshalJSON(data []byte) error {
+	type plain SessionConfig
+	var raw struct {
+		plain
+		RedisAddr string `json:"redisAddr"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = SessionConfig(raw.plain)
+	s.Redis = s.Redis.WithFallbackAddr(raw.RedisAddr)
+	return nil
 }
 
 type Duration = duration.Duration
