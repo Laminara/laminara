@@ -61,6 +61,10 @@ choose() { # choose "prompt" "opt1" "opt2" ... -> sets CHOICE to 1-based index
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
+safe_folder() {
+  printf '%s' "$1"     | tr -d '[:cntrl:]'     | tr -d '/\\:*?"<>|'     | sed -E 's/^[[:space:].]+//; s/[[:space:].]+$//'     | cut -c1-48
+}
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64) echo amd64 ;;
@@ -115,6 +119,16 @@ main() {
   local server="$data_dir/laminara-server"
   install_binary "$server"
   ln -sf "$server" "$bin_dir/laminara-server"
+
+  # --- название проекта ---
+  local project folder folder_default
+  section "Проект"
+  ask project "  Название — его увидят игроки в лаунчере:" "Laminara"
+  folder_default=$(safe_folder "$project")
+  [ -n "$folder_default" ] || folder_default=laminara
+  ask folder "  Папка на компьютере игрока:" "$folder_default"
+  folder=$(safe_folder "$folder")
+  [ -n "$folder" ] || folder="$folder_default"
 
   # --- как игроки приходят ---
   local front domain="" email="" api_addr endpoint
@@ -208,7 +222,7 @@ main() {
   choose "Включить вход в игре (authlib-injector) и скины?" "Да" "Нет"
   if [ "$CHOICE" = 1 ]; then
     local ygg_name skin_url skin_domain
-    ask ygg_name   "  Имя сервера:" "Laminara"
+    ask ygg_name   "  Имя сервера:" "$project"
     ask skin_url   "  Шаблон ссылки на скин (%nickname% / %uuid%):" "https://skins.${domain:-example.com}/%nickname%.png"
     skin_domain=$(printf '%s' "$skin_url" | sed -E 's#^https?://##; s#/.*##')
     ygg_tail=$(printf ',\n  "yggdrasil": { "enabled": true, "serverName": "%s", "rsaKeyPath": "%s/yggdrasil-rsa.pem", "skinProvider": "template", "skinConfig": { "skin": "%s" }, "skinDomains": ["%s"] }' \
@@ -216,13 +230,15 @@ main() {
   fi
 
   # --- запись конфига ---
-  mkdir -p "$data_dir/profiles" "$data_dir/objects" "$data_dir/modules"
+  mkdir -p "$data_dir/profiles" "$data_dir/objects" "$data_dir/modules" "$data_dir/launcher"
   ( umask 077; cat > "$config" <<EOF
 {
   "auth": $auth_block,
   "storage": $storage_block,
   "build": { "profilesDir": "$data_dir/profiles", "signingKeyPath": "$data_dir/signing.key" },
   "api": { "addr": "$api_addr"$xaccel },
+  "launcher": { "dir": "$data_dir/launcher", "endpoints": ["$endpoint"] },
+  "branding": { "name": "$(json_escape "$project")", "windowTitle": "$(json_escape "$project")", "folderName": "$(json_escape "$folder")" },
   "modules": { "dir": "$data_dir/modules" }$ygg_tail
 }
 EOF

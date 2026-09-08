@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,17 +75,19 @@ func (l *Loader) LoadDir(dir string, configs map[string][]byte, registry *module
 }
 
 func (l *Loader) load(path string, config []byte, registry *module.Registry) error {
+	said := &saidAloud{}
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  sdkmodule.Handshake,
 		Plugins:          sdkmodule.PluginSet(nil),
 		Cmd:              exec.Command(path),
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 		Logger:           hclog.NewNullLogger(),
+		Stderr:           said,
 	})
 	rpcClient, err := client.Client()
 	if err != nil {
 		client.Kill()
-		return err
+		return withPluginOutput(err, said.text())
 	}
 	raw, err := rpcClient.Dispense(sdkmodule.PluginName)
 	if err != nil {
@@ -224,4 +227,55 @@ func executable(path string) bool {
 		return false
 	}
 	return info.Mode()&0o111 != 0
+}
+
+type saidAloud struct {
+	mu    sync.Mutex
+	lines []string
+	size  int
+}
+
+const maxModuleOutput = 8 << 10
+
+func (s *saidAloud) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.size < maxModuleOutput {
+		text := strings.TrimRight(string(p), "\n")
+		for _, line := range strings.Split(text, "\n") {
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				s.lines = append(s.lines, trimmed)
+				s.size += len(trimmed)
+			}
+		}
+	}
+	return len(p), nil
+}
+
+func (s *saidAloud) text() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.lines) == 0 {
+		return ""
+	}
+	shown := s.lines
+	if len(shown) > 8 {
+		shown = shown[:8]
+	}
+	return strings.Join(shown, "; ")
+}
+
+func withPluginOutput(err error, said string) error {
+	if !strings.Contains(err.Error(), "Unrecognized remote plugin message") {
+		if said == "" {
+			return err
+		}
+		return fmt.Errorf("%w; модуль сказал: %s", err, said)
+	}
+	if said != "" {
+		return fmt.Errorf("модуль не поздоровался с сервером и сказал: %s", said)
+	}
+	return fmt.Errorf("модуль не поздоровался с сервером и ничего не сказал — обычно это значит, " +
+		"что файл не модуль Laminara, собран под другую версию SDK или падает молча; " +
+		"запустите его руками, чтобы увидеть причину")
 }
