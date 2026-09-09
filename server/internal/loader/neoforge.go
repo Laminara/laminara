@@ -51,7 +51,7 @@ func (n *neoForge) Versions(ctx context.Context, mcVersion string) ([]string, er
 }
 
 func (n *neoForge) Resolve(_ context.Context, _, _ string) (*LoaderProfile, error) {
-	return nil, fmt.Errorf("neoforge is a transformative loader; use the installer path")
+	return nil, fmt.Errorf("neoforge ставится через свой установщик, а не как обычный загрузчик")
 }
 
 func (n *neoForge) Install(ctx context.Context, req InstallRequest) (*InstallResult, error) {

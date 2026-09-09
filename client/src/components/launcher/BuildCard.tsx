@@ -4,13 +4,11 @@ import { useLauncher } from "@/store";
 import { loaderLabels } from "@/config/branding";
 import { buildBlock } from "@/lib/buildState";
 import { cn, formatCount } from "@/lib/format";
-import { ProgressBar } from "@/components/ui/ProgressBar";
 import { StatusDot } from "@/components/ui/atoms";
 
 export function BuildCard({ build, selected, onClick }: { build: Build; selected: boolean; onClick: () => void }) {
   const block = buildBlock(build);
   const online = useLauncher((state) => state.players?.perBuild[build.name]);
-  const installing = build.install === "syncing";
   return (
     <button
       onClick={onClick}
@@ -35,20 +33,15 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
           <StatusDot state={build.install} />
         )}
       </div>
-      <span className="text-[15px] font-bold leading-tight">{build.name}</span>
+      <span className="truncate text-[15px] font-bold leading-tight" title={build.name}>{build.name}</span>
       <div className="flex items-center gap-3">
-        {installing ? (
-          <span className="text-xs tabular-nums text-dim">{Math.round((build.progress ?? 0) * 100)}%</span>
-        ) : (
-          online && online.max > 0 && (
-            <span className="flex items-center gap-1.5 text-xs tabular-nums text-dim">
-              <span className="h-1.5 w-1.5 rounded-full bg-online" />
-              {formatCount(online.online)}
-              <span className="text-mute">/ {formatCount(online.max)}</span>
-            </span>
-          )
+        {online && online.max > 0 && (
+          <span className="flex items-center gap-1.5 text-xs tabular-nums text-dim">
+            <span className="h-1.5 w-1.5 rounded-full bg-online" />
+            {formatCount(online.online)}
+            <span className="text-mute">/ {formatCount(online.max)}</span>
+          </span>
         )}
-        <ProgressBar value={build.install === "missing" ? 0 : build.progress ?? 1} className="flex-1" />
       </div>
     </button>
   );

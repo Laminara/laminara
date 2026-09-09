@@ -1,10 +1,13 @@
+import { useState } from "react";
+
 import { brand, branding } from "@/config/branding";
 
 export function BrandMark() {
+  const [broken, setBroken] = useState(false);
   return (
     <div className="flex items-center gap-3">
-      {brand().logoDataUri ? (
-        <img src={brand().logoDataUri} alt="" className="h-9 w-9 rounded-md object-contain" />
+      {brand().logoDataUri && !broken ? (
+        <img src={brand().logoDataUri} alt="" onError={() => setBroken(true)} className="h-9 w-9 rounded-md object-contain" />
       ) : (
         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-ink">
           <svg viewBox="0 0 32 32" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
@@ -14,7 +17,7 @@ export function BrandMark() {
           </svg>
         </div>
       )}
-      <span className="text-lg font-extrabold tracking-[0.14em]">{branding.name}</span>
+      <span className="min-w-0 truncate text-lg font-extrabold tracking-[0.14em]">{branding.name}</span>
     </div>
   );
 }

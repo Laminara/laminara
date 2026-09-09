@@ -42,7 +42,7 @@ func (s *Service) ReportMachine(ctx context.Context, req *connect.Request[apiv1.
 	return connect.NewResponse(&apiv1.ReportMachineResponse{Verdict: verdict}), nil
 }
 
-var errTooManyAttempts = errors.New("too many attempts, wait a few minutes")
+var errTooManyAttempts = errors.New("слишком много попыток — подождите пару минут")
 
 func twoFactorError() error {
 	connectErr := connect.NewError(connect.CodeFailedPrecondition, auth.ErrTwoFactorRequired)

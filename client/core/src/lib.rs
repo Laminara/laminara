@@ -5,6 +5,7 @@ pub mod config;
 pub mod endpoint;
 pub mod error;
 pub mod features;
+pub mod hostmem;
 pub mod launch;
 pub mod machine;
 pub mod manifest;

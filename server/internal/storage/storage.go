@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -61,7 +62,10 @@ func BackendNames() []string {
 func BuildBackend(name string, config json.RawMessage) (Backend, error) {
 	factory, ok := backendFactories[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown storage backend %q", name)
+		return nil, fmt.Errorf("хранилища «%s» нет — выберите из: %s", name, strings.Join(BackendNames(), ", "))
+	}
+	if len(config) == 0 {
+		config = json.RawMessage("{}")
 	}
 	return factory(config)
 }

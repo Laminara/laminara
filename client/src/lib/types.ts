@@ -58,6 +58,7 @@ export interface GeneralSettings {
 export interface BuildSettings {
   maxMemoryMb: number | null;
   defaultMemoryMb: number;
+  allowedMemoryMb: number;
 }
 
 export interface FeatureMeta {

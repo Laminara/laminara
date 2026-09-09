@@ -28,6 +28,7 @@ url = "2"
 arc-swap = "1"
 tempfile = "3"
 rand = "0.8"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 same-file = "1.0.6"
 reflink-copy = "0.1.30"

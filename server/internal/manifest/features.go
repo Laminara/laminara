@@ -104,10 +104,10 @@ func validateConstraints(groups []*corev1.FeatureGroup, parentAddr string, known
 			if o.Meta != nil {
 				for _, ref := range append(append([]string{}, o.Meta.Requires...), o.Meta.IncompatibleWith...) {
 					if ref == optionAddr {
-						return fmt.Errorf("option %q references itself in requires/incompatibleWith", optionAddr)
+						return fmt.Errorf("вариант «%s» ссылается сам на себя в requires/incompatibleWith", optionAddr)
 					}
 					if !known[ref] {
-						return fmt.Errorf("option %q references unknown option address %q", optionAddr, ref)
+						return fmt.Errorf("вариант «%s» ссылается на «%s», а такого варианта нет", optionAddr, ref)
 					}
 				}
 			}
@@ -123,26 +123,26 @@ func validateGroups(groups []*corev1.FeatureGroup, policyByPath map[string]corev
 	seen := make(map[string]bool, len(groups))
 	for _, g := range groups {
 		if g.Id == "" {
-			return fmt.Errorf("feature group has an empty id")
+			return fmt.Errorf("у группы модов пустой id")
 		}
 		if seen[g.Id] {
-			return fmt.Errorf("duplicate feature group id %q", g.Id)
+			return fmt.Errorf("группа модов «%s» описана дважды", g.Id)
 		}
 		seen[g.Id] = true
 		if g.Selection == corev1.SelectionType_SELECTION_TYPE_UNSPECIFIED {
-			return fmt.Errorf("feature group %q: selection must be \"single\" or \"multi\"", g.Id)
+			return fmt.Errorf("группа «%s»: selection бывает только \"single\" или \"multi\"", g.Id)
 		}
 		if len(g.Options) == 0 {
-			return fmt.Errorf("feature group %q has no options", g.Id)
+			return fmt.Errorf("в группе «%s» нет ни одного варианта", g.Id)
 		}
 		defaults := 0
 		optSeen := make(map[string]bool, len(g.Options))
 		for _, o := range g.Options {
 			if o.Id == "" {
-				return fmt.Errorf("feature group %q: option with an empty id", g.Id)
+				return fmt.Errorf("в группе «%s» есть вариант с пустым id", g.Id)
 			}
 			if optSeen[o.Id] {
-				return fmt.Errorf("feature group %q: duplicate option id %q", g.Id, o.Id)
+				return fmt.Errorf("в группе «%s» вариант «%s» описан дважды", g.Id, o.Id)
 			}
 			optSeen[o.Id] = true
 			if o.DefaultEnabled {
@@ -151,10 +151,10 @@ func validateGroups(groups []*corev1.FeatureGroup, policyByPath map[string]corev
 			for _, file := range o.Files {
 				policy, ok := policyByPath[file]
 				if !ok {
-					return fmt.Errorf("option %q/%q: file %q is not in the build", g.Id, o.Id, file)
+					return fmt.Errorf("вариант «%s/%s»: файла «%s» в сборке нет", g.Id, o.Id, file)
 				}
 				if policy == corev1.FilePolicy_FILE_POLICY_USER_WRITABLE {
-					return fmt.Errorf("option %q/%q: file %q is user_writable; optional files must be immutable or enforced", g.Id, o.Id, file)
+					return fmt.Errorf("вариант «%s/%s»: файл «%s» помечен как изменяемый игроком — необязательные файлы должны быть неизменяемыми", g.Id, o.Id, file)
 				}
 			}
 			if err := validateLaunchArgs(g.Id, o, policyByPath); err != nil {
@@ -165,7 +165,7 @@ func validateGroups(groups []*corev1.FeatureGroup, policyByPath map[string]corev
 			}
 		}
 		if g.Selection == corev1.SelectionType_SELECTION_TYPE_SINGLE && defaults > 1 {
-			return fmt.Errorf("single group %q: at most one option may be defaultEnabled", g.Id)
+			return fmt.Errorf("в группе «%s» с одиночным выбором включённым по умолчанию может быть только один вариант", g.Id)
 		}
 	}
 	return nil
@@ -287,10 +287,10 @@ func validateLaunchArgs(groupID string, o *corev1.FeatureOption, policyByPath ma
 	}
 	for _, entry := range o.Classpath {
 		if err := validateClasspathEntry(entry); err != nil {
-			return fmt.Errorf("option %q/%q: %w", groupID, o.Id, err)
+			return fmt.Errorf("вариант «%s/%s»: %w", groupID, o.Id, err)
 		}
 		if _, ok := policyByPath[entry]; !ok {
-			return fmt.Errorf("option %q/%q: classpath entry %q is not in the build", groupID, o.Id, entry)
+			return fmt.Errorf("вариант «%s/%s»: в classpath указан «%s», которого в сборке нет", groupID, o.Id, entry)
 		}
 	}
 	return nil
@@ -298,14 +298,14 @@ func validateLaunchArgs(groupID string, o *corev1.FeatureOption, policyByPath ma
 
 func validateClasspathEntry(entry string) error {
 	if entry == "" {
-		return fmt.Errorf("classpath entry is empty")
+		return fmt.Errorf("в classpath пустая строка")
 	}
 	if strings.ContainsAny(entry, ":;\\") || strings.HasPrefix(entry, "/") {
-		return fmt.Errorf("classpath entry %q must be a path inside the profile, written with forward slashes", entry)
+		return fmt.Errorf("в classpath «%s» — нужен путь внутри сборки через прямые слэши", entry)
 	}
 	for _, segment := range strings.Split(entry, "/") {
 		if segment == ".." {
-			return fmt.Errorf("classpath entry %q leaves the profile directory", entry)
+			return fmt.Errorf("в classpath «%s» ведёт за пределы сборки", entry)
 		}
 	}
 	return nil

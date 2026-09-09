@@ -107,7 +107,7 @@ func renderNginx(opts nginxOptions) string {
 		fmt.Fprintf(&out, "server {\n    listen 80;\n    server_name %s;\n\n", names)
 	}
 
-	out.WriteString("    client_max_body_size 0;\n\n")
+	out.WriteString("    client_max_body_size 4m;\n\n")
 	out.WriteString("    location / {\n        proxy_pass http://laminara;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $connection_upgrade;\n        proxy_read_timeout 3600s;\n        proxy_buffering off;\n        proxy_request_buffering off;\n    }\n")
 	if opts.Objects != "" {
 		fmt.Fprintf(&out, "\n    location %s {\n        internal;\n        alias %s;\n        add_header Cache-Control \"public, immutable, max-age=31536000\";\n    }\n", opts.Prefix, opts.Objects)

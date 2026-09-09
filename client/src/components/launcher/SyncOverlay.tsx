@@ -7,6 +7,7 @@ const stageLabels: Record<string, string> = {
   planning: "Проверка файлов",
   downloading: "Загрузка",
   done: "Установлено",
+  launching: "Проверяю файлы и запускаю игру",
 };
 
 export function SyncOverlay() {
@@ -23,7 +24,7 @@ export function SyncOverlay() {
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-dim">{stageLabels[sync?.stage ?? "planning"] ?? "Синхронизация"}</div>
             <div className="text-lg font-bold">{selected}</div>
           </div>
-          <button onClick={() => void cancel()} className="rounded-md p-2 text-dim transition-colors hover:bg-surface-2 hover:text-text">
+          <button onClick={() => void cancel()} aria-label="Отменить загрузку" className="rounded-md p-2 text-dim transition-colors hover:bg-surface-2 hover:text-text">
             <X size={18} />
           </button>
         </div>

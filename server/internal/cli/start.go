@@ -2,7 +2,6 @@ package cli
 
 import (
 	"log/slog"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -25,15 +24,15 @@ func startCmd() *cobra.Command {
 			if configPath != "" {
 				cfg, err := config.LoadChecked(configPath)
 				if err != nil {
-					return err
+					return config.Fatal(err)
 				}
 				logging := daemon.NewLogging(cfg.Log)
 				opts.Logging = logging
 				useScratchDir(cfg, configPath, logging.Log)
-				opts.Modules = modulesetup.Build(modulesConfig(cfg), logging.Log)
+				opts.Modules = modulesetup.Build(cfg.Modules, logging.Log)
 				wired, err := serversetup.Build(cfg)
 				if err != nil {
-					return err
+					return config.Fatal(err)
 				}
 				opts.Auth = wired.Auth
 				opts.Build = wired.Build
@@ -83,13 +82,3 @@ func useScratchDir(cfg *config.Config, configPath string, log *slog.Logger) {
 	}
 }
 
-func modulesConfig(cfg *config.Config) *config.ModulesConfig {
-	out := cfg.Modules
-	if out == nil {
-		out = &config.ModulesConfig{}
-	}
-	if out.Dir == "" && cfg.Build != nil && cfg.Build.ProfilesDir != "" {
-		out.Dir = filepath.Join(filepath.Dir(cfg.Build.ProfilesDir), "modules")
-	}
-	return out
-}

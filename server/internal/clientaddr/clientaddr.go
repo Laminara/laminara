@@ -81,7 +81,9 @@ func (t *Trust) Of(header http.Header, peer string) string {
 		return hops[0]
 	}
 	if real := strings.TrimSpace(header.Get("X-Real-IP")); real != "" {
-		return real
+		if _, err := netip.ParseAddr(real); err == nil {
+			return real
+		}
 	}
 	return direct
 }

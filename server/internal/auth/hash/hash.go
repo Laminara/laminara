@@ -37,7 +37,7 @@ func ProduceCost(scheme, password string, cost int) (string, error) {
 	}
 	hasher, ok := verifier.(Hasher)
 	if !ok {
-		return "", fmt.Errorf("hash scheme %q cannot produce hashes", scheme)
+		return "", fmt.Errorf("схема хеширования «%s» умеет только проверять чужие хеши, а не создавать свои", scheme)
 	}
 	return hasher.Hash(password)
 }
@@ -64,7 +64,7 @@ func Register(name string, verifier Verifier) {
 func Get(name string) (Verifier, error) {
 	verifier, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown hash scheme %q", name)
+		return nil, fmt.Errorf("схемы хеширования «%s» нет — выберите из: %s", name, strings.Join(Names(), ", "))
 	}
 	return verifier, nil
 }

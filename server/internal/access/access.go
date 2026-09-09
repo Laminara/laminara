@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -48,7 +49,7 @@ func SourceNames() []string {
 func buildSource(kind string, config json.RawMessage) (Source, error) {
 	factory, ok := sourceFactories[kind]
 	if !ok {
-		return nil, fmt.Errorf("unknown access source type %q (have %s)", kind, strings.Join(SourceNames(), ", "))
+		return nil, fmt.Errorf("источника доступа «%s» нет — выберите из: %s", kind, strings.Join(SourceNames(), ", "))
 	}
 	return factory(config)
 }
@@ -119,7 +120,7 @@ func New(cfg *Config) (*Controller, error) {
 	for name, sc := range cfg.Sources {
 		source, err := buildSource(sc.Type, sc.Config)
 		if err != nil {
-			return nil, fmt.Errorf("access source %q: %w", name, err)
+			return nil, fmt.Errorf("источник доступа «%s»: %w", name, err)
 		}
 		sources[name] = source
 	}
@@ -127,14 +128,14 @@ func New(cfg *Config) (*Controller, error) {
 	for i, rc := range cfg.Rules {
 		source, ok := sources[rc.Source]
 		if !ok {
-			return nil, fmt.Errorf("access rule %d references unknown source %q", i, rc.Source)
+			return nil, fmt.Errorf("правило доступа %d ссылается на источник «%s», которого нет", i, rc.Source)
 		}
 		if len(rc.Builds) == 0 {
-			return nil, fmt.Errorf("access rule %d matches no builds", i)
+			return nil, fmt.Errorf("правило доступа %d не подходит ни к одной сборке", i)
 		}
 		visibility := strings.ToLower(rc.Visibility)
 		if visibility != "" && visibility != "listed" && visibility != "hidden" {
-			return nil, fmt.Errorf("access rule %d has unknown visibility %q (want listed or hidden)", i, rc.Visibility)
+			return nil, fmt.Errorf("у правила доступа %d непонятная видимость «%s» — нужно listed или hidden", i, rc.Visibility)
 		}
 		message := rc.Message
 		if message == "" {
@@ -169,6 +170,11 @@ func (c *Controller) Decide(ctx context.Context, build string, subject Subject) 
 		}
 		allowed, err := r.source.Allows(ctx, build, subject)
 		if err != nil {
+			slog.Default().Error("источник доступа не ответил — сборка закрыта для всех, пока он молчит",
+				"source", "access",
+				"сборка", build,
+				"ошибка", err,
+			)
 			return Decision{Hidden: r.hidden, Reason: "Не удалось проверить доступ, попробуйте позже"}
 		}
 		if !allowed {

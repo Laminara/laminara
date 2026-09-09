@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/format";
@@ -13,12 +13,45 @@ interface ModalProps {
 }
 
 export function Modal({ title, subtitle, compact = false, onClose, children }: ModalProps) {
+  const frame = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(
+        frame.current?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((node) => !node.hasAttribute("disabled"));
+
+    focusable()[0]?.focus();
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const nodes = focusable();
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !frame.current?.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
   }, [onClose]);
 
   return (
@@ -28,6 +61,10 @@ export function Modal({ title, subtitle, compact = false, onClose, children }: M
       style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)" }}
     >
       <div
+        ref={frame}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className={cn(
           "flex flex-col overflow-hidden rounded-lg border border-border bg-bg-tint shadow-panel",
           compact ? "max-h-[85%] w-[560px]" : "h-[88%] w-[84%]",

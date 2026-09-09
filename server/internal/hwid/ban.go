@@ -32,11 +32,11 @@ type BanOutcome struct {
 	NeedsConfirmation bool
 }
 
-var ErrNothingToBan = errors.New("nothing to ban: no machine has been seen for this account")
+var ErrNothingToBan = errors.New("банить нечего: за этим аккаунтом ещё не замечено ни одного компьютера")
 
 func (g *Gate) Ban(ctx context.Context, req BanRequest) (BanOutcome, error) {
 	if g == nil {
-		return BanOutcome{}, errors.New("machine recognition is off")
+		return BanOutcome{}, errors.New("распознавание компьютеров выключено — включите hwid.mode")
 	}
 	now := g.now()
 	identity := Identity{Subject: req.Subject, Username: req.Username}
@@ -111,7 +111,7 @@ func (g *Gate) targetFor(scope apiv1.BanScope, subject string, machines []Machin
 		}
 		return machines[0].ClusterID, nil
 	default:
-		return "", fmt.Errorf("unknown ban scope")
+		return "", fmt.Errorf("непонятная область бана — нужно account, machine или cluster")
 	}
 }
 
@@ -156,28 +156,28 @@ func (g *Gate) reach(ctx context.Context, scope apiv1.BanScope, target string) (
 
 func (g *Gate) Unban(ctx context.Context, reference string) error {
 	if g == nil {
-		return errors.New("machine recognition is off")
+		return errors.New("распознавание компьютеров выключено — включите hwid.mode")
 	}
 	ban, err := g.store.BanByReference(ctx, reference)
 	if err != nil {
 		return err
 	}
 	if ban == nil {
-		return fmt.Errorf("no ban with reference %s", reference)
+		return fmt.Errorf("бана с номером %s нет", reference)
 	}
 	return g.store.LiftBan(ctx, reference)
 }
 
 func (g *Gate) Bans(ctx context.Context, includeInactive bool) ([]Ban, error) {
 	if g == nil {
-		return nil, errors.New("machine recognition is off")
+		return nil, errors.New("распознавание компьютеров выключено — включите hwid.mode")
 	}
 	return g.store.ListBans(ctx, includeInactive, g.now())
 }
 
 func (g *Gate) BanByReference(ctx context.Context, reference string) (*Ban, error) {
 	if g == nil {
-		return nil, errors.New("machine recognition is off")
+		return nil, errors.New("распознавание компьютеров выключено — включите hwid.mode")
 	}
 	return g.store.BanByReference(ctx, reference)
 }

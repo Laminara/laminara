@@ -479,8 +479,23 @@ func TestHardwareKeyCanBeRequired(t *testing.T) {
 		signal(apiv1.SignalKind_SIGNAL_KIND_DISK_SERIAL, 2),
 		signal(apiv1.SignalKind_SIGNAL_KIND_PLATFORM_KEY, 3),
 	)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardware.PlatformKeyPublic = hwid.EncodePublicKey(public)
+	hardware.PlatformKeySignature = ed25519.Sign(private, hwid.Canonical(hardware))
 	if _, err := check(t, strict, "neo", hardware); err != nil {
 		t.Fatalf("a hardware-backed key must pass: %v", err)
+	}
+
+	silent := reportOf(
+		signal(apiv1.SignalKind_SIGNAL_KIND_SMBIOS_UUID, 1),
+		signal(apiv1.SignalKind_SIGNAL_KIND_DISK_SERIAL, 2),
+		signal(apiv1.SignalKind_SIGNAL_KIND_PLATFORM_KEY, 3),
+	)
+	if _, err := check(t, strict, "neo", silent); !errors.Is(err, hwid.ErrSoftwareKey) {
+		t.Fatalf("отчёт без ключа вовсе обходил требование аппаратного ключа, получено %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ export function CrashModal() {
   const send = useLauncher((state) => state.sendCrash);
   const sending = useLauncher((state) => state.crashSending);
   const sent = useLauncher((state) => state.crashSent);
+  const trouble = useLauncher((state) => state.crashError);
   if (!crash) return null;
 
   return (
@@ -24,6 +25,7 @@ export function CrashModal() {
         </pre>
 
         {sent && <div className="shrink-0 rounded-md border border-border bg-surface-2 p-3 text-sm text-dim">{sent}</div>}
+        {trouble && <div className="shrink-0 rounded-md bg-danger/15 p-3 text-sm text-danger">Отчёт не ушёл: {trouble}</div>}
 
         <div className="flex shrink-0 justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard?.writeText(crash.log.join("\n"))}>

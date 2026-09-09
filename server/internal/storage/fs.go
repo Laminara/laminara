@@ -35,7 +35,7 @@ func newFS(raw json.RawMessage) (Backend, error) {
 		return nil, err
 	}
 	if cfg.Root == "" {
-		return nil, errors.New("fs storage requires a root directory")
+		return nil, errors.New("файловому хранилищу нужен каталог: storage.config.root")
 	}
 	if err := os.MkdirAll(cfg.Root, 0o755); err != nil {
 		return nil, err
@@ -99,10 +99,21 @@ func (b *fsBackend) stage(key string, write func(*os.File) error) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), full)
+	if err := os.Rename(tmp.Name(), full); err != nil {
+		return err
+	}
+	if dir, err := os.Open(filepath.Dir(full)); err == nil {
+		_ = dir.Sync()
+		dir.Close()
+	}
+	return nil
 }
 
 func copyInto(dst *os.File, srcPath string) error {

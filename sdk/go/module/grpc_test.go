@@ -293,7 +293,7 @@ func TestServerAdapterExecute(t *testing.T) {
 	if err := srv.Execute(&modulev1.ExecuteRequest{Command: "nope"}, unknown); err != nil {
 		t.Fatal(err)
 	}
-	if f := unknown.final(); f == nil || !strings.Contains(f.Error, "unknown command") {
+	if f := unknown.final(); f == nil || !strings.Contains(f.Error, "в этом модуле нет") {
 		t.Fatalf("expected unknown-command error, final = %+v", f)
 	}
 }

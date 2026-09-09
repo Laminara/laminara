@@ -73,6 +73,21 @@ fn load_ledger(path: &Path) -> Ledger {
         .unwrap_or_default()
 }
 
+pub(crate) const UNFINISHED_FILE: &str = "unfinished";
+
+pub fn install_unfinished(state_dir: &Path) -> bool {
+    state_dir.join(UNFINISHED_FILE).exists()
+}
+
+fn mark_unfinished(state_dir: &Path) -> Result<(), CoreError> {
+    std::fs::write(state_dir.join(UNFINISHED_FILE), b"")
+        .map_err(|e| CoreError::Sync(format!("не отметить начало установки: {e}")))
+}
+
+fn mark_finished(state_dir: &Path) {
+    let _ = std::fs::remove_file(state_dir.join(UNFINISHED_FILE));
+}
+
 pub(crate) fn save_ledger(path: &Path, ledger: &Ledger) -> Result<(), CoreError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -187,7 +202,50 @@ fn is_read_only(meta: &std::fs::Metadata) -> bool {
     }
 }
 
+const OBJECT_ATTEMPTS: usize = 4;
+
 async fn ensure_object(
+    transport: &Transport,
+    base_url: &str,
+    cas_dir: &Path,
+    algo: i32,
+    expected_hex: &str,
+    value: &[u8],
+    executable: bool,
+) -> Result<(PathBuf, u64, bool), CoreError> {
+    let mut last = None;
+    for attempt in 1..=OBJECT_ATTEMPTS {
+        match fetch_object(
+            transport,
+            base_url,
+            cas_dir,
+            algo,
+            expected_hex,
+            value,
+            executable,
+        )
+        .await
+        {
+            Ok(done) => return Ok(done),
+            Err(error) => {
+                if attempt == OBJECT_ATTEMPTS {
+                    last = Some(error);
+                    break;
+                }
+                tracing::warn!(
+                    %expected_hex,
+                    attempt,
+                    %error,
+                    "файл не скачался, пробую ещё раз"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(500 << (attempt - 1))).await;
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| CoreError::Sync(format!("объект {expected_hex} не скачался"))))
+}
+
+async fn fetch_object(
     transport: &Transport,
     base_url: &str,
     cas_dir: &Path,
@@ -419,6 +477,7 @@ pub async fn sync(
         .map_err(|e| CoreError::Sync(format!("create {}: {e}", state_dir.display())))?;
     let ledger_path = state_dir.join(LEDGER_FILE);
     let previous = load_ledger(&ledger_path);
+    mark_unfinished(state_dir)?;
 
     let optional = features::optional_paths(&manifest.features);
     let (_, active_files) = features::resolve_active(&manifest.features, selection);
@@ -598,6 +657,7 @@ pub async fn sync(
     let pruned = prune(profile_dir, &previous, &current_paths)?;
 
     save_ledger(&ledger_path, &ledger)?;
+    mark_finished(state_dir);
     on_progress(SyncProgress {
         stage: SyncStage::Done,
         files_done: files_total,

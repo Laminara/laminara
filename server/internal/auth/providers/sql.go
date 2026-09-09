@@ -142,6 +142,9 @@ func tunePool(db *sql.DB) {
 func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {
 	stored, rawUUID, rawSecret, err := p.lookup(ctx, creds.Username)
 	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			spendSameTime(p.verifier, creds.Password)
+		}
 		return auth.Identity{}, err
 	}
 	valid, err := verify(p.verifier, p.scheme, creds.Password, stored)
@@ -198,7 +201,7 @@ func (p *sqlProvider) lookup(ctx context.Context, username string) (string, sql.
 		return "", rawUUID, rawSecret, err
 	}
 	if len(columns) == 0 || len(columns) > 2 {
-		return "", rawUUID, rawSecret, fmt.Errorf("auth query must select the password and optionally the uuid, got %d columns", len(columns))
+		return "", rawUUID, rawSecret, fmt.Errorf("запрос за аккаунтом должен выбирать пароль и, если нужно, uuid, а выбрал %d колонок", len(columns))
 	}
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {

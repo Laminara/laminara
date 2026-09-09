@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/laminara/laminara/server/internal/config"
 )
@@ -17,6 +18,9 @@ type Doc struct {
 	path string
 	mode os.FileMode
 	tree map[string]any
+
+	once   sync.Once
+	filled map[string]string
 }
 
 func Open(path string) (*Doc, error) {

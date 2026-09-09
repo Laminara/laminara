@@ -176,5 +176,6 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	withDefaults(&cfg, path)
 	return &cfg, nil
 }

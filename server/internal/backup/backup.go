@@ -14,14 +14,17 @@ import (
 	"time"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/safepath"
 	"github.com/laminara/laminara/server/internal/version"
 )
 
 const (
-	manifestName = "manifest.json"
-	filesPrefix  = "files/"
-	maxFileBytes = 512 << 20
+	manifestName    = "manifest.json"
+	filesPrefix     = "files/"
+	maxFileBytes    = 512 << 20
+	maxArchiveBytes = 4 << 30
+	maxArchiveItems = 5000
 )
 
 type Item struct {
@@ -115,11 +118,15 @@ func Skipped(cfg *config.Config) []string {
 }
 
 func Create(cfg *config.Config, configPath, target string) (*Manifest, error) {
-	file, err := os.Create(target)
+	if _, err := os.Stat(target); err == nil {
+		return nil, fmt.Errorf("%s уже существует — назовите архив иначе, чтобы не потерять прежний", target)
+	}
+	file, err := os.CreateTemp(filepath.Dir(target), ".backup-*")
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	partial := file.Name()
+	defer os.Remove(partial)
 
 	compressor := gzip.NewWriter(file)
 	archive := tar.NewWriter(compressor)
@@ -171,6 +178,18 @@ func Create(cfg *config.Config, configPath, target string) (*Manifest, error) {
 	if err := compressor.Close(); err != nil {
 		return nil, err
 	}
+	if err := file.Sync(); err != nil {
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("архив дописать не вышло, он неполный: %w", err)
+	}
+	if err := os.Chmod(partial, 0o600); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(partial, target); err != nil {
+		return nil, err
+	}
 	return manifest, nil
 }
 
@@ -216,6 +235,7 @@ func open(path string) (*Manifest, map[string][]byte, func(), error) {
 
 	archive := tar.NewReader(compressor)
 	payload := map[string][]byte{}
+	var total int64
 	var manifest *Manifest
 
 	for {
@@ -239,6 +259,10 @@ func open(path string) (*Manifest, map[string][]byte, func(), error) {
 				return nil, nil, closer, err
 			}
 			continue
+		}
+		total += int64(len(body))
+		if total > maxArchiveBytes || len(payload) >= maxArchiveItems {
+			return nil, nil, nil, fmt.Errorf("архив слишком большой: больше %s или %d файлов — это не похоже на резервную копию Laminara", humanize.Bytes(maxArchiveBytes), maxArchiveItems)
 		}
 		payload[header.Name] = body
 	}

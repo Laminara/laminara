@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-var errCloneUnsupported = errors.New("block sharing is only implemented on linux")
+var errCloneUnsupported = errors.New("общие блоки файловой системы умеет только Linux")
 
 func cloneFile(*os.File, string) error {
 	return errCloneUnsupported

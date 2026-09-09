@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,10 +13,27 @@ const ExitBadConfig = 78
 type BadConfigError struct {
 	Setting string
 	Reason  string
+	Err     error
 }
 
 func (e *BadConfigError) Error() string {
+	if e.Setting == "" {
+		return e.Reason
+	}
 	return fmt.Sprintf("%s: %s", e.Setting, e.Reason)
+}
+
+func (e *BadConfigError) Unwrap() error { return e.Err }
+
+func Fatal(err error) error {
+	if err == nil {
+		return nil
+	}
+	var broken *BadConfigError
+	if errors.As(err, &broken) {
+		return err
+	}
+	return &BadConfigError{Reason: err.Error(), Err: err}
 }
 
 func badConfig(setting, format string, args ...any) error {

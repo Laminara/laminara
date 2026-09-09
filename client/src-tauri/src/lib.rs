@@ -183,8 +183,62 @@ fn init_state() -> Result<AppState, String> {
     })
 }
 
+fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let payload = uri.strip_prefix("data:")?.split_once(";base64,")?.1;
+    base64::engine::general_purpose::STANDARD
+        .decode(payload.trim())
+        .ok()
+}
+
+fn branding_icon() -> Option<tauri::image::Image<'static>> {
+    let branding = embedded_branding();
+    let uri = branding.get("logoDataUri")?.as_str()?;
+    let bytes = decode_data_uri(uri)?;
+    match tauri::image::Image::from_bytes(&bytes) {
+        Ok(image) => Some(image),
+        Err(error) => {
+            tracing::warn!(%error, "логотип проекта не разобрался как картинка — окно остаётся с иконкой по умолчанию");
+            None
+        }
+    }
+}
+
+fn wear_branding(app: &tauri::App) {
+    use tauri::Manager;
+    let icon = branding_icon();
+    if icon.is_none() {
+        tracing::info!("в оформлении проекта нет логотипа — окно остаётся с иконкой по умолчанию");
+    }
+    let title = embedded_branding()
+        .get("windowTitle")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty());
+
+    for (label, window) in app.webview_windows() {
+        if let Some(icon) = icon.clone() {
+            match window.set_icon(icon) {
+                Ok(()) => tracing::info!(%label, "окно получило иконку проекта"),
+                Err(error) => tracing::warn!(%label, %error, "не вышло поставить окну иконку проекта"),
+            }
+        }
+        if let Some(title) = &title {
+            if let Err(error) = window.set_title(title) {
+                tracing::warn!(%label, %error, "не вышло поставить окну заголовок проекта");
+            }
+        }
+        if let Err(error) = window.show() {
+            tracing::warn!(%label, %error, "окно не показалось");
+        }
+    }
+}
+
 pub fn run() {
-    let log_dir = dirs::data_dir().map(|d| d.join(storage_name()).join("logs"));
+    let name = storage_name();
+    let data_dir = adopt_legacy(dirs::data_dir(), &name);
+    adopt_legacy(dirs::config_dir(), &name);
+    let log_dir = data_dir.map(|dir| dir.join("logs"));
     let _log_guard = log_dir.as_ref().and_then(|dir| logging::init(dir));
     tracing::info!(
         version = env!("LAMINARA_VERSION"),
@@ -195,6 +249,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
+            wear_branding(app);
             let state = init_state().map_err(|e| -> Box<dyn std::error::Error> {
                 tracing::error!("init failed: {e}");
                 e.into()

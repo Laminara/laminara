@@ -23,6 +23,8 @@ func init() {
 	auth.RegisterProvider("http", newHTTP)
 }
 
+const maxAuthResponseBytes = 1 << 20
+
 type httpConfig struct {
 	URL               string            `json:"url"`
 	Headers           map[string]string `json:"headers"`
@@ -131,7 +133,11 @@ func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials)
 	defer resp.Body.Close()
 
 	var payload map[string]any
-	if data, _ := io.ReadAll(resp.Body); len(data) > 0 {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAuthResponseBytes))
+	if err != nil {
+		return auth.Identity{}, fmt.Errorf("ответ источника аккаунтов не дочитался: %w", err)
+	}
+	if len(data) > 0 {
 		_ = json.Unmarshal(data, &payload)
 	}
 
@@ -152,10 +158,13 @@ func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials)
 	if p.secondFactorField != "" && marked(lookup(payload, p.secondFactorField)) {
 		return auth.Identity{}, auth.ErrTwoFactorRequired
 	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || p.successField != "" {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return auth.Identity{}, auth.ErrInvalidCredentials
 	}
-	return auth.Identity{}, fmt.Errorf("auth endpoint returned status %d", resp.StatusCode)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return auth.Identity{}, auth.ErrInvalidCredentials
+	}
+	return auth.Identity{}, fmt.Errorf("источник аккаунтов ответил %d", resp.StatusCode)
 }
 
 func lookup(payload map[string]any, path string) any {

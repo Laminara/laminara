@@ -11,16 +11,28 @@ import (
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/server/internal/admin"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/serversetup"
 	"github.com/laminara/laminara/server/internal/settings"
 )
 
 type settingsStore struct {
 	path    string
 	restart func() error
+	verify  func(path string) error
 
 	mu      sync.Mutex
 	pending bool
 	changed func(path string)
+}
+
+func buildable(path string) error {
+	cfg, err := config.LoadChecked(path)
+	if err != nil {
+		return err
+	}
+	_, err = serversetup.Build(cfg)
+	return err
 }
 
 type entryView struct {
@@ -178,6 +190,11 @@ func (s *settingsStore) Remove(path string) error {
 func (s *settingsStore) Restart() error {
 	if s.restart == nil {
 		return errors.New("этот сервер сам себя перезапустить не может")
+	}
+	if s.verify != nil {
+		if err := s.verify(s.path); err != nil {
+			return fmt.Errorf("перезапуск отменён — с такими настройками сервер не поднимется: %w", err)
+		}
 	}
 	return s.restart()
 }

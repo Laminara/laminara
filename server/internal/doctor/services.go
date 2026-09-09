@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,10 +14,12 @@ import (
 	"time"
 
 	"github.com/laminara/laminara/server/internal/access"
+	"github.com/laminara/laminara/server/internal/bake"
 	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/hwid"
+	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/version"
 )
@@ -64,9 +68,22 @@ func checkProxies(opts Options, probe *diag.Probe) {
 		})
 	case trusted > 0:
 		probe.OK("адреса игроков", "доверенных прокси %d", trusted)
+	case cfg.API != nil && openToTheWorld(cfg.API.Addr):
+		probe.Warn("адреса игроков", "порт открыт наружу, а api.trustedProxies не задан", diag.Remedy{
+			Hint:    "без списка сервер доверяет заголовку X-Forwarded-For от любой машины из локальной сети: сосед сможет назваться чужим адресом и обойти защиту от перебора",
+			Command: "laminara-server settings api.trustedProxies 127.0.0.1",
+		})
 	default:
 		probe.OK("адреса игроков", "берутся из соединения напрямую")
 	}
+}
+
+func openToTheWorld(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
 func behindProxy(opts Options) bool {
@@ -134,6 +151,8 @@ func checkMachines(ctx context.Context, opts Options, probe *diag.Probe) {
 	checkSecret(probe, cfg.HWID.TicketSecretPath, "ключ пропусков", "hwid.ticketSecretPath", "hwid-ticket.key",
 		"без постоянного ключа выданные пропуска перестают приниматься после перезапуска")
 
+	checkLauncherKnowsSalt(opts, probe)
+
 	if opts.Wired == nil || opts.Wired.Machines == nil {
 		probe.Skip("база компьютеров", "компоненты не собраны")
 		return
@@ -143,11 +162,57 @@ func checkMachines(ctx context.Context, opts Options, probe *diag.Probe) {
 	}
 }
 
+func checkLauncherKnowsSalt(opts Options, probe *diag.Probe) {
+	cfg := opts.Config
+	if cfg.Launcher == nil || cfg.Launcher.Dir == "" {
+		return
+	}
+	published, _, err := launchersvc.NewReleases(cfg.Launcher.Dir).Current()
+	if err != nil || len(published) == 0 {
+		return
+	}
+	release, err := launchersvc.Decode(published)
+	if err != nil {
+		return
+	}
+	salt, err := hwid.LoadOrCreateSalt(cfg.HWID.SaltPath)
+	if err != nil {
+		return
+	}
+	wanted := hex.EncodeToString(salt)
+
+	for _, artifact := range release.Artifacts {
+		image, err := os.ReadFile(filepath.Join(cfg.Launcher.Dir, release.Version, artifact.FileName))
+		if err != nil {
+			continue
+		}
+		baked, ok := bake.Read(image)
+		if !ok {
+			continue
+		}
+		var document struct {
+			HWIDSaltHex string `json:"hwidSaltHex"`
+		}
+		if json.Unmarshal(baked, &document) != nil {
+			continue
+		}
+		if document.HWIDSaltHex == wanted {
+			probe.OK("лаунчер знает соль", "версия %s", release.Version)
+			return
+		}
+		probe.Fail("лаунчер не знает соль", fmt.Sprintf("лаунчер %s собран с другой солью отпечатков", release.Version), diag.Remedy{
+			Hint:    "распознавание компьютеров включили после выпуска лаунчера: игроки со старым лаунчером не смогут войти, пока он не пересобран",
+			Command: "laminara-server exec \"launcher build\"",
+		})
+		return
+	}
+}
+
 func modeWord(mode hwid.Mode) string {
 	switch mode {
 	case hwid.ModeEnforce:
 		return "не пускать нарушителей"
-	case hwid.ModeObserve:
+	case hwid.ModeObserve, "":
 		return "только наблюдение"
 	default:
 		return string(mode)

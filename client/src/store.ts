@@ -34,7 +34,11 @@ interface LauncherState {
   crash: { code: number; log: string[]; build: string; loader: string; version: string; full: string[] } | null;
   crashSending: boolean;
   crashSent: string | null;
+  crashError: string | null;
+  crashTimer: ReturnType<typeof setTimeout> | null;
   stoppedByUser: boolean;
+  cancelRequested: boolean;
+  staleBuilds: string[];
   update: LauncherUpdate | null;
   updateProgress: { done: number; total: number } | null;
   updateDismissed: boolean;
@@ -71,6 +75,8 @@ interface LauncherState {
 
 export const useLauncher = create<LauncherState>((set, get) => ({
   phase: "connecting",
+  cancelRequested: false,
+  staleBuilds: [],
   endpoint: null,
   account: null,
   builds: [],
@@ -86,6 +92,8 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   gameLog: [],
   crash: null,
   crashSending: false,
+  crashError: null,
+  crashTimer: null,
   crashSent: null,
   stoppedByUser: false,
   update: null,
@@ -110,9 +118,9 @@ export const useLauncher = create<LauncherState>((set, get) => ({
         exitCode: crash.code,
         log: crash.full.join("\n"),
       });
-      set({ crashSent: message });
+      set({ crashSent: message, crashError: null });
     } catch (err) {
-      set({ crashSent: String(err) });
+      set({ crashError: String(err) });
     } finally {
       set({ crashSending: false });
     }
@@ -133,6 +141,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   select: (name) => set({ selected: name }),
   markOutdated: (name) =>
     set((state) => ({
+      staleBuilds: state.staleBuilds.includes(name) ? state.staleBuilds : [...state.staleBuilds, name],
       builds: state.builds.map((build) => (build.name === name && build.install === "installed" ? { ...build, install: "outdated" } : build)),
     })),
 
@@ -142,7 +151,11 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     quietly(async () => {
       const phase = get().phase;
       if (phase !== "home") return;
-      const builds = await ipc.listBuilds();
+      const fresh = await ipc.listBuilds();
+      const stale = get().staleBuilds;
+      const builds = fresh.map((build) =>
+        stale.includes(build.name) && build.install === "installed" ? { ...build, install: "outdated" as const } : build,
+      );
       const selected = get().selected;
       set({ builds, selected: selected && builds.some((build) => build.name === selected) ? selected : pickBuild(builds) });
     }),
@@ -175,13 +188,15 @@ export const useLauncher = create<LauncherState>((set, get) => ({
         set({ phase: "login" });
         return;
       }
-      const builds = await ipc.listBuilds();
-      set({
-        account: status.username ? { uuid: status.uuid ?? "", name: status.username, endpointId: get().endpoint?.id ?? "" } : null,
-        builds,
-        selected: pickBuild(builds),
-        phase: "home",
-      });
+      const account = status.username ? { uuid: status.uuid ?? "", name: status.username, endpointId: get().endpoint?.id ?? "" } : null;
+      let builds: Build[] = [];
+      let trouble: string | null = null;
+      try {
+        builds = await ipc.listBuilds();
+      } catch (err) {
+        trouble = String(err);
+      }
+      set({ account, builds, selected: pickBuild(builds), phase: "home", error: trouble });
       void get().refreshPlayers();
       void get().refreshNews();
     } catch (err) {
@@ -209,7 +224,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
             set({ stoppedByUser: false });
             if (get().phase === "running") set({ phase: "home" });
             if (code === 0 || stoppedByUser) return;
-            setTimeout(() => {
+            const timer = setTimeout(() => {
               const state = get();
               const build = state.builds.find((item) => item.name === state.selected);
               set({
@@ -222,8 +237,10 @@ export const useLauncher = create<LauncherState>((set, get) => ({
                   version: build?.minecraft ?? "",
                 },
                 crashSent: null,
+                crashTimer: null,
               });
             }, CRASH_LOG_SETTLE_MS);
+            set({ crashTimer: timer });
           }),
         );
         if (get().unbinding) {
@@ -295,6 +312,12 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   },
 
   play: async () => {
+    if (get().phase !== "home") return;
+    const pending = get().crashTimer;
+    if (pending) {
+      clearTimeout(pending);
+      set({ crashTimer: null });
+    }
     const name = get().selected;
     if (!name) return;
     const block = buildBlock(get().builds.find((item) => item.name === name));
@@ -302,7 +325,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ error: block.reason });
       return;
     }
-    set({ phase: "syncing", sync: null, error: null, crash: null, crashSent: null, gameLog: [], stoppedByUser: false });
+    set({ phase: "syncing", sync: null, error: null, crash: null, crashSent: null, crashError: null, gameLog: [], stoppedByUser: false, cancelRequested: false });
     try {
       const rate = newRateMeter();
       await ipc.syncProfile(name, (event: SyncEvent) => {
@@ -310,13 +333,22 @@ export const useLauncher = create<LauncherState>((set, get) => ({
           set({ sync: { stage: "planning", filesDone: 0, filesTotal: event.data.filesTotal, bytesDone: 0, bytesTotal: event.data.bytesTotal } });
         } else if (event.event === "progress") {
           set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
+        } else if (event.event === "finished") {
+          const current = get().sync;
+          if (current) set({ sync: { ...current, stage: "launching" } });
         }
       });
-      set({ builds: await ipc.listBuilds() });
+      set({ staleBuilds: get().staleBuilds.filter((item) => item !== name) });
+      ipc.listBuilds().then((builds) => set({ builds })).catch(() => undefined);
+      if (get().cancelRequested) {
+        set({ phase: "home", sync: null });
+        return;
+      }
       await ipc.launch(name);
-      if (get().phase === "syncing") set({ phase: "running" });
+      set({ phase: "running" });
     } catch (err) {
-      set({ phase: "home", error: String(err) });
+      set({ phase: "home", sync: null });
+      if (!get().cancelRequested) set({ error: String(err) });
     }
   },
 
@@ -342,13 +374,23 @@ export const useLauncher = create<LauncherState>((set, get) => ({
 
   cancelSync: async () => {
     const name = get().selected;
-    if (name) await ipc.cancelJob(name);
-    set({ phase: "home", sync: null });
+    set({ cancelRequested: true });
+    try {
+      if (name) await ipc.cancelJob(name);
+    } catch {
+      void 0;
+    } finally {
+      set({ phase: "home", sync: null });
+    }
   },
 
   stopGame: async () => {
     set({ stoppedByUser: true });
-    await ipc.stop();
+    try {
+      await ipc.stop();
+    } catch (err) {
+      set({ stoppedByUser: false, error: String(err) });
+    }
   },
 }));
 

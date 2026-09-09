@@ -41,7 +41,7 @@ func newS3(raw json.RawMessage) (Backend, error) {
 		return nil, err
 	}
 	if cfg.Endpoint == "" || cfg.Bucket == "" {
-		return nil, errors.New("s3 storage requires an endpoint and bucket")
+		return nil, errors.New("хранилищу S3 нужны адрес и бакет: storage.config.endpoint и storage.config.bucket")
 	}
 	host := cfg.Endpoint
 	secure := true

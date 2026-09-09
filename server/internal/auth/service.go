@@ -70,7 +70,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*Tokens, er
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return nil, ErrInvalidToken
+		return nil, sessionFailure(err)
 	}
 	now := s.now()
 	if session.Revoked || now.After(session.ExpiresAt) {
@@ -92,7 +92,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*Tokens, er
 	session.AccessExpiresAt = now.Add(s.cfg.AccessTTL)
 	session.RefreshTokenHash = refreshHash
 	if err := s.sessions.Update(ctx, session); err != nil {
-		return nil, err
+		return nil, sessionFailure(err)
 	}
 	return &Tokens{
 		Access:         accessToken,
@@ -109,7 +109,7 @@ func (s *Service) ValidateAccess(ctx context.Context, accessToken string) (Ident
 	}
 	session, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return Identity{}, ErrInvalidToken
+		return Identity{}, sessionFailure(err)
 	}
 	if session.Revoked || s.now().After(session.AccessExpiresAt) {
 		return Identity{}, ErrInvalidToken
@@ -156,4 +156,11 @@ func (s *Service) issue(ctx context.Context, identity Identity) (*Tokens, error)
 		Refresh:        refreshToken,
 		RefreshExpires: session.ExpiresAt,
 	}, nil
+}
+
+func sessionFailure(err error) error {
+	if errors.Is(err, ErrSessionNotFound) {
+		return ErrInvalidToken
+	}
+	return fmt.Errorf("%w: %w", ErrSessionsUnavailable, err)
 }

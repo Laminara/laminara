@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +14,7 @@ import (
 )
 
 const (
-	defaultLimit    = 20
+	DefaultLimit    = 20
 	defaultCacheTTL = 5 * time.Minute
 	maxBodyRunes    = 2000
 	maxTitleRunes   = 160
@@ -74,7 +76,7 @@ func parse(data []byte) ([]Item, error) {
 	}
 	var doc document
 	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
-		return nil, fmt.Errorf("news is neither a list nor an object with \"items\": %w", err)
+		return nil, fmt.Errorf("новости должны быть списком или объектом с полем \"items\": %w", err)
 	}
 	return doc.Items, nil
 }
@@ -91,7 +93,7 @@ func New(cfg *Config) (*Service, error) {
 	}
 	factory, ok := sourceFactories[cfg.Source.Type]
 	if !ok {
-		return nil, fmt.Errorf("unknown news source %q (have %s)", cfg.Source.Type, strings.Join(SourceNames(), ", "))
+		return nil, fmt.Errorf("источника новостей «%s» нет — выберите из: %s", cfg.Source.Type, strings.Join(SourceNames(), ", "))
 	}
 	source, err := factory(cfg.Source.Config)
 	if err != nil {
@@ -99,9 +101,9 @@ func New(cfg *Config) (*Service, error) {
 	}
 	limit := cfg.Limit
 	if limit <= 0 {
-		limit = defaultLimit
+		limit = DefaultLimit
 	}
-	return &Service{source: source, limit: limit, banners: newBannerCache()}, nil
+	return &Service{source: source, limit: limit, banners: newBannerCache(cfg.Source.Type == "file")}, nil
 }
 
 func (s *Service) Enabled() bool { return s != nil }
@@ -110,10 +112,15 @@ func (s *Service) Latest(ctx context.Context) []*apiv1.NewsItem {
 	if s == nil {
 		return nil
 	}
-	items, err := s.source.Items(ctx)
+	fromSource, err := s.source.Items(ctx)
 	if err != nil {
+		slog.Default().Warn("новости не прочитались — лаунчер покажет пустой блок",
+			"source", "news",
+			"ошибка", err,
+		)
 		return nil
 	}
+	items := slices.Clone(fromSource)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].PublishedAt.After(items[j].PublishedAt) })
 	if len(items) > s.limit {
 		items = items[:s.limit]

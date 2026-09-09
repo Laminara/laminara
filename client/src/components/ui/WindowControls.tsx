@@ -1,6 +1,7 @@
 import { Minus, X } from "@phosphor-icons/react";
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+import { isTauri } from "@/lib/ipc";
+
 
 async function appWindow() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");

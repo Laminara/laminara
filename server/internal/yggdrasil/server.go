@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -129,11 +130,11 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.machines.VerifyTicket(r.Header.Get(MachineTicketHeader), hwid.IdentityOf(identity)); err != nil {
-		yggError(w, http.StatusForbidden, err.Error())
+		yggError(w, http.StatusForbidden, machineMessage(err))
 		return
 	}
 	if err := s.machines.CheckSubject(r.Context(), hwid.IdentityOf(identity)); err != nil {
-		yggError(w, http.StatusForbidden, err.Error())
+		yggError(w, http.StatusForbidden, machineMessage(err))
 		return
 	}
 	clientToken := req.ClientToken
@@ -163,11 +164,15 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	current, ok := s.store.session(req.AccessToken)
 	if !ok || (req.ClientToken != "" && req.ClientToken != current.clientToken) {
-		yggError(w, http.StatusForbidden, "Invalid token.")
+		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
 	newAccess := randomToken()
-	sess, _ := s.store.rotateSession(req.AccessToken, newAccess, tokenTTL)
+	sess, rotated := s.store.rotateSession(req.AccessToken, newAccess, tokenTTL)
+	if !rotated {
+		yggError(w, http.StatusForbidden, "Токен недействителен.")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken":     newAccess,
 		"clientToken":     sess.clientToken,
@@ -185,7 +190,7 @@ func (s *Server) validate(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, ok := s.store.session(req.AccessToken)
 	if !ok || (req.ClientToken != "" && req.ClientToken != sess.clientToken) {
-		yggError(w, http.StatusForbidden, "Invalid token.")
+		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -237,11 +242,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, ok := s.store.session(req.AccessToken)
 	if !ok {
-		yggError(w, http.StatusForbidden, "Invalid token.")
+		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
 	if err := s.machines.CheckSubject(r.Context(), hwid.IdentityOf(sess.identity)); err != nil {
-		yggError(w, http.StatusForbidden, err.Error())
+		yggError(w, http.StatusForbidden, machineMessage(err))
 		return
 	}
 	s.store.putJoin(req.ServerID, sess.identity, joinTTL)
@@ -332,15 +337,37 @@ func yggErrorType(w http.ResponseWriter, status int, errorType, message string) 
 
 func messageFor(err error) string {
 	if errors.Is(err, auth.ErrTwoFactorRequired) {
-		return "Two-factor authentication code required."
+		return "Нужен код из приложения-аутентификатора."
 	}
-	return "Invalid credentials. Invalid username or password."
+	return "Неверный логин или пароль."
 }
 
+const maxYggBodyBytes = 64 << 10
+
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxYggBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
-		yggError(w, http.StatusBadRequest, "Malformed request body.")
+		yggError(w, http.StatusBadRequest, "Запрос составлен неверно.")
 		return false
 	}
 	return true
+}
+
+func machineMessage(err error) string {
+	if ban, ok := hwid.AsBanError(err); ok {
+		return ban.Error()
+	}
+	switch {
+	case errors.Is(err, hwid.ErrReportRequired),
+		errors.Is(err, hwid.ErrReportInvalid),
+		errors.Is(err, hwid.ErrChallengeStale),
+		errors.Is(err, hwid.ErrVirtualMachine),
+		errors.Is(err, hwid.ErrSoftwareKey):
+		return err.Error()
+	}
+	slog.Default().Error("проверка компьютера не прошла из-за внутренней ошибки",
+		"source", "yggdrasil",
+		"ошибка", err,
+	)
+	return "Сервер не смог проверить компьютер — попробуйте позже."
 }

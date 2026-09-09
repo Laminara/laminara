@@ -19,10 +19,19 @@ type Command struct {
 
 type Registry struct {
 	commands map[string]Command
+	asleep   map[string]string
 }
 
 func NewRegistry() *Registry {
-	return &Registry{commands: make(map[string]Command)}
+	return &Registry{commands: make(map[string]Command), asleep: make(map[string]string)}
+}
+
+func (r *Registry) Sleeping(reason string, names ...string) {
+	for _, name := range names {
+		if _, taken := r.commands[name]; !taken {
+			r.asleep[name] = reason
+		}
+	}
 }
 
 func (r *Registry) Register(c Command) {
@@ -58,6 +67,9 @@ func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) err
 	}
 	c, ok := r.commands[fields[0]]
 	if !ok {
+		if reason, sleeping := r.asleep[fields[0]]; sleeping {
+			return fmt.Errorf("команда «%s» есть, но сейчас выключена: %s", fields[0], reason)
+		}
 		return fmt.Errorf("команды «%s» нет — весь список даёт help", fields[0])
 	}
 	return c.Run(ctx, fields[1:], out)

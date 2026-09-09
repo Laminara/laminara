@@ -16,9 +16,9 @@ export function Header() {
   const initial = account?.name?.[0]?.toUpperCase() ?? "?";
 
   return (
-    <header data-tauri-drag-region className="relative z-30 flex items-center justify-between px-9 py-6">
+    <header data-tauri-drag-region className="relative z-30 flex items-center justify-between gap-4 px-9 py-6">
       <BrandMark />
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         {players && players.total.max > 0 && (
           <div className="flex items-center gap-2.5 rounded-full border border-border bg-panel px-4 py-2.5 backdrop-blur-md">
             <OnlineDot />
@@ -41,10 +41,15 @@ export function Header() {
         <div className="relative">
           <button
             onClick={toggleMenu}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && menuOpen) closeMenu();
+            }}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             className="flex items-center gap-2.5 rounded-full border border-border bg-surface py-2 pl-2 pr-3.5 transition-colors hover:bg-surface-2"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-ink">{initial}</span>
-            <span className="text-sm font-semibold">{account?.name ?? "Гость"}</span>
+            <span className="max-w-40 truncate text-sm font-semibold">{account?.name ?? "Гость"}</span>
             <CaretDown size={14} className={`text-dim transition-transform ${menuOpen ? "rotate-180" : ""}`} />
           </button>
 

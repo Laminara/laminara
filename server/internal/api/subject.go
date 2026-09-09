@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/laminara/laminara/server/internal/access"
+	"github.com/laminara/laminara/server/internal/auth"
 )
 
 const (
@@ -85,9 +86,10 @@ const (
 	tokenAbsent tokenState = iota
 	tokenValid
 	tokenStale
+	tokenUnknown
 )
 
-var errStaleSession = errors.New("session expired, sign in again")
+var errStaleSession = errors.New("сессия истекла — войдите заново")
 
 func (s *Service) subjectOf(ctx context.Context, header http.Header) (access.Subject, tokenState) {
 	token := bearerToken(header)
@@ -99,6 +101,13 @@ func (s *Service) subjectOf(ctx context.Context, header http.Header) (access.Sub
 	}
 	identity, err := s.auth.ValidateAccess(ctx, token)
 	if err != nil {
+		if errors.Is(err, auth.ErrSessionsUnavailable) {
+			s.log.Error("хранилище сессий не отвечает — игроки получат «сервер недоступен», а не «войдите заново»",
+				"source", "api",
+				"ошибка", err,
+			)
+			return access.Subject{}, tokenUnknown
+		}
 		return access.Subject{}, tokenStale
 	}
 	subject := access.Subject{Subject: identity.Subject, Username: identity.Username, UUID: identity.UUID.String()}

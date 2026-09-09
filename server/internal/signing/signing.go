@@ -29,7 +29,7 @@ func decodeSeed(data []byte) (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 	if len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("signing key: expected a %d-byte seed, got %d", ed25519.SeedSize, len(seed))
+		return nil, fmt.Errorf("ключ подписи испорчен: ждали %d байт, в файле %d", ed25519.SeedSize, len(seed))
 	}
 	return ed25519.NewKeyFromSeed(seed), nil
 }

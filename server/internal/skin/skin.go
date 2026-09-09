@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -38,16 +39,21 @@ func ProviderNames() []string {
 func Build(name string, config json.RawMessage) (Provider, error) {
 	factory, ok := factories[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown skin provider %q", name)
+		return nil, fmt.Errorf("источника скинов «%s» нет — выберите из: %s", name, strings.Join(ProviderNames(), ", "))
+	}
+	if len(config) == 0 {
+		config = json.RawMessage("{}")
 	}
 	return factory(config)
 }
 
 func substitute(template, username, uuid string) string {
+	safeName := url.PathEscape(username)
+	safeUUID := url.PathEscape(uuid)
 	return strings.NewReplacer(
-		"%nickname%", username,
-		"%username%", username,
-		"%uuid%", uuid,
-		"%hash%", strings.ReplaceAll(uuid, "-", ""),
+		"%nickname%", safeName,
+		"%username%", safeName,
+		"%uuid%", safeUUID,
+		"%hash%", url.PathEscape(strings.ReplaceAll(uuid, "-", "")),
 	).Replace(template)
 }

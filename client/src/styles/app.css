@@ -50,6 +50,11 @@ body {
   user-select: none;
 }
 
+pre,
+.selectable {
+  user-select: text;
+}
+
 ::selection {
   background: color-mix(in srgb, var(--lm-primary) 32%, transparent);
 }

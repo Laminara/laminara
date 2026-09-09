@@ -16,8 +16,22 @@ var platformOnly = map[string]bool{
 	"runtime": true,
 }
 
+const migrationMark = ".laminara/migrating"
+
+func migrationStarted(root string) bool {
+	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(migrationMark)))
+	return err == nil
+}
+
 func shareCommonFiles(root string, platforms []corev1.Platform) (uint64, error) {
 	var freed uint64
+	mark := filepath.Join(root, filepath.FromSlash(migrationMark))
+	if err := os.MkdirAll(filepath.Dir(mark), 0o750); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(mark, []byte("перенос раскладки сборки начат"), 0o600); err != nil {
+		return 0, err
+	}
 	for index, p := range platforms {
 		key, ok := platform.Key(p)
 		if !ok {
@@ -33,6 +47,9 @@ func shareCommonFiles(root string, platforms []corev1.Platform) (uint64, error) 
 		if err := os.RemoveAll(from); err != nil {
 			return freed, err
 		}
+	}
+	if err := os.Remove(mark); err != nil && !os.IsNotExist(err) {
+		return freed, err
 	}
 	return freed, nil
 }

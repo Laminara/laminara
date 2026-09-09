@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/auth/hash"
@@ -8,6 +11,7 @@ import (
 	"github.com/laminara/laminara/server/internal/crash"
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/news"
+	"github.com/laminara/laminara/server/internal/ratelimit"
 	"github.com/laminara/laminara/server/internal/selfupdate"
 	"github.com/laminara/laminara/server/internal/skin"
 	"github.com/laminara/laminara/server/internal/sqlschema"
@@ -55,6 +59,12 @@ type Collection struct {
 	NameLabel string
 	NameHint  string
 	Fields    []Field
+}
+
+func countOf(bucket ratelimit.Bucket) string { return strconv.Itoa(bucket.Limit) }
+
+func overOf(bucket ratelimit.Bucket) string {
+	return strings.TrimSuffix(bucket.Per.Duration().String(), "0s")
 }
 
 var schema = []Section{
@@ -272,12 +282,12 @@ var schema = []Section{
 			{Key: "redis.password", Label: "Пароль Redis", Kind: KindSecret, Hint: "Пусто, если Redis без requirepass."},
 			{Key: "redis.db", Label: "Номер базы Redis", Kind: KindInt, Default: "0"},
 			{Key: "redis.tls", Label: "Redis через TLS", Kind: KindBool, Default: "false", Hint: "Для облачного Redis. Локальному не нужно."},
-			{Key: "login.limit", Label: "Попыток с адреса", Kind: KindInt, Default: "10"},
-			{Key: "login.per", Label: "За время", Kind: KindDuration, Default: "1m"},
-			{Key: "account.limit", Label: "Попыток на аккаунт", Kind: KindInt, Default: "30", Hint: "Тесный лимит позволил бы закрыть вход названному игроку."},
-			{Key: "account.per", Label: "За время", Kind: KindDuration, Default: "10m"},
-			{Key: "challenge.limit", Label: "Заданий на подпись", Kind: KindInt, Default: "30"},
-			{Key: "challenge.per", Label: "За время", Kind: KindDuration, Default: "1m"},
+			{Key: "login.limit", Label: "Попыток с адреса", Kind: KindInt, Default: countOf(ratelimit.DefaultLogin)},
+			{Key: "login.per", Label: "За время", Kind: KindDuration, Default: overOf(ratelimit.DefaultLogin)},
+			{Key: "account.limit", Label: "Попыток на аккаунт", Kind: KindInt, Default: countOf(ratelimit.DefaultAccount), Hint: "Тесный лимит позволил бы закрыть вход названному игроку."},
+			{Key: "account.per", Label: "За время", Kind: KindDuration, Default: overOf(ratelimit.DefaultAccount)},
+			{Key: "challenge.limit", Label: "Заданий на подпись", Kind: KindInt, Default: countOf(ratelimit.DefaultChallenge)},
+			{Key: "challenge.per", Label: "За время", Kind: KindDuration, Default: overOf(ratelimit.DefaultChallenge)},
 		},
 	},
 	{
@@ -286,7 +296,7 @@ var schema = []Section{
 		Hint:  "Простой текст: лаунчер держит сессию игрока, поэтому разметку извне он не показывает.",
 		Fields: []Field{
 			{Key: "source.type", Label: "Откуда брать", Kind: KindChoice, Options: news.SourceNames, Hint: "Пусто — новостей нет."},
-			{Key: "limit", Label: "Сколько показывать", Kind: KindInt, Default: "10"},
+			{Key: "limit", Label: "Сколько показывать", Kind: KindInt, Default: strconv.Itoa(news.DefaultLimit)},
 			{Key: "source.config", Label: "Настройки источника", VariantOf: "source.type", Variants: map[string][]Field{
 				"file": {
 					{Key: "path", Label: "Файл новостей", Kind: KindText},

@@ -36,17 +36,40 @@ func newStore(now func() time.Time) *store {
 	}
 }
 
+const maxLiveRecords = 20_000
+
 func (s *store) putSession(accessToken, clientToken string, identity auth.Identity, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.sessions) >= maxLiveRecords {
+		s.sweepLocked()
+	}
 	s.sessions[accessToken] = session{clientToken: clientToken, identity: identity, expiresAt: s.now().Add(ttl)}
+}
+
+func (s *store) sweepLocked() {
+	now := s.now()
+	for token, sess := range s.sessions {
+		if now.After(sess.expiresAt) {
+			delete(s.sessions, token)
+		}
+	}
+	for id, record := range s.joins {
+		if now.After(record.expiresAt) {
+			delete(s.joins, id)
+		}
+	}
 }
 
 func (s *store) session(accessToken string) (session, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[accessToken]
-	if !ok || s.now().After(sess.expiresAt) {
+	if !ok {
+		return session{}, false
+	}
+	if s.now().After(sess.expiresAt) {
+		delete(s.sessions, accessToken)
 		return session{}, false
 	}
 	return sess, true
@@ -84,6 +107,9 @@ func (s *store) deleteUser(username string) {
 func (s *store) putJoin(serverID string, identity auth.Identity, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.joins) >= maxLiveRecords {
+		s.sweepLocked()
+	}
 	s.joins[serverID] = joinRecord{identity: identity, expiresAt: s.now().Add(ttl)}
 }
 
@@ -91,7 +117,11 @@ func (s *store) join(serverID string) (auth.Identity, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.joins[serverID]
-	if !ok || s.now().After(record.expiresAt) {
+	if !ok {
+		return auth.Identity{}, false
+	}
+	if s.now().After(record.expiresAt) {
+		delete(s.joins, serverID)
 		return auth.Identity{}, false
 	}
 	return record.identity, true

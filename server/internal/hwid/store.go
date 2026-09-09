@@ -62,9 +62,13 @@ func StoreNames() []string {
 func BuildStore(cfg StoreConfig) (Store, error) {
 	factory, ok := storeFactories[cfg.Backend]
 	if !ok {
-		return nil, fmt.Errorf("unknown hwid store %q (have %s)", cfg.Backend, strings.Join(StoreNames(), ", "))
+		return nil, fmt.Errorf("базы компьютеров «%s» нет — выберите из: %s", cfg.Backend, strings.Join(StoreNames(), ", "))
 	}
-	return factory(cfg.Config)
+	config := cfg.Config
+	if len(config) == 0 {
+		config = json.RawMessage("{}")
+	}
+	return factory(config)
 }
 
 func signalKey(kind apiv1.SignalKind, digest string) string {

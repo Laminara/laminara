@@ -34,6 +34,8 @@ pub fn default_http_client() -> reqwest::Client {
         .http1_only()
         .use_rustls_tls()
         .redirect(reqwest::redirect::Policy::limited(5))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(60))
         .build()
         .expect("build http client")
 }

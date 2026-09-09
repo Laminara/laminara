@@ -12,17 +12,26 @@ export function BuildSettingsModal({ profile }: { profile: string }) {
   const repair = useLauncher((state) => state.repairBuild);
   const [data, setData] = useState<BuildSettings | null>(null);
   const [memory, setMemory] = useState(4096);
+  const [trouble, setTrouble] = useState<string | null>(null);
 
   useEffect(() => {
-    void ipc.buildSettings(profile).then((settings) => {
-      setData(settings);
-      setMemory(settings.maxMemoryMb ?? settings.defaultMemoryMb);
-    });
+    ipc
+      .buildSettings(profile)
+      .then((settings) => {
+        setData(settings);
+        setMemory(Math.min(settings.maxMemoryMb ?? settings.defaultMemoryMb, settings.allowedMemoryMb));
+        setTrouble(null);
+      })
+      .catch((err: unknown) => setTrouble(String(err)));
   }, [profile]);
 
   const save = async () => {
-    await ipc.setBuildMemory(profile, memory);
-    close();
+    try {
+      await ipc.setBuildMemory(profile, memory);
+      close();
+    } catch (err) {
+      setTrouble(String(err));
+    }
   };
 
   const check = () => {
@@ -32,9 +41,11 @@ export function BuildSettingsModal({ profile }: { profile: string }) {
 
   return (
     <Modal title="Настройки сборки" subtitle={profile} compact onClose={close}>
+      {trouble && <div className="mb-4 rounded-lg bg-danger/15 px-3 py-2 text-sm text-danger">{trouble}</div>}
+      {!data && !trouble && <div className="text-sm text-dim">Загружаю настройки сборки…</div>}
       {data && (
         <div className="flex flex-col gap-6">
-          <MemoryField valueMb={memory} onChange={setMemory} />
+          <MemoryField valueMb={memory} onChange={setMemory} max={data.allowedMemoryMb} />
 
           <div className="flex flex-col gap-2 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-4">

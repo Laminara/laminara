@@ -33,6 +33,21 @@ func (s *Service) ReportCrash(ctx context.Context, req *connect.Request[apiv1.Re
 		happened = time.Unix(0, incoming.HappenedAtUnixNanos)
 	}
 
+	details := incoming.Details
+	if len(details) > crash.MaxDetails {
+		trimmed := make(map[string]string, crash.MaxDetails)
+		for key, value := range details {
+			if len(trimmed) >= crash.MaxDetails {
+				break
+			}
+			if len(value) > crash.MaxDetailBytes {
+				value = value[:crash.MaxDetailBytes]
+			}
+			trimmed[key] = value
+		}
+		details = trimmed
+	}
+
 	report := crash.Report{
 		Player:    subject.Username,
 		UUID:      subject.UUID,
@@ -41,14 +56,14 @@ func (s *Service) ReportCrash(ctx context.Context, req *connect.Request[apiv1.Re
 		Loader:    incoming.Loader,
 		ExitCode:  incoming.ExitCode,
 		Log:       log,
-		Details:   incoming.Details,
+		Details:   details,
 		Happened:  happened,
-		Launcher:  incoming.Details["launcher"],
-		Platform:  incoming.Details["platform"],
-		OSVersion: incoming.Details["os"],
+		Launcher:  details["launcher"],
+		Platform:  details["platform"],
+		OSVersion: details["os"],
 	}
 
-	if err := s.crashes.Accept(ctx, report, s.log); err != nil {
+	if err := s.crashes.Accept(context.WithoutCancel(ctx), report, s.log); err != nil {
 		return connect.NewResponse(&apiv1.ReportCrashResponse{Accepted: false, Message: err.Error()}), nil
 	}
 	return connect.NewResponse(&apiv1.ReportCrashResponse{

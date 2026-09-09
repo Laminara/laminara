@@ -12,7 +12,16 @@ export function Hero() {
   const play = useLauncher((state) => state.play);
   const players = useLauncher((state) => state.players);
   const openModal = useLauncher((state) => state.openModal);
-  if (!build) return null;
+  if (!build) {
+    return (
+      <div className="max-w-2xl">
+        <h1 className="text-3xl font-semibold text-ink">Пока нет доступных сборок</h1>
+        <p className="mt-3 text-sm text-dim">
+          Для вашего аккаунта сборки ещё не открыты. Напишите администратору проекта — он выдаёт доступ вручную.
+        </p>
+      </div>
+    );
+  }
   const online = players?.perBuild[build.name];
   const block = buildBlock(build);
   const actionLabel = build.install === "missing" ? labels.install : build.install === "outdated" ? labels.update : labels.play;
@@ -27,7 +36,7 @@ export function Hero() {
         <span>{formatBytes(build.sizeBytes)}</span>
       </div>
 
-      <h1 className="max-w-2xl text-[84px] font-extrabold leading-[0.9] tracking-tight">{build.name}</h1>
+      <h1 className="line-clamp-2 max-w-2xl break-words text-[clamp(40px,6vw,84px)] font-extrabold leading-[0.9] tracking-tight">{build.name}</h1>
 
       {online && online.max > 0 && (
         <div className="flex items-center gap-2.5 text-sm">

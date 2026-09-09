@@ -42,6 +42,8 @@ func TestOperatorAndPlayerFlows(t *testing.T) {
 	t.Run("весь путь игрока проходит", s.playerPath)
 	t.Run("модуль поднимается и приносит свою команду", s.modulePluginRuns)
 	t.Run("сервер объясняет, почему модуль не поднялся", s.moduleFailureIsExplained)
+	t.Run("голый конфиг доводит сервер до работы", s.bareConfigRuns)
+	t.Run("перезапуск в нерабочие настройки отменяется", s.restartRefusesToBreakServer)
 	t.Run("диагностика не находит поломок", s.doctorIsClean)
 	t.Run("испорченный конфиг останавливает перезапуски", s.badConfigStopsRestarts)
 }
@@ -364,6 +366,90 @@ func (s *server) moduleFailureIsExplained(t *testing.T) {
 	}
 	body, _ := os.ReadFile(log)
 	t.Fatalf("модуль не поднялся, но сервер не сказал, что виноват временный каталог:\n%s", body)
+}
+
+func (s *server) bareConfigRuns(t *testing.T) {
+	root := t.TempDir()
+	config := filepath.Join(root, "config.json")
+	write(t, filepath.Join(root, "users.json"), `[]`)
+	write(t, config, fmt.Sprintf(`{
+		"auth": {"provider": "jsonfile", "config": {"path": %q}},
+		"storage": {"backend": "fs", "config": {"root": %q}},
+		"build": {"profilesDir": %q},
+		"api": {"addr": "127.0.0.1:%s"},
+		"yggdrasil": {"enabled": true},
+		"hwid": {"mode": "observe"},
+		"console": {"enabled": false},
+		"update": {"check": false}
+	}`, filepath.Join(root, "users.json"), filepath.Join(root, "objects"), filepath.Join(root, "profiles"), freePort(t)))
+
+	command := exec.Command(s.binary, "start", "--config", config)
+	command.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+filepath.Join(root, "run"))
+	log, err := os.Create(filepath.Join(root, "server.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	command.Stdout = log
+	command.Stderr = log
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+
+	wanted := []string{"hwid.ticket.key", "signing.key", "yggdrasil-rsa.pem"}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		missing := ""
+		for _, made := range wanted {
+			if _, err := os.Stat(filepath.Join(root, made)); err != nil {
+				missing = made
+				break
+			}
+		}
+		if missing == "" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	for _, made := range wanted {
+		if _, err := os.Stat(filepath.Join(root, made)); err != nil {
+			body, _ := os.ReadFile(filepath.Join(root, "server.log"))
+			t.Fatalf("сервер не завёл %s сам, хотя в конфиге пути нет:\n%s", made, body)
+		}
+	}
+
+	baked := exec.Command(s.binary, "client-config", "--config", config, "--endpoint", "http://127.0.0.1:9999")
+	out, err := baked.CombinedOutput()
+	if err != nil {
+		t.Fatalf("на голом конфиге не собирается конфигурация лаунчера — именно так падал launcher build:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hwid.salt")); err != nil {
+		t.Fatal("соль отпечатков не завелась сама, хотя hwid включён")
+	}
+	if strings.Contains(string(out), "saltPath is required") {
+		t.Fatal("сервер снова требует путь, который умеет вывести сам")
+	}
+}
+
+func (s *server) restartRefusesToBreakServer(t *testing.T) {
+	if out := s.exec("settings auth.sessions.backend redis"); !strings.Contains(out, "Записано") {
+		t.Fatalf("настройка не записалась: %s", out)
+	}
+	defer s.exec("settings auth.sessions.backend memory")
+
+	out := s.exec("restart")
+	if !strings.Contains(out, "перезапуск отменён") {
+		t.Fatalf("сервер ушёл в перезапуск, из которого не вернулся бы — а вместе с ним и веб-консоль:\n%s", out)
+	}
+	time.Sleep(2 * time.Second)
+	if status := s.run("status"); !strings.Contains(status, "в работе") {
+		t.Fatalf("после отменённого перезапуска сервер должен работать дальше: %s", status)
+	}
 }
 
 func (s *server) doctorIsClean(t *testing.T) {

@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	MaxLogBytes  = 256 << 10
-	maxLogInText = 3800
+	MaxLogBytes    = 256 << 10
+	MaxDetails     = 32
+	MaxDetailBytes = 4 << 10
+	maxLogInText   = 3800
 )
 
 type Report struct {

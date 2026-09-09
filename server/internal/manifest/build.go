@@ -35,7 +35,7 @@ func validatePolicies(files []*corev1.ManifestFile) error {
 		}
 	}
 	if len(offenders) > 0 {
-		return fmt.Errorf("user_writable must not cover launch-critical files (mods/libraries/versions/runtime/assets/root jars): %s", strings.Join(offenders, ", "))
+		return fmt.Errorf("в userWritable попали файлы, без которых игра не запустится (моды, библиотеки, версии, runtime, ресурсы, jar в корне): %s", strings.Join(offenders, ", "))
 	}
 	return nil
 }
@@ -72,7 +72,10 @@ func (b *Builder) BuildPlatform(ctx context.Context, sources Sources, settingsRo
 		return nil, err
 	}
 
-	needed := neededLibraries(sources.Platform, settings)
+	needed, err := neededLibraries(sources.Platform, settings)
+	if err != nil {
+		return nil, err
+	}
 	collected := map[string]*corev1.ManifestFile{}
 	var order []string
 	var indexed int
@@ -93,6 +96,9 @@ func (b *Builder) BuildPlatform(ctx context.Context, sources Sources, settingsRo
 			}
 			if d.Name() == SettingsFileName {
 				return nil
+			}
+			if d.Type()&fs.ModeSymlink != 0 {
+				return fmt.Errorf("в сборке есть ссылка %s — публикуются только настоящие файлы, замените её копией", p)
 			}
 			rel, err := filepath.Rel(root, p)
 			if err != nil {
@@ -166,7 +172,10 @@ func (b *Builder) BuildPlatform(ctx context.Context, sources Sources, settingsRo
 		return nil, err
 	}
 
-	launch := readLaunchProfile(sources.Platform)
+	launch, err := readLaunchProfile(sources.Platform)
+	if err != nil {
+		return nil, err
+	}
 
 	return &corev1.Manifest{
 		SchemaVersion:        SchemaVersion,
@@ -196,8 +205,11 @@ const (
 	librariesDir     = "libraries"
 )
 
-func neededLibraries(platformDir string, settings Settings) map[string]bool {
-	launch := readLaunchProfile(platformDir)
+func neededLibraries(platformDir string, settings Settings) (map[string]bool, error) {
+	launch, err := readLaunchProfile(platformDir)
+	if err != nil {
+		return nil, err
+	}
 	needed := make(map[string]bool, len(launch.Classpath)+len(launch.Natives))
 	for _, group := range [][]string{launch.Classpath, launch.Natives, settings.Classpath} {
 		for _, path := range group {
@@ -205,7 +217,7 @@ func neededLibraries(platformDir string, settings Settings) map[string]bool {
 		}
 	}
 	if len(needed) == 0 {
-		return nil
+		return nil, nil
 	}
-	return needed
+	return needed, nil
 }

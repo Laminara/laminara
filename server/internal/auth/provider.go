@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrInvalidToken       = errors.New("invalid token")
-	ErrTwoFactorRequired  = errors.New("two-factor code required")
+	ErrInvalidCredentials = errors.New("неверный логин или пароль")
+	ErrInvalidToken       = errors.New("токен недействителен")
+	ErrTwoFactorRequired  = errors.New("нужен код из приложения-аутентификатора")
 
 	ErrSourceUnavailable   = errors.New("источник аккаунтов недоступен")
 	ErrSessionsUnavailable = errors.New("хранилище сессий недоступно")
@@ -41,7 +42,10 @@ func ProviderNames() []string {
 func BuildProvider(name string, config json.RawMessage) (Provider, error) {
 	factory, ok := providerFactories[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown auth provider %q", name)
+		return nil, fmt.Errorf("источника аккаунтов «%s» нет — выберите из: %s", name, strings.Join(ProviderNames(), ", "))
+	}
+	if len(config) == 0 {
+		config = json.RawMessage("{}")
 	}
 	return factory(config)
 }

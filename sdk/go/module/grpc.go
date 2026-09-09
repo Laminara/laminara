@@ -99,9 +99,11 @@ func (s *grpcServer) Execute(req *modulev1.ExecuteRequest, stream grpc.ServerStr
 		}
 	}
 	if run == nil {
-		return stream.Send(&modulev1.ExecuteResponse{Done: true, Error: "unknown command: " + req.Command})
+		return stream.Send(&modulev1.ExecuteResponse{Done: true, Error: "команды «" + req.Command + "» в этом модуле нет"})
 	}
-	err := run(stream.Context(), req.Args, &streamWriter{stream: stream})
+	err := survive(func() error {
+		return run(stream.Context(), req.Args, &streamWriter{stream: stream})
+	})
 	final := &modulev1.ExecuteResponse{Done: true}
 	if err != nil {
 		final.Error = err.Error()
@@ -348,8 +350,10 @@ func (c *grpcClient) Authenticate(ctx context.Context, handle Handle, creds Cred
 		return Identity{Subject: resp.Subject, Username: resp.Username, UUID: resp.Uuid}, nil
 	case modulev1.AuthOutcome_AUTH_OUTCOME_TWO_FACTOR_REQUIRED:
 		return Identity{}, ErrTwoFactorRequired
-	default:
+	case modulev1.AuthOutcome_AUTH_OUTCOME_INVALID_CREDENTIALS:
 		return Identity{}, ErrInvalidCredentials
+	default:
+		return Identity{}, fmt.Errorf("модуль ответил непонятным исходом входа (%s) — считаю, что источник аккаунтов недоступен", resp.Outcome)
 	}
 }
 
@@ -435,4 +439,13 @@ func localTime(nanos int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, nanos).UTC()
+}
+
+func survive(run func() error) (err error) {
+	defer func() {
+		if panicked := recover(); panicked != nil {
+			err = fmt.Errorf("модуль упал во время работы команды: %v", panicked)
+		}
+	}()
+	return run()
 }

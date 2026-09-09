@@ -90,6 +90,7 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credentials) (auth.Identity, error) {
 	record, ok := p.users[creds.Username]
 	if !ok {
+		spendSameTime(p.verifier, creds.Password)
 		return auth.Identity{}, auth.ErrInvalidCredentials
 	}
 	stored, _ := record[p.passwordKey].(string)

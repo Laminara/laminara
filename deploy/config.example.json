@@ -14,7 +14,7 @@
     "backend": "fs",
     "config": {
       "root": "/var/lib/laminara/objects",
-      "xAccelPrefix": "/internal-objects/"
+      "xaccelPrefix": "/internal-objects/"
     }
   },
   "build": {
@@ -83,6 +83,7 @@
   "branding": {
     "name": "LAMINARA",
     "windowTitle": "Laminara",
+    "folderName": "Laminara",
     "tagline": "Войдите аккаунтом LAMINARA",
     "primaryColor": "",
     "primaryInk": "",

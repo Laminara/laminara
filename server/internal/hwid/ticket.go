@@ -34,6 +34,9 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 	if err == nil && len(data) >= 32 {
 		return data[:32], nil
 	}
+	if err == nil && len(data) > 0 {
+		return nil, fmt.Errorf("%s повреждён: в нём %d байт вместо 32 — восстановите файл из резервной копии, иначе все выданные пропуска перестанут приниматься", path, len(data))
+	}
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}

@@ -99,6 +99,49 @@ install_binary() {
   chmod +x "$dest"
 }
 
+first_build() { # first_build server config project endpoint
+  local server=$1 config=$2 project=$3 endpoint=$4
+  local name version loader loader_version release
+
+  section "Первая сборка"
+  release=$("$server" exec "versions" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | sed -n 's/^Последний релиз: \([^ ]*\).*/\1/p' | head -1)
+  [ -n "$release" ] && note "последний релиз Minecraft — $release"
+
+  while [ -z "${name:-}" ]; do
+    ask name "  Имя сборки (латиницей, без точек и слэшей):" ""
+    name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9_-')
+  done
+  while [ -z "${version:-}" ]; do
+    ask version "  Версия Minecraft:" ""
+  done
+
+  say ""
+  "$server" exec "loaders $version" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^/  /'
+  say ""
+  while [ -z "${loader:-}" ]; do
+    ask loader "  Загрузчик (из списка выше):" ""
+  done
+  ask loader_version "  Версия загрузчика (Enter — последняя):" ""
+
+  local build_cmd="install $name $version loader=$loader"
+  [ -n "$loader_version" ] && build_cmd="$build_cmd loaderVersion=$loader_version"
+
+  section "Собираю"
+  note "это надолго: качается Minecraft, библиотеки и Java под каждую платформу"
+  "$server" exec "$build_cmd" || { note "сборка не получилась — поправьте и повторите: laminara-server console"; return 1; }
+  "$server" exec "publish $name"  || { note "публикация не прошла — повторите: laminara-server exec \"publish $name\""; return 1; }
+
+  section "Лаунчер"
+  "$server" exec "launcher build" || { note "лаунчер собрать не вышло — повторите: laminara-server exec \"launcher build\""; return 1; }
+
+  section "Игрокам"
+  say "  Скачать лаунчер:   $endpoint/launcher"
+  say "  Windows:           $endpoint/launcher/windows-x64"
+  say "  Linux:             $endpoint/launcher/linux"
+  say ""
+  note "ссылка постоянная: после каждой пересборки по ней лежит свежий лаунчер"
+}
+
 redis_only() {
   local config="" server="" candidate
   section "Laminara — настройка Redis"
@@ -182,7 +225,11 @@ main() {
   else
     front=direct
     ask api_addr "Адрес публичного слушателя:" "0.0.0.0:8099"
-    ask domain "Адрес проекта — по нему лаунчер ходит на сервер (IP или домен):" "$(hostname -I 2>/dev/null | awk '{print $1}')"
+    local guess; guess=$(hostname -I 2>/dev/null | awk '{print $1}')
+    while [ -z "$domain" ]; do
+      ask domain "Адрес проекта — по нему лаунчер ходит на сервер (IP или домен):" "$guess"
+      [ -n "$domain" ] || note "этот адрес запекается в каждый лаунчер — без него игроки не найдут сервер"
+    done
     endpoint="http://${domain}:${api_addr##*:}"
   fi
 
@@ -270,7 +317,12 @@ main() {
   if [ "$CHOICE" = 1 ]; then
     local ygg_name skin_url skin_domain
     ask ygg_name   "  Имя сервера:" "$project"
-    ask skin_url   "  Шаблон ссылки на скин (%nickname% / %uuid%):" "https://skins.${domain:-example.com}/%nickname%.png"
+    local skin_default="https://skins.${domain:-example.com}/%nickname%.png"
+    case "$domain" in
+      ''|*[!0-9.]*) ;;
+      *) skin_default="https://minotar.net/skin/%nickname%" ;;
+    esac
+    ask skin_url   "  Шаблон ссылки на скин (%nickname% / %uuid%):" "$skin_default"
     skin_domain=$(printf '%s' "$skin_url" | sed -E 's#^https?://##; s#/.*##')
     ygg_tail=$(printf ',\n  "yggdrasil": { "enabled": true, "serverName": "%s", "rsaKeyPath": "%s/yggdrasil-rsa.pem", "skinProvider": "template", "skinConfig": { "skin": "%s" }, "skinDomains": ["%s"] }' \
       "$(json_escape "$ygg_name")" "$data_dir" "$(json_escape "$skin_url")" "$(json_escape "$skin_domain")")
@@ -296,6 +348,15 @@ EOF
   note "  конфиг:  $config"
   note "  данные:  $data_dir"
 
+  # --- проверка конфига ---
+  section "Проверяю настройки"
+  if "$server" doctor --config "$config" --only config,auth,storage,build,api,yggdrasil >/dev/null 2>&1; then
+    good "настройки в порядке"
+  else
+    "$server" doctor --config "$config" --only config,auth,storage,build,api,yggdrasil 2>&1 | tail -20
+    note "сервер всё равно поставим — поправить можно потом: laminara-server console"
+  fi
+
   # --- запуск ---
   local run_opts=("Только конфиг — запущу сам")
   command -v systemctl >/dev/null && run_opts+=("systemd-сервис (автозапуск)")
@@ -313,8 +374,28 @@ EOF
 
   [ "$front" = nginx ] && setup_nginx "$server" "$config" "$domain" "$email"
 
+  section "Сервер готов ✓"
+  say "Адрес проекта:      ${bold}${endpoint}${reset}"
+
+  local wait_for_server=25
+  while [ "$wait_for_server" -gt 0 ] && ! "$server" status >/dev/null 2>&1; do
+    sleep 1
+    wait_for_server=$((wait_for_server - 1))
+  done
+
+  choose "Что дальше?" \
+    "Собрать первую сборку и лаунчер прямо сейчас" \
+    "Открыть консоль проекта" \
+    "На этом закончить"
+  case "$CHOICE" in
+    1) first_build "$server" "$config" "$project" "$endpoint" || true ;;
+    2) exec 3<&- 2>/dev/null; "$server" console; return ;;
+    3) : ;;
+  esac
+
   section "Готово ✓"
   say "Адрес проекта:      ${bold}${endpoint}${reset}"
+  say "Консоль проекта:    ${bold}$server console${reset}"
   say "Первая сборка:      ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
   say "Лаунчер для игроков:"
   say "  ${bold}$server console${reset}  →  launcher build"
@@ -570,7 +651,7 @@ setup_systemd() {
   $sudo tee /etc/systemd/system/laminara-server.service >/dev/null < "$unit"
   rm -f "$unit"
   $sudo systemctl daemon-reload
-  $sudo systemctl enable --now laminara-server
+  $sudo systemctl enable --now laminara-server || die "служба не запустилась — что случилось, покажет: journalctl -u laminara-server -n 50"
   note "сервис запущен: systemctl status laminara-server"
 }
 

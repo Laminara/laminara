@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,11 +32,11 @@ const (
 )
 
 var (
-	ErrReportRequired = errors.New("this server requires a launcher that reports its machine")
-	ErrReportInvalid  = errors.New("machine report is not valid")
-	ErrChallengeStale = errors.New("machine report answers no live challenge")
-	ErrVirtualMachine = errors.New("this server does not accept virtual machines")
-	ErrSoftwareKey    = errors.New("this server requires a computer with a TPM or a Secure Enclave the launcher can use")
+	ErrReportRequired = errors.New("на этот сервер пускают только через лаунчер проекта")
+	ErrReportInvalid  = errors.New("лаунчер прислал непонятные сведения о компьютере")
+	ErrChallengeStale = errors.New("проверка компьютера устарела — перезапустите лаунчер")
+	ErrVirtualMachine = errors.New("на этот сервер не пускают из виртуальной машины")
+	ErrSoftwareKey    = errors.New("этому серверу нужен компьютер с аппаратным ключом (TPM или Secure Enclave)")
 )
 
 type BanError struct {
@@ -44,7 +45,7 @@ type BanError struct {
 
 func (e *BanError) Error() string {
 	if e.Ban.Reason == "" {
-		return "banned (" + e.Ban.Reference + ")"
+		return "доступ закрыт (" + e.Ban.Reference + ")"
 	}
 	return e.Ban.Reason + " (" + e.Ban.Reference + ")"
 }
@@ -154,7 +155,18 @@ func (g *Gate) expireLocked() {
 	if len(g.challenges) < maxChallenges {
 		return
 	}
-	g.challenges = map[string]challenge{}
+	oldest := time.Time{}
+	for _, entry := range g.challenges {
+		if oldest.IsZero() || entry.expires.Before(oldest) {
+			oldest = entry.expires
+		}
+	}
+	cutoff := oldest.Add(g.cfg.ChallengeTTL.Duration() / 2)
+	for key, entry := range g.challenges {
+		if entry.expires.Before(cutoff) {
+			delete(g.challenges, key)
+		}
+	}
 }
 
 func (g *Gate) takeChallenge(nonce []byte) bool {
@@ -280,7 +292,7 @@ func (g *Gate) Check(ctx context.Context, identity Identity, report *apiv1.Machi
 		return nil, ErrVirtualMachine
 	}
 	keyFallback := hasFlag(report.Flags, apiv1.CollectorFlag_COLLECTOR_FLAG_PLATFORM_KEY_FALLBACK)
-	if keyFallback && g.cfg.RequireHardwareKey && g.Enforcing() {
+	if g.cfg.RequireHardwareKey && g.Enforcing() && (keyFallback || len(report.PlatformKeyPublic) == 0) {
 		return nil, ErrSoftwareKey
 	}
 
@@ -400,24 +412,24 @@ func (g *Gate) VerifyTicket(ticket string, identity Identity) error {
 		return nil
 	}
 	if ticket == "" {
-		return errors.New("this server accepts in-game login only through its launcher")
+		return errors.New("в игру на этом сервере пускают только через лаунчер проекта")
 	}
 	claims, err := g.tickets.Verify(ticket, g.now())
 	if err != nil {
 		return err
 	}
 	if claims.Subject != identity.key() {
-		return errors.New("this launcher ticket belongs to another account")
+		return errors.New("этот пропуск лаунчера выдан другому аккаунту")
 	}
 	return nil
 }
 
 func NewReference() string {
-	raw := make([]byte, 2)
+	raw := make([]byte, 4)
 	if _, err := rand.Read(raw); err != nil {
-		return "LM-0000"
+		return "LM-" + strconv.FormatInt(time.Now().UnixNano()&0xFFFFFFFF, 16)
 	}
-	out := []byte("LM-0000")
+	out := []byte("LM-00000000")
 	for i, b := range raw {
 		out[3+i*2] = referenceChars[b>>4]
 		out[4+i*2] = referenceChars[b&0x0f]

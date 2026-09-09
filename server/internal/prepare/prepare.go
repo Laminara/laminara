@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/laminara/laminara/server/internal/atomicfile"
 	"github.com/laminara/laminara/server/internal/authlib"
 	"github.com/laminara/laminara/server/internal/jre"
 	"github.com/laminara/laminara/server/internal/loader"
@@ -80,7 +82,7 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	if opts.LoaderName != "" && opts.LoaderName != "vanilla" {
 		selected, ok := loader.Get(opts.LoaderName)
 		if !ok {
-			return nil, fmt.Errorf("unknown loader %q", opts.LoaderName)
+			return nil, fmt.Errorf("загрузчика «%s» нет — какие есть для версии, покажет loaders <версия>", opts.LoaderName)
 		}
 		if installer, ok := selected.(loader.Installer); ok {
 			loaderInstaller = installer
@@ -171,7 +173,10 @@ func (p *Preparer) runInstaller(ctx context.Context, opts Options, mcVersion, ja
 	if err != nil {
 		return nil, err
 	}
-	installer := loaderMustInstaller(opts.LoaderName)
+	installer, err := loaderMustInstaller(opts.LoaderName)
+	if err != nil {
+		return nil, err
+	}
 	return installer.Install(ctx, loader.InstallRequest{
 		MCVersion:     mcVersion,
 		LoaderVersion: opts.LoaderVersion,
@@ -182,12 +187,38 @@ func (p *Preparer) runInstaller(ctx context.Context, opts Options, mcVersion, ja
 		Download: func(ctx context.Context, url, dest, sha1 string) error {
 			return downloadFile(ctx, p.http, url, dest, sha1, false)
 		},
+		Fetch: func(ctx context.Context, url string) ([]byte, error) {
+			return fetchSmall(ctx, p.http, url)
+		},
 	})
 }
 
-func loaderMustInstaller(name string) loader.Installer {
-	selected, _ := loader.Get(name)
-	return selected.(loader.Installer)
+func loaderMustInstaller(name string) (loader.Installer, error) {
+	selected, ok := loader.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("загрузчика «%s» нет", name)
+	}
+	installer, ok := selected.(loader.Installer)
+	if !ok {
+		return nil, fmt.Errorf("загрузчик «%s» не умеет ставить себя установщиком", name)
+	}
+	return installer, nil
+}
+
+func fetchSmall(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s ответил %s", url, response.Status)
+	}
+	return io.ReadAll(io.LimitReader(response.Body, 1<<10))
 }
 
 func (p *Preparer) serverJavaBin(ctx context.Context, root, component string) (string, error) {
@@ -258,7 +289,7 @@ func resolveJavaBin(files []jre.RuntimeFile, platformKey string) (string, error)
 			}
 		}
 	}
-	return "", fmt.Errorf("no java executable in the %s runtime", platformKey)
+	return "", fmt.Errorf("в скачанной Java для %s нет исполняемого файла — удалите её и соберите заново", platformKey)
 }
 
 func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, javaComponent string, javaMajor int, javaBin, versionID string, install *loader.InstallResult) error {
@@ -308,7 +339,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	if err := os.MkdirAll(opts.PlatformDir, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(opts.PlatformDir, manifest.LaunchProfileName), data, 0o644)
+	return atomicfile.Write(filepath.Join(opts.PlatformDir, manifest.LaunchProfileName), data, 0o644)
 }
 
 func mergeUnique(base, extra []string) []string {

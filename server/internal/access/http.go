@@ -72,25 +72,25 @@ func newHTTPSource(config json.RawMessage) (Source, error) {
 		}
 	}
 	if cfg.URL == "" {
-		return nil, fmt.Errorf("http access source needs a url")
+		return nil, fmt.Errorf("источнику доступа http нужен адрес")
 	}
 	if _, err := url.Parse(cfg.URL); err != nil {
-		return nil, fmt.Errorf("http access source url: %w", err)
+		return nil, fmt.Errorf("адрес источника доступа http: %w", err)
 	}
 	mode := strings.ToLower(cfg.Mode)
 	if mode == "" {
 		mode = "list"
 	}
 	if mode != "list" && mode != "check" {
-		return nil, fmt.Errorf("http access source mode %q (want list or check)", cfg.Mode)
+		return nil, fmt.Errorf("режим источника доступа http «%s» — нужно list или check", cfg.Mode)
 	}
 	timeout, err := parseOptionalDuration(cfg.Timeout, defaultHTTPTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("http access source timeout: %w", err)
+		return nil, fmt.Errorf("время ожидания источника доступа http: %w", err)
 	}
 	ttl, err := parseOptionalDuration(cfg.CacheTTL, defaultHTTPCacheTTL)
 	if err != nil {
-		return nil, fmt.Errorf("http access source cacheTTL: %w", err)
+		return nil, fmt.Errorf("срок кеша источника доступа http: %w", err)
 	}
 	method := strings.ToUpper(cfg.Method)
 	if method == "" {
@@ -240,11 +240,11 @@ func (h *httpSource) fetch(ctx context.Context, build string, subject Subject) (
 	}
 	defer response.Body.Close()
 
-	if h.check && (response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound) {
+	if h.check && response.StatusCode == http.StatusForbidden {
 		return nil, false, nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, false, fmt.Errorf("access endpoint returned %s", response.Status)
+		return nil, false, fmt.Errorf("источник доступа ответил %s", response.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxRosterBytes))
 	if err != nil {
@@ -265,14 +265,14 @@ type checkResponse struct {
 func parseCheckResponse(body []byte) (bool, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return false, fmt.Errorf("access endpoint answered with an empty body, want {\"allowed\": bool}")
+		return false, fmt.Errorf("источник доступа вернул пустой ответ, а нужен {\"allowed\": bool}")
 	}
 	var parsed checkResponse
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return false, fmt.Errorf("access endpoint returned %q, want {\"allowed\": bool}", trimmed)
+		return false, fmt.Errorf("источник доступа вернул %q, а нужен {\"allowed\": bool}", trimmed)
 	}
 	if parsed.Allowed == nil {
-		return false, fmt.Errorf("access endpoint response has no \"allowed\" field")
+		return false, fmt.Errorf("в ответе источника доступа нет поля \"allowed\"")
 	}
 	return *parsed.Allowed, nil
 }

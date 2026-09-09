@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/admin"
+	"github.com/laminara/laminara/server/internal/atomicfile"
 	"github.com/laminara/laminara/server/internal/buildview"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/command"
@@ -23,6 +25,7 @@ import (
 )
 
 type Service struct {
+	busy        sync.Map
 	mojang      *mojang.Client
 	preparer    *prepare.Preparer
 	cas         *storage.CAS
@@ -53,6 +56,13 @@ func (s *Service) SetAccess(describe func(build string) string) {
 
 func (s *Service) SetEmitter(emit func(topic string, data map[string]string)) {
 	s.emit = emit
+}
+
+func (s *Service) alone(name string) (func(), error) {
+	if _, taken := s.busy.LoadOrStore(name, struct{}{}); taken {
+		return nil, fmt.Errorf("со сборкой «%s» прямо сейчас работает другая команда — дождитесь, пока она закончит", name)
+	}
+	return func() { s.busy.Delete(name) }, nil
 }
 
 func (s *Service) fire(topic, name string) {
@@ -202,6 +212,12 @@ func (s *Service) delete(_ context.Context, args []string, out io.Writer) error 
 	if !safeName(name) {
 		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
+	done, err := s.alone(name)
+	if err != nil {
+		return err
+	}
+	defer done()
+
 	dir := filepath.Join(s.profilesDir, name)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return fmt.Errorf("сборки «%s» нет — список даёт команда builds", name)
@@ -209,11 +225,18 @@ func (s *Service) delete(_ context.Context, args []string, out io.Writer) error 
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
+	var left []string
 	for _, manifestPath := range s.manifestsOf(name) {
-		_ = os.Remove(manifestPath)
-		_ = os.Remove(catalog.SignaturePath(manifestPath))
+		for _, path := range []string{manifestPath, catalog.SignaturePath(manifestPath)} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				left = append(left, path)
+			}
+		}
 	}
 	s.fire("build.deleted", name)
+	if len(left) > 0 {
+		return fmt.Errorf("файлы сборки удалены, но манифесты остались и игроки всё ещё видят «%s» — уберите руками: %s", name, strings.Join(left, ", "))
+	}
 	fmt.Fprintf(out, "Сборка «%s» удалена.\n", name)
 	return nil
 }
@@ -291,6 +314,11 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	if !safeName(name) {
 		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
+	done, err := s.alone(name)
+	if err != nil {
+		return err
+	}
+	defer done()
 	opts := parseKV(args[2:])
 
 	targets, err := parsePlatforms(opts["platform"])
@@ -430,6 +458,15 @@ func parsePlatforms(raw string) ([]corev1.Platform, error) {
 	return out, nil
 }
 
+type readyManifest struct {
+	target    string
+	canonical []byte
+	signature []byte
+	label     string
+	files     int
+	size      uint64
+}
+
 func (s *Service) publish(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 1 {
 		return fmt.Errorf("напишите имя сборки: publish <имя>")
@@ -438,6 +475,12 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 	if !safeName(name) {
 		return fmt.Errorf("имя «%s» не годится для сборки — без слэшей и точек", name)
 	}
+	done, err := s.alone(name)
+	if err != nil {
+		return err
+	}
+	defer done()
+
 	layout := s.layout(name)
 	if !layout.exists() {
 		return fmt.Errorf("собранной сборки «%s» нет — сначала install", name)
@@ -447,6 +490,7 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 	if layout.flat {
 		variants = []corev1.Platform{corev1.Platform_PLATFORM_UNSPECIFIED}
 	}
+	prepared := make([]readyManifest, 0, len(variants))
 	for _, variant := range variants {
 		placed := layout.place(variant)
 		published, err := prepare.PublishPlatform(ctx, s.cas, s.signer,
@@ -455,18 +499,27 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 		if err != nil {
 			return err
 		}
-		target := catalog.ManifestPath(s.profilesDir, name, variant)
-		if err := os.WriteFile(target, published.Canonical, 0o644); err != nil {
-			return err
-		}
-		if err := os.WriteFile(catalog.SignaturePath(target), published.Signature, 0o644); err != nil {
-			return err
-		}
 		label, ok := platform.Key(variant)
 		if !ok {
 			label = "все платформы"
 		}
-		fmt.Fprintf(out, "Опубликована «%s» (%s): %s, %s\n", name, label, humanize.Count(len(published.Manifest.Files), "файл", "файла", "файлов"), humanize.Bytes(published.Manifest.TotalSize))
+		prepared = append(prepared, readyManifest{
+			target:    catalog.ManifestPath(s.profilesDir, name, variant),
+			canonical: published.Canonical,
+			signature: published.Signature,
+			label:     label,
+			files:     len(published.Manifest.Files),
+			size:      published.Manifest.TotalSize,
+		})
+	}
+	for _, item := range prepared {
+		if err := atomicfile.Write(item.target, item.canonical, 0o644); err != nil {
+			return err
+		}
+		if err := atomicfile.Write(catalog.SignaturePath(item.target), item.signature, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Опубликована «%s» (%s): %s, %s\n", name, item.label, humanize.Count(item.files, "файл", "файла", "файлов"), humanize.Bytes(item.size))
 	}
 	s.fire("build.published", name)
 	return nil

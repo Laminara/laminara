@@ -2,6 +2,7 @@ package hwid
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,7 +225,10 @@ func (s *SQLStore) SaveMachine(ctx context.Context, machine Machine, signals []S
 func (s *SQLStore) Machine(ctx context.Context, id string) (*Machine, error) {
 	var row machineRow
 	if err := s.db.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx); err != nil {
-		return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	machine := row.toMachine()
 	return &machine, nil
@@ -278,11 +282,17 @@ func (s *SQLStore) SetTrusted(ctx context.Context, machineID string, trusted boo
 
 func (s *SQLStore) SeeAccount(ctx context.Context, machineID string, account Account) error {
 	row := accountRow{MachineID: machineID, Subject: account.Subject, Username: account.Username, LastSeen: account.LastSeen}
-	_, err := s.db.NewInsert().Model(&row).
-		On("CONFLICT (machine_id, subject) DO UPDATE").
-		Set("username = EXCLUDED.username").
-		Set("last_seen = EXCLUDED.last_seen").
-		Exec(ctx)
+	insert := s.db.NewInsert().Model(&row)
+	if s.db.Dialect().Name() == dialect.MySQL {
+		insert = insert.On("DUPLICATE KEY UPDATE").
+			Set("username = VALUES(username)").
+			Set("last_seen = VALUES(last_seen)")
+	} else {
+		insert = insert.On("CONFLICT (machine_id, subject) DO UPDATE").
+			Set("username = EXCLUDED.username").
+			Set("last_seen = EXCLUDED.last_seen")
+	}
+	_, err := insert.Exec(ctx)
 	return err
 }
 
@@ -327,12 +337,19 @@ func (s *SQLStore) SaveBan(ctx context.Context, ban Ban) error {
 		ExpiresAt: ban.ExpiresAt,
 		Lifted:    ban.Lifted,
 	}
-	_, err := s.db.NewInsert().Model(&row).
-		On("CONFLICT (reference) DO UPDATE").
-		Set("lifted = EXCLUDED.lifted").
-		Set("reason = EXCLUDED.reason").
-		Set("expires_at = EXCLUDED.expires_at").
-		Exec(ctx)
+	insert := s.db.NewInsert().Model(&row)
+	if s.db.Dialect().Name() == dialect.MySQL {
+		insert = insert.On("DUPLICATE KEY UPDATE").
+			Set("lifted = VALUES(lifted)").
+			Set("reason = VALUES(reason)").
+			Set("expires_at = VALUES(expires_at)")
+	} else {
+		insert = insert.On("CONFLICT (reference) DO UPDATE").
+			Set("lifted = EXCLUDED.lifted").
+			Set("reason = EXCLUDED.reason").
+			Set("expires_at = EXCLUDED.expires_at")
+	}
+	_, err := insert.Exec(ctx)
 	return err
 }
 
@@ -357,7 +374,10 @@ func (s *SQLStore) ActiveBans(ctx context.Context, targets []string, now time.Ti
 func (s *SQLStore) BanByReference(ctx context.Context, reference string) (*Ban, error) {
 	var row banRow
 	if err := s.db.NewSelect().Model(&row).Where("reference = ?", reference).Scan(ctx); err != nil {
-		return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	ban := row.toBan()
 	return &ban, nil
@@ -387,6 +407,7 @@ func (s *SQLStore) Prune(ctx context.Context, idleBefore, ipBefore time.Time) (i
 		Column("id").
 		Where("last_seen < ?", idleBefore).
 		Where("id NOT IN (SELECT target FROM hwid_ban WHERE lifted = ? AND (expires_at IS NULL OR expires_at > ?))", false, idleBefore).
+		Where("cluster_id NOT IN (SELECT target FROM hwid_ban WHERE lifted = ? AND (expires_at IS NULL OR expires_at > ?))", false, idleBefore).
 		Scan(ctx, &stale)
 	if err != nil {
 		return 0, err

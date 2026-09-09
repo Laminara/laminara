@@ -171,7 +171,7 @@ func TestAuthenticateWithTwoFactor(t *testing.T) {
 		ErrorMessage string `json:"errorMessage"`
 	}
 	json.NewDecoder(missing.Body).Decode(&errBody)
-	if errBody.ErrorMessage != "Two-factor authentication code required." {
+	if errBody.ErrorMessage != "Нужен код из приложения-аутентификатора." {
 		t.Fatalf("errorMessage = %q", errBody.ErrorMessage)
 	}
 

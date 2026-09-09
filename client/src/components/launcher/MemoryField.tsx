@@ -11,6 +11,7 @@ function gbLabel(mb: number): string {
 }
 
 export function MemoryField({ valueMb, onChange, min = 1024, max = 16384 }: MemoryFieldProps) {
+  const ceiling = Math.max(min, max);
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -20,7 +21,7 @@ export function MemoryField({ valueMb, onChange, min = 1024, max = 16384 }: Memo
       <input
         type="range"
         min={min}
-        max={max}
+        max={ceiling}
         step={512}
         value={valueMb}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -28,7 +29,7 @@ export function MemoryField({ valueMb, onChange, min = 1024, max = 16384 }: Memo
       />
       <div className="mt-1 flex justify-between text-[11px] text-mute">
         <span>{gbLabel(min)}</span>
-        <span>{gbLabel(max)}</span>
+        <span>{gbLabel(ceiling)} — это 80% памяти компьютера</span>
       </div>
     </div>
   );

@@ -219,3 +219,23 @@ func TestUnrecognisedBannerStillInlinesAsAnImage(t *testing.T) {
 		t.Fatalf("a banner of an unknown type must still be inlined as an image, got %q", got)
 	}
 }
+
+func TestForeignFeedCannotReadServerFiles(t *testing.T) {
+	secret := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(secret, []byte(`{"dsn":"postgres://user:пароль@host/db"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `[{"id":"a","title":"Анонс","banner":%q}]`, secret)
+	}))
+	defer feed.Close()
+
+	service := serviceFor(t, fmt.Sprintf(`{"source": {"type": "http", "config": {"url": %q}}}`, feed.URL))
+	items := service.Latest(context.Background())
+	if len(items) != 1 {
+		t.Fatalf("ожидалась одна новость, пришло %d", len(items))
+	}
+	if items[0].BannerDataUri != "" {
+		t.Fatal("лента с чужого сайта прочитала файл сервера и раздала его игрокам")
+	}
+}

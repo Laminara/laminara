@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/laminara/laminara/server/internal/config"
+	"github.com/laminara/laminara/server/internal/news"
+	"github.com/laminara/laminara/server/internal/ratelimit"
 	"github.com/laminara/laminara/server/internal/sqlschema"
 )
 
@@ -420,5 +423,28 @@ func TestModuleConfigIsRawJSON(t *testing.T) {
 	}
 	if stored["channel"] != "общий" {
 		t.Fatalf("module config = %s", loaded.Modules.Config["greeter"])
+	}
+}
+
+func TestSchemaShowsTheDefaultsCodeActuallyUses(t *testing.T) {
+	shown := map[string]string{}
+	for _, section := range Sections() {
+		for _, field := range section.Fields {
+			shown[section.Key+"."+field.Key] = field.Default
+		}
+	}
+	real := map[string]string{
+		"rateLimit.login.limit":     strconv.Itoa(ratelimit.DefaultLogin.Limit),
+		"rateLimit.login.per":       strings.TrimSuffix(ratelimit.DefaultLogin.Per.Duration().String(), "0s"),
+		"rateLimit.account.limit":   strconv.Itoa(ratelimit.DefaultAccount.Limit),
+		"rateLimit.account.per":     strings.TrimSuffix(ratelimit.DefaultAccount.Per.Duration().String(), "0s"),
+		"rateLimit.challenge.limit": strconv.Itoa(ratelimit.DefaultChallenge.Limit),
+		"rateLimit.challenge.per":   strings.TrimSuffix(ratelimit.DefaultChallenge.Per.Duration().String(), "0s"),
+		"news.limit":                strconv.Itoa(news.DefaultLimit),
+	}
+	for path, want := range real {
+		if shown[path] != want {
+			t.Errorf("экран настроек обещает %s = %q, а сервер берёт %q — оператор читает не то, что работает", path, shown[path], want)
+		}
 	}
 }

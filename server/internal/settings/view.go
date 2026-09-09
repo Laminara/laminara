@@ -59,12 +59,18 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 		path = base + "." + relative
 	}
 	raw, present := d.raw(path)
+	shownDefault := displayDefault(field)
+	if !present {
+		if derived := d.derived(path); derived != "" {
+			shownDefault = derived
+		}
+	}
 	entry := Entry{
 		Path:    path,
 		Label:   field.Label,
 		Hint:    field.Hint,
 		Kind:    field.Kind,
-		Default: displayDefault(field),
+		Default: shownDefault,
 		IsSet:   present,
 		Options: field.options(),
 	}

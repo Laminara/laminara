@@ -69,7 +69,7 @@ func ParseRoster(data []byte) (*Roster, error) {
 
 	var doc rosterDocument
 	if err := json.Unmarshal(trimmed, &doc); err != nil {
-		return nil, fmt.Errorf("whitelist is not valid JSON: %w", err)
+		return nil, fmt.Errorf("список доступа — не JSON: %w", err)
 	}
 	roster.global = memberSet(doc.Users, doc.UUIDs, doc.Members)
 	if len(doc.Builds) > 0 {
@@ -77,7 +77,7 @@ func ParseRoster(data []byte) (*Roster, error) {
 		for build, raw := range doc.Builds {
 			members, err := parseMembers(raw)
 			if err != nil {
-				return nil, fmt.Errorf("whitelist for build %q: %w", build, err)
+				return nil, fmt.Errorf("список доступа для сборки «%s»: %w", build, err)
 			}
 			roster.perBuild[build] = members
 		}

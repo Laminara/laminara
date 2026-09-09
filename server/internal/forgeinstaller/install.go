@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
 	"github.com/laminara/laminara/server/internal/safepath"
@@ -72,7 +73,7 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 		cmd.Dir = req.ProfileDir
 		if output, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("processor %s failed: %w\n%s", processor.Jar, err, output)
+			return nil, fmt.Errorf("обработчик установщика %s не отработал: %w\n%s", processor.Jar, err, output)
 		}
 	}
 
@@ -180,7 +181,10 @@ func (i *Installer) extractFile(internal, destDir string) (string, error) {
 		if file.Name != name {
 			continue
 		}
-		dest := filepath.Join(destDir, filepath.FromSlash(name))
+		dest, err := safepath.Join(destDir, name)
+		if err != nil {
+			return "", fmt.Errorf("установщик Forge пытается записать файл мимо своей папки: %w", err)
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return "", err
 		}
@@ -189,7 +193,7 @@ func (i *Installer) extractFile(internal, destDir string) (string, error) {
 		}
 		return dest, nil
 	}
-	return "", fmt.Errorf("forgeinstaller: %s not found in installer", internal)
+	return "", fmt.Errorf("в установщике нет файла %s", internal)
 }
 
 var placeholderPattern = regexp.MustCompile(`\{[A-Z0-9_]+\}`)
@@ -219,6 +223,8 @@ func (i *Installer) extractEmbeddedMaven(librariesDir string) error {
 	return nil
 }
 
+const maxUnpackedFileBytes = 512 << 20
+
 func copyZipFile(file *zip.File, dest string) error {
 	rc, err := file.Open()
 	if err != nil {
@@ -230,8 +236,14 @@ func copyZipFile(file *zip.File, dest string) error {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, rc)
-	return err
+	written, err := io.Copy(out, io.LimitReader(rc, maxUnpackedFileBytes+1))
+	if err != nil {
+		return err
+	}
+	if written > maxUnpackedFileBytes {
+		return fmt.Errorf("файл %s внутри установщика больше %s — распаковку прервал", file.Name, humanize.Bytes(maxUnpackedFileBytes))
+	}
+	return nil
 }
 
 func resolveToken(token string, placeholders map[string]string, librariesDir string) (string, error) {
@@ -300,5 +312,21 @@ func jarMainClass(jarPath string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("forgeinstaller: no Main-Class in %s", jarPath)
+	return "", fmt.Errorf("в %s нет Main-Class — это не исполняемый jar", jarPath)
 }
+
+const maxProcessorOutput = 64 << 10
+
+type tail struct {
+	kept []byte
+}
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.kept = append(t.kept, p...)
+	if len(t.kept) > maxProcessorOutput {
+		t.kept = t.kept[len(t.kept)-maxProcessorOutput:]
+	}
+	return len(p), nil
+}
+
+func (t *tail) String() string { return string(t.kept) }

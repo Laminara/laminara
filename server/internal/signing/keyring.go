@@ -40,7 +40,7 @@ func parseTrusted(entry string) (ed25519.PublicKey, error) {
 	}
 	private, err := Load(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("trusted signing key %q is neither a %d-byte public key in hex nor a readable key file: %w", entry, ed25519.PublicKeySize, err)
+		return nil, fmt.Errorf("доверенный ключ «%s» — это ни %d-байтовый публичный ключ в hex, ни читаемый файл ключа: %w", entry, ed25519.PublicKeySize, err)
 	}
 	return private.Public().(ed25519.PublicKey), nil
 }

@@ -50,7 +50,7 @@ func (f *forge) Versions(ctx context.Context, mcVersion string) ([]string, error
 }
 
 func (f *forge) Resolve(_ context.Context, _, _ string) (*LoaderProfile, error) {
-	return nil, fmt.Errorf("forge is a transformative loader; use the installer path")
+	return nil, fmt.Errorf("forge ставится через свой установщик, а не как обычный загрузчик")
 }
 
 func (f *forge) Install(ctx context.Context, req InstallRequest) (*InstallResult, error) {

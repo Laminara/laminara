@@ -143,5 +143,5 @@ func readZipFile(reader *zip.Reader, name string) ([]byte, error) {
 		defer rc.Close()
 		return io.ReadAll(rc)
 	}
-	return nil, fmt.Errorf("forgeinstaller: %s not found in installer", name)
+	return nil, fmt.Errorf("в установщике нет файла %s", name)
 }

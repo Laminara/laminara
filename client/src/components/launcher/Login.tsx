@@ -70,7 +70,7 @@ export function Login() {
 
         <Button
           type="submit"
-          disabled={busy || !username || (twoFactor && code.length !== 6)}
+          disabled={busy || !username || !password || (twoFactor && code.length !== 6)}
           icon={<ArrowRight size={16} weight="bold" />}
           className="mt-6 w-full py-3.5"
         >

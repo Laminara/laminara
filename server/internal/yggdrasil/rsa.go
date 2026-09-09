@@ -30,7 +30,7 @@ func loadOrCreateRSA(path string) (*rsa.PrivateKey, error) {
 	}
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, errors.New("yggdrasil: invalid RSA private key PEM")
+		return nil, errors.New("файл ключа входа в игре испорчен — удалите его, сервер создаст новый")
 	}
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }

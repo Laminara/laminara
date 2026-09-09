@@ -111,22 +111,30 @@ func (c *Client) Download(ctx context.Context, release *Release, asset, dest str
 		return err
 	}
 
-	file, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	partial := dest + ".part"
+	file, err := os.OpenFile(partial, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
 		return err
 	}
 	digest := sha256.New()
 	err = c.Fetch(ctx, url, io.MultiWriter(file, digest))
+	if syncErr := file.Sync(); err == nil {
+		err = syncErr
+	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		os.Remove(dest)
+		os.Remove(partial)
 		return err
 	}
 	if got := hex.EncodeToString(digest.Sum(nil)); got != expected {
-		os.Remove(dest)
+		os.Remove(partial)
 		return fmt.Errorf("контрольная сумма %s не сошлась: скачано %s, в релизе %s", asset, got, expected)
+	}
+	if err := os.Rename(partial, dest); err != nil {
+		os.Remove(partial)
+		return err
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ type FileSource interface {
 	PutFromFile(ctx context.Context, key, src string, verify func(io.Reader) error) error
 }
 
-var errObjectMismatch = errors.New("the stored bytes do not match the file that was hashed")
+var errObjectMismatch = errors.New("записанные байты не совпали с тем файлом, который хешировали")
 
 func (c *CAS) PutFile(ctx context.Context, path string) (*corev1.ObjectRef, error) {
 	sum, size, err := c.hashFile(path)
@@ -125,7 +125,7 @@ func changedWhilePublished(path string, cleanup error) error {
 	if cleanup == nil {
 		return err
 	}
-	return errors.Join(err, fmt.Errorf("the object it produced is still in the store and has to be removed by hand: %w", cleanup))
+	return errors.Join(err, fmt.Errorf("получившийся объект остался в хранилище, его надо убрать руками: %w", cleanup))
 }
 
 func (c *CAS) matches(sum []byte, size int64) func(io.Reader) error {
@@ -207,6 +207,6 @@ func newHasher(algo corev1.HashAlgo) (hash.Hash, error) {
 	case corev1.HashAlgo_HASH_ALGO_SHA256:
 		return sha256.New(), nil
 	default:
-		return nil, fmt.Errorf("unsupported hash algorithm %v", algo)
+		return nil, fmt.Errorf("хеш %v сервер не считает", algo)
 	}
 }

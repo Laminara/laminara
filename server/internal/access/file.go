@@ -36,7 +36,7 @@ func newFileSource(config json.RawMessage) (Source, error) {
 		}
 	}
 	if cfg.Path == "" {
-		return nil, fmt.Errorf("file access source needs a path")
+		return nil, fmt.Errorf("источнику доступа file нужен путь к файлу со списком")
 	}
 	return &fileSource{path: cfg.Path}, nil
 }

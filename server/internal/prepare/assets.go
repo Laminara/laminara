@@ -30,7 +30,7 @@ func (p *Preparer) downloadAssets(ctx context.Context, root, indexID, indexURL s
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("asset index %s: status %d", indexURL, resp.StatusCode)
+		return fmt.Errorf("список ресурсов %s не скачался: сервер ответил %d", indexURL, resp.StatusCode)
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -52,6 +52,9 @@ func (p *Preparer) downloadAssets(ctx context.Context, root, indexID, indexURL s
 	dl := &downloader{http: p.http, root: root, workers: p.workers}
 	jobs := make([]job, 0, len(index.Objects))
 	for _, object := range index.Objects {
+		if len(object.Hash) < 2 {
+			return fmt.Errorf("в списке ресурсов Minecraft попался файл без хеша — скачайте версию заново")
+		}
 		prefix := object.Hash[:2]
 		jobs = append(jobs, job{
 			url:  p.assetsBaseURL + "/" + prefix + "/" + object.Hash,

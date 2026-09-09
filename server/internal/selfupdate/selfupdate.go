@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -78,15 +79,17 @@ func (c *Checker) Download(ctx context.Context, release *Release, dir string) (s
 	if err := c.releases().Download(ctx, release.source, AssetName(), staged); err != nil {
 		return "", err
 	}
-	if err := verifyVersion(staged, release.Version); err != nil {
+	if err := verifyVersion(ctx, staged, release.Version); err != nil {
 		os.Remove(staged)
 		return "", err
 	}
 	return staged, nil
 }
 
-func verifyVersion(binary, want string) error {
-	output, err := exec.Command(binary, "version").Output()
+func verifyVersion(ctx context.Context, binary, want string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, binary, "version").Output()
 	if err != nil {
 		return fmt.Errorf("скачанный файл не запускается: %w", err)
 	}
@@ -105,7 +108,12 @@ func Install(staged, target string) error {
 		return replaceError(target, err)
 	}
 	if err := os.Rename(staged, target); err != nil {
-		os.Rename(previous, target)
+		if back := os.Rename(previous, target); back != nil {
+			return errors.Join(
+				replaceError(target, err),
+				fmt.Errorf("вернуть прежний файл тоже не вышло: %w; он лежит как %s — верните его руками, иначе сервер не запустится", back, previous),
+			)
+		}
 		return replaceError(target, err)
 	}
 	return nil

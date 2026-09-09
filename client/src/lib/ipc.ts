@@ -15,7 +15,8 @@ import type {
 } from "@/lib/types";
 import { mockAccount, mockBuilds, mockEndpoint, mockFeatures, mockLoginFailures, mockPlayerCounts } from "@/lib/mock";
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export const isTauri =
+  !import.meta.env.DEV || (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window);
 
 async function core<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -46,8 +47,6 @@ async function mockSync(onEvent: (event: SyncEvent) => void): Promise<void> {
 export const ipc = {
   probeEndpoints: (): Promise<EndpointStatus[]> => (isTauri ? core("probe_endpoints") : Promise.resolve([mockEndpoint])),
 
-  authStatus: (): Promise<AuthStatus> =>
-    isTauri ? core("auth_status") : Promise.resolve({ signedIn: true, username: mockAccount.name, uuid: mockAccount.uuid }),
 
   restoreSession: (): Promise<AuthStatus> =>
     isTauri ? core("restore_session") : Promise.resolve({ signedIn: true, username: mockAccount.name, uuid: mockAccount.uuid }),
@@ -120,7 +119,7 @@ export const ipc = {
   },
 
   buildSettings: (profile: string): Promise<BuildSettings> =>
-    isTauri ? core("build_settings", { profile }) : Promise.resolve({ maxMemoryMb: null, defaultMemoryMb: 4096 }),
+    isTauri ? core("build_settings", { profile }) : Promise.resolve({ maxMemoryMb: null, defaultMemoryMb: 4096, allowedMemoryMb: 12288 }),
 
   setBuildMemory: (profile: string, maxMemoryMb: number | null): Promise<void> =>
     isTauri ? core("set_build_memory", { profile, maxMemoryMb }) : Promise.resolve(),

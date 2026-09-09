@@ -81,7 +81,7 @@ func (h *Handler) run(ctx context.Context) map[string]string {
 
 	failures := map[string]string{}
 	for _, check := range h.checks {
-		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
 		err := check.Probe(probeCtx)
 		cancel()
 		if err != nil {

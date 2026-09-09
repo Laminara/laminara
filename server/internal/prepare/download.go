@@ -86,7 +86,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, full, sha1sum s
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: status %d", url, resp.StatusCode)
+		return fmt.Errorf("не скачался %s: сервер ответил %d", url, resp.StatusCode)
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(full), ".dl-*")
@@ -110,7 +110,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, full, sha1sum s
 	}
 	if hasher != nil {
 		if got := hex.EncodeToString(hasher.Sum(nil)); got != sha1sum {
-			return fmt.Errorf("download %s: sha1 mismatch (got %s, want %s)", url, got, sha1sum)
+			return fmt.Errorf("файл %s скачался повреждённым: sha1 %s вместо %s", url, got, sha1sum)
 		}
 	}
 	mode := os.FileMode(0o644)

@@ -1,6 +1,8 @@
 package manifest
 
 import (
+	"github.com/laminara/laminara/server/internal/atomicfile"
+
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -85,7 +87,7 @@ func SetLoader(root, loader string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, SettingsFileName), data, 0o644)
+	return atomicfile.Write(filepath.Join(root, SettingsFileName), data, 0o644)
 }
 
 func LoadSettings(root string) (Settings, error) {
@@ -115,5 +117,5 @@ func EnsureDefaultSettings(root string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return atomicfile.Write(path, data, 0o644)
 }

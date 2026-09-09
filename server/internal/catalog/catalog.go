@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	ErrNotFound            = errors.New("profile not found")
-	ErrPlatformUnavailable = errors.New("build is not available for this platform")
+	ErrNotFound            = errors.New("сборки с таким именем нет")
+	ErrPlatformUnavailable = errors.New("под эту систему сборка не публиковалась")
 )
 
 func ManifestName(build string, p corev1.Platform) string {

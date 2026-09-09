@@ -125,6 +125,7 @@ func New(opts Options) *Daemon {
 		d.settings = &settingsStore{
 			path:    opts.ConfigPath,
 			restart: d.RequestRestart,
+			verify:  buildable,
 			changed: func(path string) {
 				log.Info("настройка изменена", "source", "settings", "что", path)
 			},
@@ -134,6 +135,8 @@ func New(opts Options) *Daemon {
 	}
 	if opts.Auth != nil {
 		registry.Register(authCommand(opts.Auth))
+	} else {
+		registry.Sleeping("не заполнен раздел auth, аккаунтами управлять нечем", "auth")
 	}
 	if opts.Catalog != nil {
 		registry.Register(accessCommand(opts.Access, opts.Catalog.List))
@@ -141,11 +144,15 @@ func New(opts Options) *Daemon {
 	registry.Register(hwidCommand(opts.Machines))
 	if opts.Signing != nil {
 		registry.Register(signingCommand(opts.Signing))
+	} else {
+		registry.Sleeping("не задан build.signingKeyPath, подписывать нечем", "signing")
 	}
 	if opts.Machines != nil {
 		registry.Register(machinesCommand(opts.Machines))
 		registry.Register(banCommand(opts.Machines))
 		registry.Register(bansCommand(opts.Machines))
+	} else {
+		registry.Sleeping("распознавание компьютеров выключено — включите hwid.mode", "machines", "ban", "bans")
 	}
 	for _, webCommand := range opts.Console.Commands() {
 		registry.Register(webCommand)
@@ -155,6 +162,8 @@ func New(opts Options) *Daemon {
 		for _, launcherCommand := range opts.Launcher.Commands() {
 			registry.Register(launcherCommand)
 		}
+	} else {
+		registry.Sleeping("не задан launcher.dir, собирать лаунчеры негде", "launcher")
 	}
 	if opts.Build != nil {
 		d.catalog = opts.Build
@@ -165,6 +174,11 @@ func New(opts Options) *Daemon {
 		for _, buildCommand := range opts.Build.Commands() {
 			registry.Register(buildCommand)
 		}
+	} else {
+		registry.Sleeping(
+			"нужны разделы storage и build.profilesDir — без них сборки негде готовить и хранить",
+			"install", "prepare", "publish", "builds", "build", "delete", "players",
+		)
 	}
 
 	runtime := opts.Modules
@@ -239,7 +253,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	var publicServer *http.Server
 	if publicListener != nil {
-		publicServer = &http.Server{Handler: d.publicHandler}
+		publicServer = &http.Server{
+			Handler:           d.publicHandler,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
 		go func() { serveErr <- publicServer.Serve(publicListener) }()
 	}
 
@@ -255,9 +273,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	)
 	_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
 
-	stop := func(reason string, grace time.Duration) error {
+	stop := func(reason string, grace time.Duration, leaving bool) error {
 		d.log.Info(reason, "source", "daemon")
-		_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
+		if leaving {
+			_, _ = sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
 		if publicServer != nil {
@@ -273,9 +293,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return stop("останавливаюсь", shutdownTimeout)
+		return stop("останавливаюсь", shutdownTimeout, true)
 	case <-d.quit:
-		if err := stop("перезапускаюсь с новыми настройками", restartTimeout); err != nil {
+		if err := stop("перезапускаюсь с новыми настройками", restartTimeout, false); err != nil {
 			d.log.Info("закрыл открытые подключения", "source", "daemon")
 		}
 		return nil

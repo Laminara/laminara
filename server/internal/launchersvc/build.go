@@ -144,7 +144,7 @@ func (s *Service) roomFor(candidate string) error {
 	if version.IsNewer(candidate, decoded.Version) {
 		return nil
 	}
-	return fmt.Errorf("версия %s уже опубликована — назовите новую: launcher build %s", decoded.Version, version.NextPatch(decoded.Version))
+	return fmt.Errorf("версия %s не новее уже опубликованной %s — назовите новую: launcher build %s", candidate, decoded.Version, version.NextPatch(decoded.Version))
 }
 
 func (b *Bakery) template(ctx context.Context, tag, asset, root string, out io.Writer) (string, error) {

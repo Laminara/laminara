@@ -81,9 +81,11 @@ func (s *Service) CheckUpdate(_ context.Context, _ *connect.Request[apiv1.CheckU
 	return connect.NewResponse(&apiv1.CheckUpdateResponse{Release: canonical, Signature: signature}), nil
 }
 
+const maxRequestBytes = 1 << 20
+
 func Handler(service *Service, backend storage.Backend, xAccel bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle(apiv1connect.NewLauncherServiceHandler(service))
+	mux.Handle(apiv1connect.NewLauncherServiceHandler(service, connect.WithReadMaxBytes(maxRequestBytes)))
 	mux.Handle("/objects/", service.ObjectHandler(backend, xAccel))
 	mux.Handle(downloadPrefix, service.DownloadHandler())
 	mux.Handle(downloadPrefix+"/", service.DownloadHandler())
@@ -105,7 +107,7 @@ func brokenPart(err error) string {
 
 func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginRequest]) (*connect.Response[apiv1.LoginResponse], error) {
 	if s.auth == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("auth is not configured"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("вход не настроен на сервере"))
 	}
 	address := s.proxies.Of(req.Header(), req.Peer().Addr)
 	if !s.limits.SignInAllowed(ctx, address, req.Msg.Username) {
@@ -145,7 +147,7 @@ func (s *Service) Login(ctx context.Context, req *connect.Request[apiv1.LoginReq
 
 func (s *Service) Refresh(ctx context.Context, req *connect.Request[apiv1.RefreshRequest]) (*connect.Response[apiv1.RefreshResponse], error) {
 	if s.auth == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("auth is not configured"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("вход не настроен на сервере"))
 	}
 	tokens, err := s.auth.Refresh(ctx, req.Msg.Refresh)
 	if err != nil {
@@ -185,6 +187,9 @@ func (s *Service) ListProfiles(ctx context.Context, req *connect.Request[apiv1.L
 
 func (s *Service) GetManifest(ctx context.Context, req *connect.Request[apiv1.GetManifestRequest]) (*connect.Response[apiv1.GetManifestResponse], error) {
 	subject, state := s.subjectOf(ctx, req.Header())
+	if state == tokenUnknown {
+		return nil, connect.NewError(connect.CodeUnavailable, errSignInUnavailable)
+	}
 	if state == tokenStale {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errStaleSession)
 	}
@@ -213,7 +218,7 @@ func (s *Service) allowedObject(r *http.Request, key string) (allowed bool, stal
 		return true, false
 	}
 	subject, state := s.subjectOf(r.Context(), r.Header)
-	if state == tokenStale {
+	if state == tokenStale || state == tokenUnknown {
 		return false, true
 	}
 	owners, err := s.catalog.Owners(key)
@@ -247,8 +252,15 @@ func (s *Service) isLauncherArtifact(key string) bool {
 	return false
 }
 
+func (s *Service) cachePolicy() string {
+	if s.access.Guarded() {
+		return "private, immutable, max-age=31536000"
+	}
+	return "public, immutable, max-age=31536000"
+}
+
 func (s *Service) ObjectHandler(backend storage.Backend, xAccel bool) http.Handler {
-	serve := ObjectHandler(backend, xAccel)
+	serve := ObjectHandler(backend, xAccel, s.cachePolicy())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		allowed, stale := s.allowedObject(r, strings.TrimPrefix(r.URL.Path, "/objects/"))
 		if stale {
@@ -264,7 +276,7 @@ func (s *Service) ObjectHandler(backend storage.Backend, xAccel bool) http.Handl
 	})
 }
 
-func ObjectHandler(backend storage.Backend, xAccel bool) http.Handler {
+func ObjectHandler(backend storage.Backend, xAccel bool, cachePolicy string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimPrefix(r.URL.Path, "/objects/")
 		if key == "" || strings.Contains(key, "..") {
@@ -284,7 +296,7 @@ func ObjectHandler(backend storage.Backend, xAccel bool) http.Handler {
 			w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
 		}
 		if xAccel && err == nil && location.Kind == storage.LocationInternal && location.InternalPath != "" {
-			w.Header().Set("Cache-Control", "public, immutable, max-age=31536000")
+			w.Header().Set("Cache-Control", cachePolicy)
 			w.Header().Set("X-Accel-Redirect", location.InternalPath)
 			return
 		}
@@ -294,7 +306,7 @@ func ObjectHandler(backend storage.Backend, xAccel bool) http.Handler {
 			return
 		}
 		defer reader.Close()
-		w.Header().Set("Cache-Control", "public, immutable, max-age=31536000")
+		w.Header().Set("Cache-Control", cachePolicy)
 		_, _ = io.Copy(w, reader)
 	})
 }

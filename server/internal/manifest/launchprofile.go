@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -26,12 +28,18 @@ type LaunchProfile struct {
 	Runtime       string   `json:"runtime"`
 }
 
-func readLaunchProfile(root string) LaunchProfile {
+func readLaunchProfile(root string) (LaunchProfile, error) {
 	var profile LaunchProfile
-	data, err := os.ReadFile(filepath.Join(root, LaunchProfileName))
+	path := filepath.Join(root, LaunchProfileName)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return profile
+		if errors.Is(err, os.ErrNotExist) {
+			return profile, nil
+		}
+		return profile, fmt.Errorf("%s не читается: %w", path, err)
 	}
-	_ = json.Unmarshal(data, &profile)
-	return profile
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return profile, fmt.Errorf("%s испорчен — соберите сборку заново командой install: %w", path, err)
+	}
+	return profile, nil
 }

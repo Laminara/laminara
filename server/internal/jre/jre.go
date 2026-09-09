@@ -54,7 +54,7 @@ func (c *Client) Select(ctx context.Context, platformKey, component string) (*Ru
 	}
 	runtimes := platform[component]
 	if len(runtimes) == 0 {
-		return nil, fmt.Errorf("no %q runtime for platform %q", component, platformKey)
+		return nil, fmt.Errorf("Mojang не выпускает Java «%s» под систему %s", component, platformKey)
 	}
 	runtime := runtimes[0]
 	return &runtime, nil

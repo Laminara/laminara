@@ -46,7 +46,7 @@ import ParamField from "@site/components/ParamField.astro";
 
 <ParamField path="profilesDir" type="string" required>Каталог с папками профилей сборок.</ParamField>
 <ParamField path="trustedSigningKeys" type="array">Ключи, которые лаунчер обязан принимать помимо активного: публичный ключ в hex или путь к файлу ключа. Нужны для смены ключа — см. [Ключ подписи](/server/signing).</ParamField>
-<ParamField path="signingKeyPath" type="string" required>Путь к ключу подписи Ed25519. Создаётся автоматически, если файла ещё нет.</ParamField>
+<ParamField path="signingKeyPath" type="string">Путь к ключу подписи Ed25519. Создаётся автоматически, если файла ещё нет; не задан — ляжет рядом с каталогом сборок.</ParamField>
 
 ## api
 
@@ -120,7 +120,7 @@ import ParamField from "@site/components/ParamField.astro";
 ## hwid
 
 <ParamField path="mode" type="string">`off` · `observe` (по умолчанию) · `enforce`.</ParamField>
-<ParamField path="saltPath" type="string">Файл соли, которой хешируются измерения. Запекается в лаунчер командой `client-config`.</ParamField>
+<ParamField path="saltPath" type="string">Файл соли, которой хешируются измерения. Запекается в лаунчер командой `client-config`. Не задан — сервер заводит его сам в каталоге данных: соль нельзя менять, иначе все компьютеры станут новыми.</ParamField>
 <ParamField path="ticketSecretPath" type="string">Ключ HMAC для тикетов входа в игру.</ParamField>
 <ParamField path="store" type="object">`memory` или `sql` (`driver`: `sqlite`/`postgres`/`mysql`, `dsn`).</ParamField>
 <ParamField path="requireReport · requireChallenge · requireLauncher · requireHardwareKey" type="boolean">Строгость: отчёт обязателен, ответ на nonce обязателен, вход в игру только через лаунчер, ключ машины только в TPM.</ParamField>

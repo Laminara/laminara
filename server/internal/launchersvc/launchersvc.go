@@ -1,6 +1,8 @@
 package launchersvc
 
 import (
+	"github.com/laminara/laminara/server/internal/atomicfile"
+
 	"context"
 	"fmt"
 	"io"
@@ -162,12 +164,7 @@ func (s *Service) publish(ctx context.Context, candidate string, out io.Writer) 
 		}
 		seen[slot] = true
 
-		file, err := os.Open(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			return err
-		}
-		ref, err := s.cas.Put(ctx, file)
-		file.Close()
+		ref, err := s.cas.PutFile(ctx, filepath.Join(dir, entry.Name()))
 		if err != nil {
 			return err
 		}
@@ -207,11 +204,7 @@ func (s *Service) publish(ctx context.Context, candidate string, out io.Writer) 
 }
 
 func writeAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data, 0o644)
 }
 
 func classify(name string) (corev1.Platform, corev1.LauncherArtifactKind, bool) {

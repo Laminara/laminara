@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -163,16 +164,29 @@ func (s *store) saveLocked() {
 	}
 	data, err := json.Marshal(saved)
 	if err != nil {
+		s.complain(err)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		s.complain(err)
 		return
 	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		s.complain(err)
 		return
 	}
-	os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		s.complain(err)
+	}
+}
+
+func (s *store) complain(err error) {
+	slog.Default().Warn("вход в веб-консоль не сохранился — после перезапуска придётся получать ссылку заново",
+		"source", "console",
+		"файл", s.path,
+		"ошибка", err,
+	)
 }
 
 func expired(entry record) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +22,12 @@ type Bucket struct {
 	Limit int      `json:"limit"`
 	Per   Duration `json:"per"`
 }
+
+var (
+	DefaultLogin     = Bucket{Limit: 10, Per: Duration(5 * time.Minute)}
+	DefaultAccount   = Bucket{Limit: 50, Per: Duration(15 * time.Minute)}
+	DefaultChallenge = Bucket{Limit: 60, Per: Duration(time.Minute)}
+)
 
 type Config struct {
 	Disabled bool             `json:"disabled"`
@@ -67,9 +74,9 @@ func New(cfg *Config) (*Guard, error) {
 		return nil, nil
 	}
 
-	resolved.Login = resolved.Login.orElse(10, 5*time.Minute)
-	resolved.Account = resolved.Account.orElse(50, 15*time.Minute)
-	resolved.Challenge = resolved.Challenge.orElse(60, time.Minute)
+	resolved.Login = resolved.Login.orElse(DefaultLogin.Limit, DefaultLogin.Per.Duration())
+	resolved.Account = resolved.Account.orElse(DefaultAccount.Limit, DefaultAccount.Per.Duration())
+	resolved.Challenge = resolved.Challenge.orElse(DefaultChallenge.Limit, DefaultChallenge.Per.Duration())
 
 	build := func(bucket Bucket) Limiter { return NewMemoryLimiter(bucket.Limit, bucket.Per.Duration()) }
 	switch strings.ToLower(resolved.Backend) {
@@ -95,8 +102,23 @@ func (g *Guard) SignInAllowed(ctx context.Context, address, username string) boo
 	if g == nil {
 		return true
 	}
-	for limiter, key := range map[Limiter]string{g.login: "login:" + address, g.account: "account:" + fold(username)} {
-		if blocked, err := limiter.Blocked(ctx, key); err != nil || blocked {
+	checks := []struct {
+		limiter Limiter
+		key     string
+	}{
+		{g.login, "login:" + address},
+		{g.account, "account:" + fold(username)},
+	}
+	for _, check := range checks {
+		blocked, err := check.limiter.Blocked(ctx, check.key)
+		if err != nil {
+			slog.Default().Error("счётчик попыток входа не отвечает — пускаю игроков дальше, чтобы вход не встал у всех",
+				"source", "ratelimit",
+				"ошибка", err,
+			)
+			continue
+		}
+		if blocked {
 			return false
 		}
 	}
@@ -116,7 +138,14 @@ func (g *Guard) ChallengeAllowed(ctx context.Context, address string) bool {
 		return true
 	}
 	allowed, err := g.challenge.Allow(ctx, "challenge:"+address)
-	return err == nil && allowed
+	if err != nil {
+		slog.Default().Error("счётчик заданий на подпись не отвечает — задание всё равно выдаю",
+			"source", "ratelimit",
+			"ошибка", err,
+		)
+		return true
+	}
+	return allowed
 }
 
 func fold(username string) string {

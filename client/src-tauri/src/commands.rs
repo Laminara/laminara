@@ -495,17 +495,18 @@ pub async fn list_builds(state: State<'_, AppState>) -> Result<Vec<BuildDto>, St
         .await
         .map_err(|e| player_error("list profiles", e))?;
     let mine = laminara_core::platform::current();
-    let launch_profiles: Vec<PathBuf> = profiles
+    let build_dirs: Vec<PathBuf> = profiles
         .iter()
-        .map(|profile| {
-            state
-                .core
-                .profile_dir(&profile.name)
-                .join(LAUNCH_PROFILE_NAME)
-        })
+        .map(|profile| state.core.profile_dir(&profile.name))
         .collect();
     let installed: Vec<bool> = crate::auth::offload(move || {
-        Ok(launch_profiles.iter().map(|path| path.exists()).collect())
+        Ok(build_dirs
+            .iter()
+            .map(|dir| {
+                dir.join(LAUNCH_PROFILE_NAME).exists()
+                    && !laminara_core::sync::install_unfinished(&dir.join(".laminara"))
+            })
+            .collect())
     })
     .await?;
 
@@ -652,7 +653,10 @@ pub async fn launch(
     state: State<'_, AppState>,
     profile: String,
 ) -> Result<(), String> {
-    let game = state.auth.game_session().ok_or("not signed in")?;
+    let game = state
+        .auth
+        .game_session()
+        .ok_or("Сессия истекла — войдите заново")?;
     let authlib = state.authlib_jar.clone();
 
     state
@@ -760,6 +764,7 @@ pub struct GeneralSettings {
 pub struct BuildSettingsDto {
     max_memory_mb: Option<u32>,
     default_memory_mb: u32,
+    allowed_memory_mb: u32,
 }
 
 #[tauri::command]
@@ -809,7 +814,12 @@ pub fn build_settings(state: State<'_, AppState>, profile: String) -> BuildSetti
     BuildSettingsDto {
         max_memory_mb: state.core.build_settings(&profile).max_memory_mb,
         default_memory_mb: state.core.default_memory_mb(),
+        allowed_memory_mb: memory_ceiling(),
     }
+}
+
+fn memory_ceiling() -> u32 {
+    laminara_core::hostmem::allowed_mb().unwrap_or(16384)
 }
 
 #[tauri::command]
@@ -818,6 +828,15 @@ pub async fn set_build_memory(
     profile: String,
     max_memory_mb: Option<u32>,
 ) -> Result<(), String> {
+    if let Some(asked) = max_memory_mb {
+        let ceiling = memory_ceiling();
+        if asked > ceiling {
+            return Err(format!(
+                "Игре можно отдать не больше {} ГБ — это 80% оперативной памяти этого компьютера",
+                ceiling / 1024
+            ));
+        }
+    }
     state
         .core
         .set_build_memory(&profile, max_memory_mb)

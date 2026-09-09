@@ -12,24 +12,35 @@ export function FeaturesModal({ profile }: { profile: string }) {
   const markOutdated = useLauncher((state) => state.markOutdated);
   const [model, setModel] = useState<FeatureGroup[] | null>(null);
   const [selected, setSelected] = useState<Selected>({});
+  const [trouble, setTrouble] = useState<string | null>(null);
 
   useEffect(() => {
-    void ipc.buildFeatures(profile).then((data) => {
-      setModel(data.model);
-      setSelected(data.selection.selected ?? {});
-    });
+    ipc
+      .buildFeatures(profile)
+      .then((data) => {
+        setModel(data.model);
+        setSelected(data.selection.selected ?? {});
+        setTrouble(null);
+      })
+      .catch((err: unknown) => setTrouble(String(err)));
   }, [profile]);
 
   const onChange = (addr: string, ids: string[]) => setSelected((prev) => ({ ...prev, [addr]: ids }));
 
   const save = async () => {
-    await ipc.setBuildFeatures(profile, { selected });
-    markOutdated(profile);
-    close();
+    try {
+      await ipc.setBuildFeatures(profile, { selected });
+      markOutdated(profile);
+      close();
+    } catch (err) {
+      setTrouble(String(err));
+    }
   };
 
   return (
     <Modal title="Моды" subtitle={profile} onClose={close}>
+      {trouble && <div className="mb-4 rounded-lg bg-danger/15 px-3 py-2 text-sm text-danger">{trouble}</div>}
+      {!model && !trouble && <div className="text-sm text-dim">Загружаю список модов…</div>}
       {model && (
         <div className="flex flex-col gap-6">
           {model.length === 0 && <p className="text-sm text-mute">У этой сборки нет опциональных модов.</p>}

@@ -11,12 +11,17 @@ export function GeneralSettingsModal() {
   const [settings, setSettings] = useState<GeneralSettings | null>(null);
   const [installDir, setInstallDir] = useState("");
   const [cleaned, setCleaned] = useState<number | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
 
   useEffect(() => {
-    void ipc.generalSettings().then((data) => {
-      setSettings(data);
-      setInstallDir(data.installDir);
-    });
+    ipc
+      .generalSettings()
+      .then((data) => {
+        setSettings(data);
+        setInstallDir(data.installDir);
+        setTrouble(null);
+      })
+      .catch((err: unknown) => setTrouble(String(err)));
   }, []);
 
   const chooseFolder = async () => {
@@ -25,14 +30,20 @@ export function GeneralSettingsModal() {
   };
 
   const save = async () => {
-    if (settings && installDir && installDir !== settings.installDir) {
-      await ipc.setInstallDir(installDir);
+    try {
+      if (settings && installDir && installDir !== settings.installDir) {
+        await ipc.setInstallDir(installDir);
+      }
+      close();
+    } catch (err) {
+      setTrouble(String(err));
     }
-    close();
   };
 
   return (
     <Modal title="Настройки" subtitle="Общие параметры лаунчера" compact onClose={close}>
+      {trouble && <div className="mb-4 rounded-lg bg-danger/15 px-3 py-2 text-sm text-danger">{trouble}</div>}
+      {!settings && !trouble && <div className="text-sm text-dim">Загружаю настройки…</div>}
       {settings && (
         <div className="flex flex-col gap-6">
           <div>

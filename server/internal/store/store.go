@@ -35,7 +35,7 @@ type Config struct {
 
 func sqliteDSN(dsn string) (string, error) {
 	if dsn == "" {
-		return "", fmt.Errorf("sqlite needs a file path")
+		return "", fmt.Errorf("для sqlite нужен путь к файлу базы")
 	}
 	path, query, _ := strings.Cut(dsn, "?")
 	if path != ":memory:" {
@@ -105,7 +105,7 @@ func Open(cfg Config) (*bun.DB, error) {
 		sqldb.SetMaxOpenConns(1)
 		return bun.NewDB(sqldb, sqlitedialect.New()), nil
 	default:
-		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
+		return nil, fmt.Errorf("СУБД «%s» сервер не поддерживает", cfg.Driver)
 	}
 }
 

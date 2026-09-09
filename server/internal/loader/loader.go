@@ -31,6 +31,7 @@ type InstallRequest struct {
 	MinecraftJar  string
 	JavaBin       string
 	Download      Downloader
+	Fetch         func(ctx context.Context, url string) ([]byte, error)
 }
 
 type InstallResult struct {

@@ -33,6 +33,10 @@ func (s *Service) layout(name string) buildLayout {
 	if found := platformsUnder(filepath.Join(root, platformsDir)); len(found) > 0 {
 		layout.shared = true
 		layout.platforms = found
+		if leftovers := platformsUnder(root); len(leftovers) > 0 || migrationStarted(root) {
+			layout.shared = false
+			layout.platforms = mergePlatforms(found, leftovers)
+		}
 		return layout
 	}
 	layout.platforms = platformsUnder(root)
@@ -84,4 +88,19 @@ func (l buildLayout) dir(p corev1.Platform) (string, string) {
 func sharedPlacement(root string, p corev1.Platform) placement {
 	key, _ := platform.Key(p)
 	return placement{shared: root, platform: filepath.Join(root, platformsDir, key)}
+}
+
+func mergePlatforms(first, second []corev1.Platform) []corev1.Platform {
+	seen := make(map[corev1.Platform]bool, len(first)+len(second))
+	out := make([]corev1.Platform, 0, len(first)+len(second))
+	for _, group := range [][]corev1.Platform{first, second} {
+		for _, p := range group {
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }

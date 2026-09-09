@@ -30,3 +30,9 @@ func verify(verifier hash.Verifier, scheme, password, stored string) (bool, erro
 	}
 	return valid, nil
 }
+
+const decoyHash = "$argon2id$v=19$m=65536,t=3,p=2$bGFtaW5hcmEtZGVjb3k$0000000000000000000000000000000000000000000"
+
+func spendSameTime(verifier hash.Verifier, password string) {
+	_, _ = verifier.Verify(password, decoyHash)
+}

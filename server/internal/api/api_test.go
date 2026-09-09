@@ -111,7 +111,7 @@ func TestObjectHandler(t *testing.T) {
 	if err := backend.Put(context.Background(), "objects/blake3/ab/cd/abcd", bytes.NewReader([]byte("HELLO")), 5); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(api.ObjectHandler(backend, false))
+	server := httptest.NewServer(api.ObjectHandler(backend, false, "public, immutable, max-age=31536000"))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/objects/objects/blake3/ab/cd/abcd")
@@ -143,7 +143,7 @@ func TestObjectHandlerXAccel(t *testing.T) {
 	if err := backend.Put(context.Background(), "objects/blake3/ab/cd/abcd", bytes.NewReader([]byte("HELLO")), 5); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(api.ObjectHandler(backend, true))
+	server := httptest.NewServer(api.ObjectHandler(backend, true, "public, immutable, max-age=31536000"))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/objects/objects/blake3/ab/cd/abcd")

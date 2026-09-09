@@ -737,25 +737,28 @@ func streamLogs(ctx context.Context, client adminv1connect.AdminServiceClient, l
 	backscroll := uint32(200)
 	lost := false
 	for ctx.Err() == nil {
+		if _, err := client.Status(ctx, connect.NewRequest(&adminv1.StatusRequest{})); err != nil {
+			if !lost {
+				logCh <- st.faint.Render("связь с проектом прервалась — жду, пока он поднимется…")
+				lost = true
+			}
+			backscroll = 0
+			time.Sleep(time.Second)
+			continue
+		}
+		if lost {
+			logCh <- st.good.Render("проект снова на связи")
+			lost = false
+		}
 		stream, err := client.StreamLogs(ctx, connect.NewRequest(&adminv1.StreamLogsRequest{Backscroll: backscroll, Follow: true}))
 		if err == nil {
-			if lost {
-				logCh <- st.good.Render("проект снова на связи")
-				lost = false
-			}
 			for stream.Receive() {
 				logCh <- formatLog(stream.Msg().Line, st)
 			}
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if !lost {
-			logCh <- st.faint.Render("связь с проектом прервалась — жду, пока он поднимется…")
-			lost = true
+			stream.Close()
 		}
 		backscroll = 0
-		time.Sleep(time.Second)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
