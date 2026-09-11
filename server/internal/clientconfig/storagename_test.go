@@ -34,14 +34,28 @@ func TestWithoutBrandingStaysLaminara(t *testing.T) {
 }
 
 func TestPathTricksAreStripped(t *testing.T) {
-	for _, raw := range []string{"../../etc", "a/b", `c\d`, "имя:двоеточие", "...."} {
+	for _, raw := range []string{"../../etc", "a/b", `c\d`, "имя:двоеточие", "....", "..", ".", "../"} {
 		cfg := &config.Config{Branding: &config.BrandingConfig{FolderName: raw}}
 		got := StorageNameFor(cfg)
-		for _, bad := range []string{"/", `\`, ":", "..", "*", "?"} {
+		if got == "." || got == ".." {
+			t.Fatalf("%q превратилось в %q — так можно вылезти из своей папки", raw, got)
+		}
+		for _, bad := range []string{"/", `\`, ":", "*", "?"} {
 			if got != "laminara" && contains(got, bad) {
 				t.Fatalf("%q превратилось в %q — так можно вылезти из своей папки", raw, got)
 			}
 		}
+	}
+}
+
+func TestALeadingDotSurvivesButATrailingOneDoesNot(t *testing.T) {
+	cfg := &config.Config{Branding: &config.BrandingConfig{FolderName: ".МирПриключений"}}
+	if got := StorageNameFor(cfg); got != ".МирПриключений" {
+		t.Fatalf("папка = %q: точка в начале скрывает её на Linux и macOS, это законное желание оператора", got)
+	}
+	cfg.Branding.FolderName = "МирПриключений."
+	if got := StorageNameFor(cfg); got != "МирПриключений" {
+		t.Fatalf("папка = %q: точку в конце Windows не принимает", got)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/clientaddr"
 	"github.com/laminara/laminara/server/internal/hwid"
@@ -33,6 +35,7 @@ type Config struct {
 	SkinDomains []string
 	RSAKeyPath  string
 	Proxies     *clientaddr.Trust
+	Sessions    *redis.Client
 }
 
 type Server struct {
@@ -69,7 +72,7 @@ func NewServer(authService *auth.Service, skinProvider skin.Provider, machines *
 		publicPEM:   publicPEM,
 		serverName:  cfg.ServerName,
 		skinDomains: cfg.SkinDomains,
-		store:       newStore(now),
+		store:       newStore(now, cfg.Sessions),
 		now:         now,
 	}, nil
 }
@@ -142,7 +145,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		clientToken = randomToken()
 	}
 	accessToken := randomToken()
-	s.store.putSession(accessToken, clientToken, identity, tokenTTL)
+	s.store.putSession(r.Context(), accessToken, clientToken, identity, tokenTTL)
 	s.store.rememberProfile(identity)
 
 	profile := gameProfile(identity)
@@ -162,13 +165,13 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	current, ok := s.store.session(req.AccessToken)
+	current, ok := s.store.session(r.Context(), req.AccessToken)
 	if !ok || (req.ClientToken != "" && req.ClientToken != current.clientToken) {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
 	newAccess := randomToken()
-	sess, rotated := s.store.rotateSession(req.AccessToken, newAccess, tokenTTL)
+	sess, rotated := s.store.rotateSession(r.Context(), req.AccessToken, newAccess, tokenTTL)
 	if !rotated {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
@@ -188,7 +191,7 @@ func (s *Server) validate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	sess, ok := s.store.session(req.AccessToken)
+	sess, ok := s.store.session(r.Context(), req.AccessToken)
 	if !ok || (req.ClientToken != "" && req.ClientToken != sess.clientToken) {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
@@ -203,7 +206,7 @@ func (s *Server) invalidate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	s.store.deleteSession(req.AccessToken)
+	s.store.deleteSession(r.Context(), req.AccessToken)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -228,7 +231,7 @@ func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusForbidden, messageFor(err))
 		return
 	}
-	s.store.deleteUser(req.Username)
+	s.store.deleteUser(r.Context(), req.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -240,7 +243,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	sess, ok := s.store.session(req.AccessToken)
+	sess, ok := s.store.session(r.Context(), req.AccessToken)
 	if !ok {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return

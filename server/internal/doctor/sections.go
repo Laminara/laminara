@@ -157,6 +157,14 @@ func checkAuth(ctx context.Context, opts Options, probe *diag.Probe) {
 			Command: "laminara-server settings auth.sessions.backend redis",
 		})
 	}
+	if cfg.Auth.Sessions.Backend == "redis" {
+		probe.OK("сессии в игре", "там же, где и сессии лаунчера")
+	} else {
+		probe.Warn("сессии в игре", "хранятся в памяти", diag.Remedy{
+			Hint:    "вход в игру не переживёт перезапуск сервера, даже если redis настроен для чего-то ещё",
+			Command: "laminara-server settings auth.sessions.backend redis",
+		})
+	}
 	checkLifetimes(probe, service)
 }
 

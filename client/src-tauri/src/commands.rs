@@ -217,9 +217,19 @@ fn now_unix_nanos() -> i64 {
 }
 
 const TOKEN_REFRESH_LEAD: i64 = 60_000_000_000;
+const FIRST_RETRY_PAUSE: Duration = Duration::from_secs(5);
+const LONGEST_RETRY_PAUSE: Duration = Duration::from_secs(120);
+
+fn longer_pause(previous: Duration) -> Duration {
+    if previous.is_zero() {
+        return FIRST_RETRY_PAUSE;
+    }
+    (previous * 2).min(LONGEST_RETRY_PAUSE)
+}
 
 fn spawn_token_keeper(app: AppHandle, generation: u64) {
     tauri::async_runtime::spawn(async move {
+        let mut retry_pause = Duration::ZERO;
         loop {
             let wait = {
                 let state = app.state::<AppState>();
@@ -231,7 +241,11 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
                 };
                 (expiry - now_unix_nanos() - TOKEN_REFRESH_LEAD).max(1_000_000_000) as u64
             };
-            tokio::time::sleep(Duration::from_nanos(wait)).await;
+            if retry_pause.is_zero() {
+                tokio::time::sleep(Duration::from_nanos(wait)).await;
+            } else {
+                tokio::time::sleep(retry_pause).await;
+            }
 
             let state = app.state::<AppState>();
             if state.auth.generation() != generation {
@@ -252,6 +266,11 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
                     state
                         .auth
                         .update_access(tokens.access, tokens.access_expires_unix_nanos);
+                    retry_pause = Duration::ZERO;
+                }
+                Err(e) if e.server_unreachable() => {
+                    retry_pause = longer_pause(retry_pause);
+                    tracing::warn!("сервер не ответил на продление, повтор через {retry_pause:?}: {e}");
                 }
                 Err(e) => {
                     tracing::warn!("token keeper stopping: {e}");
@@ -381,8 +400,11 @@ pub async fn restore_session(
     }
 
     if let Err(e) = state.core.report_machine().await {
-        tracing::warn!("machine check failed during restore: {e:?}");
-        return Ok(state.auth.status());
+        if !e.server_unreachable() {
+            tracing::warn!("machine check failed during restore: {e:?}");
+            return Ok(state.auth.status());
+        }
+        tracing::warn!("сервер не ответил на проверку машины, вход сохраняю: {e}");
     }
 
     match state.core.refresh_session(&base, &access, &client).await {
@@ -406,6 +428,25 @@ pub async fn restore_session(
                 access: Zeroizing::new(launcher_access),
                 access_expires_unix_nanos: launcher_access_expires,
                 game: session,
+            });
+            spawn_token_keeper(app, generation);
+        }
+        Err(e) if e.server_unreachable() => {
+            tracing::warn!("сервер не отвечает, вход восстановлен из сохранённого: {e}");
+            let generation = state.auth.set_session(Session {
+                account: laminara_core::Account {
+                    uuid: account.uuid.clone(),
+                    name: account.name.clone(),
+                    endpoint_id: account.endpoint_id.clone(),
+                },
+                access: Zeroizing::new(launcher_access),
+                access_expires_unix_nanos: launcher_access_expires,
+                game: laminara_core::account::GameSession {
+                    uuid: account.uuid.clone(),
+                    name: account.name.clone(),
+                    access_token: access,
+                    client_token: client,
+                },
             });
             spawn_token_keeper(app, generation);
         }

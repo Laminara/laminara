@@ -71,7 +71,7 @@ fn sanitise_folder(raw: &str) -> String {
         .filter(|c| !c.is_control() && !r#"/\:*?"<>|"#.contains(*c))
         .take(48)
         .collect();
-    cleaned.trim_matches(|c| c == ' ' || c == '.').to_string()
+    cleaned.trim_end_matches(|c| c == ' ' || c == '.').to_string()
 }
 
 fn adopt_legacy(parent: Option<PathBuf>, name: &str) -> Option<PathBuf> {

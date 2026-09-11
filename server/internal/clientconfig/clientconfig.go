@@ -103,10 +103,10 @@ func folderName(raw string) string {
 		}
 		return r
 	}, strings.TrimSpace(raw))
-	cleaned = strings.Trim(cleaned, " .")
+	cleaned = strings.TrimRight(cleaned, " .")
 	if len([]rune(cleaned)) > 48 {
 		cleaned = string([]rune(cleaned)[:48])
-		cleaned = strings.Trim(cleaned, " .")
+		cleaned = strings.TrimRight(cleaned, " .")
 	}
 	return cleaned
 }

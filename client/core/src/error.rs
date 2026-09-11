@@ -22,6 +22,12 @@ pub enum CoreError {
     Io(String),
 }
 
+impl CoreError {
+    pub fn server_unreachable(&self) -> bool {
+        matches!(self, CoreError::Transport(_) | CoreError::NoEndpoint)
+    }
+}
+
 impl From<std::io::Error> for CoreError {
     fn from(err: std::io::Error) -> Self {
         CoreError::Io(err.to_string())

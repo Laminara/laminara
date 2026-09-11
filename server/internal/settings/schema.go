@@ -86,7 +86,7 @@ var schema = []Section{
 			{Key: "provider", Label: "Источник аккаунтов", Kind: KindChoice, Default: "jsonfile", Options: auth.ProviderNames, Hint: "jsonfile — файл рядом с сервером, sql — ваша база, http — ваш сайт."},
 			{Key: "accessTTL", Label: "Срок токена доступа", Kind: KindDuration, Default: "15m", Hint: "Через сколько лаунчер обновляет доступ. Больше срок — реже запросы, дольше живёт украденный токен."},
 			{Key: "refreshTTL", Label: "Срок токена обновления", Kind: KindDuration, Default: "720h", Hint: "Сколько игрок остаётся в лаунчере без ввода пароля."},
-			{Key: "sessions.backend", Label: "Где хранить сессии", Kind: KindChoice, Default: "memory", Options: func() []string { return []string{"memory", "redis"} }, Hint: "memory — сессии теряются при перезапуске; redis — переживают его."},
+			{Key: "sessions.backend", Label: "Где хранить сессии", Kind: KindChoice, Default: "memory", Options: func() []string { return []string{"memory", "redis"} }, Hint: "memory — и вход в лаунчер, и вход в игру теряются при перезапуске сервера; redis — переживают его."},
 			{Key: "sessions.redis.addr", Label: "Адрес Redis", Kind: KindText, Default: "127.0.0.1:6379", Hint: "Нужен, только когда сессии в Redis."},
 			{Key: "sessions.redis.password", Label: "Пароль Redis", Kind: KindSecret, Hint: "Пусто, если Redis без requirepass."},
 			{Key: "sessions.redis.db", Label: "Номер базы Redis", Kind: KindInt, Default: "0"},

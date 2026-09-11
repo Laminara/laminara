@@ -1,9 +1,13 @@
 package yggdrasil
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/laminara/laminara/server/internal/auth"
 )
@@ -25,26 +29,38 @@ type store struct {
 	joins    map[string]joinRecord
 	profiles map[string]auth.Identity
 	now      func() time.Time
+	remote   *redisSessions
 }
 
-func newStore(now func() time.Time) *store {
-	return &store{
+func newStore(now func() time.Time, sessions *redis.Client) *store {
+	built := &store{
 		sessions: make(map[string]session),
 		joins:    make(map[string]joinRecord),
 		profiles: make(map[string]auth.Identity),
 		now:      now,
 	}
+	if sessions != nil {
+		built.remote = &redisSessions{client: sessions}
+	}
+	return built
 }
 
 const maxLiveRecords = 20_000
 
-func (s *store) putSession(accessToken, clientToken string, identity auth.Identity, ttl time.Duration) {
+func (s *store) putSession(ctx context.Context, accessToken, clientToken string, identity auth.Identity, ttl time.Duration) {
+	sess := session{clientToken: clientToken, identity: identity, expiresAt: s.now().Add(ttl)}
+	if s.remote != nil {
+		if err := s.remote.put(ctx, accessToken, sess, ttl); err != nil {
+			slog.Error("игровая сессия не записалась в redis", "source", "yggdrasil", "ошибка", err)
+		}
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.sessions) >= maxLiveRecords {
 		s.sweepLocked()
 	}
-	s.sessions[accessToken] = session{clientToken: clientToken, identity: identity, expiresAt: s.now().Add(ttl)}
+	s.sessions[accessToken] = sess
 }
 
 func (s *store) sweepLocked() {
@@ -61,7 +77,14 @@ func (s *store) sweepLocked() {
 	}
 }
 
-func (s *store) session(accessToken string) (session, bool) {
+func (s *store) session(ctx context.Context, accessToken string) (session, bool) {
+	if s.remote != nil {
+		sess, found, err := s.remote.get(ctx, accessToken)
+		if err != nil {
+			slog.Error("игровая сессия не читается из redis", "source", "yggdrasil", "ошибка", err)
+		}
+		return sess, found
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[accessToken]
@@ -75,7 +98,14 @@ func (s *store) session(accessToken string) (session, bool) {
 	return sess, true
 }
 
-func (s *store) rotateSession(oldToken, newToken string, ttl time.Duration) (session, bool) {
+func (s *store) rotateSession(ctx context.Context, oldToken, newToken string, ttl time.Duration) (session, bool) {
+	if s.remote != nil {
+		sess, rotated, err := s.remote.rotate(ctx, oldToken, newToken, ttl)
+		if err != nil {
+			slog.Error("игровая сессия не продлилась в redis", "source", "yggdrasil", "ошибка", err)
+		}
+		return sess, rotated
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[oldToken]
@@ -88,13 +118,25 @@ func (s *store) rotateSession(oldToken, newToken string, ttl time.Duration) (ses
 	return sess, true
 }
 
-func (s *store) deleteSession(accessToken string) {
+func (s *store) deleteSession(ctx context.Context, accessToken string) {
+	if s.remote != nil {
+		if err := s.remote.remove(ctx, accessToken); err != nil {
+			slog.Error("игровая сессия не удалилась из redis", "source", "yggdrasil", "ошибка", err)
+		}
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, accessToken)
 }
 
-func (s *store) deleteUser(username string) {
+func (s *store) deleteUser(ctx context.Context, username string) {
+	if s.remote != nil {
+		if err := s.remote.removeUser(ctx, username); err != nil {
+			slog.Error("сессии игрока не удалились из redis", "source", "yggdrasil", "ошибка", err)
+		}
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {

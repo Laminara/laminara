@@ -10,6 +10,8 @@ import (
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/api"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/authsetup"
 	"github.com/laminara/laminara/server/internal/buildsvc"
@@ -222,6 +224,7 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 		SkinDomains: cfg.Yggdrasil.SkinDomains,
 		RSAKeyPath:  cfg.Yggdrasil.RSAKeyPath,
 		Proxies:     proxies,
+		Sessions:    gameSessionStore(cfg),
 	})
 	if err != nil {
 		return nil, err
@@ -229,6 +232,13 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 
 	mux.Handle("/yggdrasil/", http.StripPrefix("/yggdrasil", yggServer.Handler()))
 	return mux, nil
+}
+
+func gameSessionStore(cfg *config.Config) *redis.Client {
+	if cfg.Auth.Sessions.Backend != "redis" || !cfg.Auth.Sessions.Redis.Set() {
+		return nil
+	}
+	return cfg.Auth.Sessions.Redis.Client()
 }
 
 func healthChecks(wired *Wired, backend storage.Backend) *health.Handler {
