@@ -39,11 +39,13 @@ import ParamField from "@site/components/ParamField.astro";
 </ParamField>
 
 <ParamField path="loaders <версия>">
-  Загрузчики, доступные для версии Minecraft, и их актуальные версии.
+  Загрузчики, доступные для версии Minecraft, и их актуальные версии, а под старые версии — ещё и
+  [рецепты совместимости](/builds/compat/).
 </ParamField>
 
-<ParamField path="install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..]">
-  Собирает клиент в папку профиля. Аргументы разобраны в разделе [Подготовка сборок](/builds/preparing). Алиас: `prepare`.
+<ParamField path="install <имя> <версия> [loader=..] [loaderVersion=..] [compat=..] [platform=..] [java=..]">
+  Собирает клиент в папку профиля. Аргументы разобраны в разделе [Подготовка сборок](/builds/preparing).
+  `compat=` включает [рецепт совместимости](/builds/compat/) для старых версий. Алиас: `prepare`.
 </ParamField>
 
 <ParamField path="publish <имя>">

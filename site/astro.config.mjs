@@ -44,7 +44,7 @@ export default defineConfig({
       sidebar: [
         { label: "Знакомство", items: ["index", "quickstart", "console", "architecture"] },
         { label: "Сервер", items: ["server/install", "server/pterodactyl", "server/configuration", "server/production", "server/updates", "server/maintenance", "server/signing", "server/machines"] },
-        { label: "Сборки", items: ["builds/preparing", "builds/loaders", "builds/publishing", "builds/settings", "builds/features", "builds/access", "builds/custom-runtime"] },
+        { label: "Сборки", items: ["builds/preparing", "builds/loaders", "builds/compat", "builds/publishing", "builds/settings", "builds/features", "builds/access", "builds/custom-runtime"] },
         { label: "Лаунчер", items: ["launcher", "launcher/building", "launcher/updates", "launcher/news", "launcher/crashes"] },
         { label: "Вход игроков", items: ["auth/adapters", "auth/yggdrasil"] },
         { label: "Хранилище", items: ["storage"] },

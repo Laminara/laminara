@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/launchargs"
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/mojang"
@@ -23,6 +24,8 @@ type Profile struct {
 	ClientJar     Artifact
 	Libraries     []Artifact
 	Natives       []Artifact
+	JvmArgs       []string
+	GameArgs      []string
 	AssetIndexID  string
 	AssetIndexURL string
 }
@@ -40,23 +43,33 @@ func Resolve(detail *mojang.VersionDetail, os, arch string, loaderProfile *loade
 			Size: detail.Downloads.Client.Size,
 			URL:  detail.Downloads.Client.URL,
 		},
+		JvmArgs:       launchargs.JVM(detail.Arguments.JVM, os, arch),
+		GameArgs:      gameArgs(detail, os, arch),
 		AssetIndexID:  detail.AssetIndex.ID,
 		AssetIndexURL: detail.AssetIndex.URL,
 	}
 
 	for _, lib := range detail.Libraries {
-		if !EvaluateRules(lib.Rules, os, arch) {
+		if !mojang.EvaluateRules(lib.Rules, os, arch) {
 			continue
 		}
 		if classifierKey, ok := lib.Natives[os]; ok {
 			classifierKey = strings.ReplaceAll(classifierKey, "${arch}", archBits(arch))
-			if artifact := lib.Downloads.Classifiers[classifierKey]; artifact != nil {
-				profile.Natives = append(profile.Natives, fromArtifact(*artifact))
+			if declared := lib.Downloads.Classifiers[classifierKey]; declared != nil {
+				artifact, err := fromArtifact(*declared, lib.Name+":"+classifierKey)
+				if err != nil {
+					return nil, err
+				}
+				profile.Natives = append(profile.Natives, artifact)
 			}
 			continue
 		}
 		if lib.Downloads.Artifact != nil {
-			profile.Libraries = append(profile.Libraries, fromArtifact(*lib.Downloads.Artifact))
+			artifact, err := fromArtifact(*lib.Downloads.Artifact, lib.Name)
+			if err != nil {
+				return nil, err
+			}
+			profile.Libraries = append(profile.Libraries, artifact)
 			continue
 		}
 		if lib.URL != "" {
@@ -87,37 +100,23 @@ func Resolve(detail *mojang.VersionDetail, os, arch string, loaderProfile *loade
 	return profile, nil
 }
 
-func EvaluateRules(rules []mojang.Rule, os, arch string) bool {
-	if len(rules) == 0 {
-		return true
+func gameArgs(detail *mojang.VersionDetail, os, arch string) []string {
+	if len(detail.Arguments.Game) > 0 {
+		return launchargs.Game(detail.Arguments.Game, os, arch)
 	}
-	allowed := false
-	for _, rule := range rules {
-		if ruleMatches(rule, os, arch) {
-			allowed = rule.Action == "allow"
+	return launchargs.Legacy(detail.MinecraftArguments)
+}
+
+func fromArtifact(a mojang.Artifact, name string) (Artifact, error) {
+	path := a.Path
+	if path == "" {
+		derived, err := maven.Path(name)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("библиотека «%s» не говорит, куда её класть, и координаты не разобрать: %w", name, err)
 		}
+		path = derived
 	}
-	return allowed
-}
-
-func ruleMatches(rule mojang.Rule, os, arch string) bool {
-	if len(rule.Features) > 0 {
-		return false
-	}
-	if rule.OS == nil {
-		return true
-	}
-	if rule.OS.Name != "" && rule.OS.Name != os {
-		return false
-	}
-	if rule.OS.Arch != "" && rule.OS.Arch != arch {
-		return false
-	}
-	return true
-}
-
-func fromArtifact(a mojang.Artifact) Artifact {
-	return Artifact{Path: "libraries/" + a.Path, SHA1: a.SHA1, Size: a.Size, URL: a.URL}
+	return Artifact{Path: "libraries/" + path, SHA1: a.SHA1, Size: a.Size, URL: a.URL}, nil
 }
 
 func mavenArtifact(coords, base string) (Artifact, error) {

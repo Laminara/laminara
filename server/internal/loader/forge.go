@@ -24,7 +24,7 @@ type forge struct {
 }
 
 func newForge() *forge {
-	return &forge{http: &http.Client{Timeout: 30 * time.Second}, metadataURL: forgeMetadataURL}
+	return &forge{http: httpx.NewClient(30 * time.Second), metadataURL: forgeMetadataURL}
 }
 
 func (f *forge) Name() string { return "forge" }

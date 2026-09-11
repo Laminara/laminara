@@ -66,7 +66,10 @@ func (s *Service) ListLoaders(ctx context.Context, req *connect.Request[adminv1.
 	}
 	resp := &adminv1.ListLoadersResponse{}
 	for _, entry := range loaders {
-		resp.Loaders = append(resp.Loaders, &adminv1.LoaderInfo{Name: entry.Name, Versions: entry.Versions})
+		resp.Loaders = append(resp.Loaders, &adminv1.LoaderInfo{Name: entry.Name, Versions: entry.Versions, Trouble: entry.Trouble})
+	}
+	for _, entry := range s.catalog.Recipes(req.Msg.McVersion) {
+		resp.Recipes = append(resp.Recipes, &adminv1.RecipeInfo{Name: entry.Name, Summary: entry.Summary, Loader: entry.Loader})
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -245,6 +248,8 @@ func BuildInfoOf(entry BuildEntry) *adminv1.BuildInfo {
 		MinecraftVersion: entry.Minecraft,
 		JavaMajor:        entry.JavaMajor,
 		Loader:           entry.Loader,
+		Compat:           entry.Compat,
+		Trouble:          entry.Trouble,
 		SizeBytes:        entry.SizeBytes,
 		Files:            uint32(entry.Files),
 		ServerAddress:    entry.ServerAddress,

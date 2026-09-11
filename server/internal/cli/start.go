@@ -81,4 +81,3 @@ func useScratchDir(cfg *config.Config, configPath string, log *slog.Logger) {
 		)
 	}
 }
-

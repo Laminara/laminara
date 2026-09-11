@@ -91,10 +91,18 @@ message ListLoadersRequest {
 message LoaderInfo {
   string name = 1;
   repeated string versions = 2;
+  string trouble = 3;
+}
+
+message RecipeInfo {
+  string name = 1;
+  string summary = 2;
+  string loader = 3;
 }
 
 message ListLoadersResponse {
   repeated LoaderInfo loaders = 1;
+  repeated RecipeInfo recipes = 2;
 }
 
 message ListBuildsRequest {}
@@ -113,6 +121,8 @@ message BuildInfo {
   int64 published_at_unix_nanos = 11;
   uint32 java_major = 12;
   string access = 13;
+  string compat = 14;
+  string trouble = 15;
 }
 
 message ListBuildsResponse {

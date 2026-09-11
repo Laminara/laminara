@@ -16,7 +16,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: 30 * time.Second}, manifestURL: DefaultManifestURL}
+	return &Client{http: httpx.NewClient(30 * time.Second), manifestURL: DefaultManifestURL}
 }
 
 func NewClientWith(httpClient *http.Client, manifestURL string) *Client {
@@ -59,13 +59,15 @@ type AssetIndexRef struct {
 }
 
 type VersionDetail struct {
-	ID          string        `json:"id"`
-	Type        string        `json:"type"`
-	MainClass   string        `json:"mainClass"`
-	JavaVersion JavaVersion   `json:"javaVersion"`
-	AssetIndex  AssetIndexRef `json:"assetIndex"`
-	Libraries   []Library     `json:"libraries"`
-	Downloads   struct {
+	ID                 string        `json:"id"`
+	Type               string        `json:"type"`
+	MainClass          string        `json:"mainClass"`
+	JavaVersion        JavaVersion   `json:"javaVersion"`
+	AssetIndex         AssetIndexRef `json:"assetIndex"`
+	Libraries          []Library     `json:"libraries"`
+	Arguments          Arguments     `json:"arguments"`
+	MinecraftArguments string        `json:"minecraftArguments"`
+	Downloads          struct {
 		Client Download `json:"client"`
 	} `json:"downloads"`
 }

@@ -21,6 +21,13 @@ type VersionList struct {
 type LoaderEntry struct {
 	Name     string
 	Versions []string
+	Trouble  string
+}
+
+type RecipeEntry struct {
+	Name    string
+	Summary string
+	Loader  string
 }
 
 type BuildEntry struct {
@@ -29,6 +36,8 @@ type BuildEntry struct {
 	Minecraft     string
 	JavaMajor     uint32
 	Loader        string
+	Compat        string
+	Trouble       string
 	SizeBytes     uint64
 	Files         int
 	ServerAddress string
@@ -53,6 +62,7 @@ type BuildPlayers struct {
 type Catalog interface {
 	Versions(ctx context.Context, query string) (VersionList, error)
 	Loaders(ctx context.Context, mcVersion string) ([]LoaderEntry, error)
+	Recipes(mcVersion string) []RecipeEntry
 	Builds() ([]BuildEntry, error)
 	Players(ctx context.Context) ([]BuildPlayers, error)
 }

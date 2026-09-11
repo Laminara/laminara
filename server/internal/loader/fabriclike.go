@@ -25,7 +25,7 @@ type fabricLike struct {
 }
 
 func newFabricLike(name, baseURL, mavenURL string) *fabricLike {
-	return &fabricLike{name: name, http: &http.Client{Timeout: 30 * time.Second}, baseURL: baseURL, mavenURL: mavenURL}
+	return &fabricLike{name: name, http: httpx.NewClient(30 * time.Second), baseURL: baseURL, mavenURL: mavenURL}
 }
 
 func (f *fabricLike) Name() string { return f.name }

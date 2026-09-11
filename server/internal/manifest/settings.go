@@ -36,6 +36,8 @@ type Settings struct {
 	Enforced         []string     `json:"enforced"`
 	ServerAddress    string       `json:"serverAddress"`
 	Loader           string       `json:"loader"`
+	Compat           string       `json:"compat,omitempty"`
+	CompatFiles      []string     `json:"compatFiles,omitempty"`
 	JvmArgs          []string     `json:"jvmArgs,omitempty"`
 	GameArgs         []string     `json:"gameArgs,omitempty"`
 	Classpath        []string     `json:"classpath,omitempty"`
@@ -77,17 +79,21 @@ type MetaSpec struct {
 	IncompatibleWith []string `json:"incompatibleWith,omitempty"`
 }
 
-func SetLoader(root, loader string) error {
+func UpdateSettings(root string, apply func(*Settings)) error {
 	settings, err := LoadSettings(root)
 	if err != nil {
 		return err
 	}
-	settings.Loader = loader
+	apply(&settings)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
 	return atomicfile.Write(filepath.Join(root, SettingsFileName), data, 0o644)
+}
+
+func SetLoader(root, loader string) error {
+	return UpdateSettings(root, func(settings *Settings) { settings.Loader = loader })
 }
 
 func LoadSettings(root string) (Settings, error) {

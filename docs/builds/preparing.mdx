@@ -10,7 +10,7 @@ import ParamField from "@site/components/ParamField.astro";
 `install` собирает клиент под конкретную версию Minecraft и загрузчик и складывает его в папку профиля. Дальше эту папку можно править руками, а потом опубликовать. (Прежнее имя `prepare` работает как алиас.)
 
 ```sh
-laminara-server exec install <имя> <версия> [loader=...] [loaderVersion=...] [platform=...] [java=...]
+laminara-server exec install <имя> <версия> [loader=...] [loaderVersion=...] [compat=...] [platform=...] [java=...]
 ```
 
 <Aside type="note">
@@ -28,11 +28,18 @@ laminara-server exec install <имя> <версия> [loader=...] [loaderVersion
 </ParamField>
 
 <ParamField path="loader" default="vanilla">
-  Загрузчик: `vanilla`, `fabric`, `quilt`, `forge` или `neoforge`. Какие доступны для версии — покажет `loaders`.
+  Загрузчик: `vanilla`, `fabric`, `quilt`, `forge`, `neoforge` или `cleanroom`. Какие доступны для версии — покажет `loaders`.
 </ParamField>
 
 <ParamField path="loaderVersion">
   Версия загрузчика. Если не указать, берётся последняя, подходящая под версию Minecraft.
+</ParamField>
+
+<ParamField path="compat">
+  [Рецепт совместимости](/builds/compat/) для старых версий, например `lwjgl3ify` или `lwjgl3ify:3.0.33`.
+  Он подменяет манифест версии целиком, поэтому приносит свою версию загрузчика, свою Java и свои моды.
+  Выбранная версия запоминается: повторный `install` соберёт её же, а `compat=последняя` возьмёт свежую.
+  `compat=нет` собирает сборку без рецепта и убирает из неё файлы прошлого.
 </ParamField>
 
 <ParamField path="platform" default="windows-x64">
@@ -40,12 +47,12 @@ laminara-server exec install <имя> <версия> [loader=...] [loaderVersion
 </ParamField>
 
 <ParamField path="java">
-  Версия Java для клиента. По умолчанию берётся та, что Mojang указал для этой версии Minecraft. Указывайте вручную, только если нужна другая.
+  Версия Java для клиента. По умолчанию берётся та, что просит версия: у ванильной — указанная Mojang, у рецепта совместимости и у Cleanroom — их собственная, более новая. Указывайте вручную, только если нужна другая; рецепт на чужой Java может не запуститься.
 </ParamField>
 
 ## Что происходит
 
-Сервер запрашивает метаданные версии у Mojang, разрешает библиотеки и нативы под платформу, скачивает клиент, ассеты и Java. Для Forge и NeoForge дополнительно прогоняется установщик загрузчика — подробности в разделе [Загрузчики](/builds/loaders).
+Сервер запрашивает метаданные версии у Mojang, разрешает библиотеки и нативы под платформу, скачивает клиент, ассеты и Java. Для Forge, NeoForge и Cleanroom дополнительно прогоняется установщик загрузчика — подробности в разделе [Загрузчики](/builds/loaders).
 
 Загрузка идёт в несколько потоков с ограничением, чтобы не упереться в диск и сеть. Файл с уже совпадающим хешем повторно не качается, так что пересборка соседней версии проходит заметно быстрее первой.
 

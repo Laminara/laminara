@@ -4,12 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 )
 
 const maxBody = 64 << 20
+
+type StatusError struct {
+	URL    string
+	Status int
+}
+
+func (e StatusError) Error() string {
+	return fmt.Sprintf("GET %s: status %d", e.URL, e.Status)
+}
+
+func (e StatusError) NoSuchThing() bool {
+	return e.Status == http.StatusBadRequest || e.Status == http.StatusNotFound
+}
+
+func NothingThere(err error) bool {
+	var status StatusError
+	return errors.As(err, &status) && status.NoSuchThing()
+}
 
 func GetJSON(ctx context.Context, client *http.Client, url string, out any) error {
 	return GetJSONWithHeaders(ctx, client, url, nil, out)
@@ -41,7 +60,7 @@ func get(ctx context.Context, client *http.Client, url string, headers map[strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+		return StatusError{URL: url, Status: resp.StatusCode}
 	}
 	return decode(resp)
 }

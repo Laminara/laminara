@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/launchargs"
 	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
 )
@@ -88,7 +89,7 @@ func (i *Installer) legacyInstall(ctx context.Context, req Request) (*LaunchInfo
 		launch.Libraries = append(launch.Libraries, path)
 	}
 
-	launch.GameArgs = tweakArgs(profile.VersionInfo.MinecraftArguments)
+	launch.GameArgs = launchargs.Legacy(profile.VersionInfo.MinecraftArguments)
 	launch.ClientJar = ""
 	return launch, nil
 }
@@ -135,19 +136,6 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func tweakArgs(arguments string) []string {
-	fields := strings.Fields(arguments)
-	var extra []string
-	for index := 0; index < len(fields); index++ {
-		if fields[index] != "--tweakClass" || index+1 >= len(fields) {
-			continue
-		}
-		extra = append(extra, "--tweakClass", fields[index+1])
-		index++
-	}
-	return extra
 }
 
 func (i *Installer) extractEmbedded(name, dest string) error {

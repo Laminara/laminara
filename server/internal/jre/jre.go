@@ -19,7 +19,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: 30 * time.Second}, url: DefaultAllRuntimesURL}
+	return &Client{http: httpx.NewClient(30 * time.Second), url: DefaultAllRuntimesURL}
 }
 
 func NewClientWith(httpClient *http.Client, url string) *Client {

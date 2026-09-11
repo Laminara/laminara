@@ -51,6 +51,14 @@ func LoaderWord(loader string) string {
 	return loader
 }
 
+func RecipeWord(compat string) string {
+	name, version, found := strings.Cut(compat, ":")
+	if !found {
+		return compat
+	}
+	return name + " " + version
+}
+
 func PlayersWord(players *adminv1.BuildPlayers) (string, string) {
 	if players == nil {
 		return "", ""
@@ -78,6 +86,12 @@ func Fields(build *adminv1.BuildInfo, players *adminv1.BuildPlayers) []Field {
 	if build.MinecraftVersion != "" {
 		fields = append(fields, Field{Label: "Minecraft", Value: build.MinecraftVersion})
 		fields = append(fields, Field{Label: "Загрузчик", Value: LoaderWord(build.Loader)})
+	}
+	if build.Compat != "" {
+		fields = append(fields, Field{Label: "Совместимость", Value: RecipeWord(build.Compat)})
+	}
+	if build.Trouble != "" {
+		fields = append(fields, Field{Label: "Внимание", Value: build.Trouble})
 	}
 	if build.JavaMajor > 0 {
 		fields = append(fields, Field{Label: "Java", Value: strconv.FormatUint(uint64(build.JavaMajor), 10)})

@@ -57,9 +57,9 @@ func (p *Preparer) downloadAssets(ctx context.Context, root, indexID, indexURL s
 		}
 		prefix := object.Hash[:2]
 		jobs = append(jobs, job{
-			url:  p.assetsBaseURL + "/" + prefix + "/" + object.Hash,
-			path: "assets/objects/" + prefix + "/" + object.Hash,
-			sha1: object.Hash,
+			url:    p.assetsBaseURL + "/" + prefix + "/" + object.Hash,
+			path:   "assets/objects/" + prefix + "/" + object.Hash,
+			digest: sha1Digest(object.Hash),
 		})
 	}
 	return dl.run(ctx, jobs, "Ресурсы (assets)")

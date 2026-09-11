@@ -99,9 +99,22 @@ install_binary() {
   chmod +x "$dest"
 }
 
+recipe_section() { # recipe_section "<вывод loaders>" — строки раздела рецептов
+  printf '%s\n' "$1" | sed -n '/^Рецепты совместимости/,$p' | tail -n +2
+}
+
+recipe_for() { # recipe_for "<вывод loaders>" загрузчик — имя подходящего рецепта
+  recipe_section "$1" | awk -v want="$2" 'NF >= 3 && $2 == want { print $1; exit }'
+}
+
+recipe_summary_for() { # recipe_summary_for "<вывод loaders>" рецепт — его описание
+  recipe_section "$1" | awk -v want="$2" '$1 == want { $1=""; $2=""; sub(/^ +/, ""); print; exit }'
+}
+
 first_build() { # first_build server config project endpoint
   local server=$1 config=$2 project=$3 endpoint=$4
-  local name version loader loader_version release
+  local name version loader release loaders_out recipe_name recipe_summary answer
+  local loader_version="" recipe=""
 
   section "Первая сборка"
   release=$("$server" exec "versions" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | sed -n 's/^Последний релиз: \([^ ]*\).*/\1/p' | head -1)
@@ -116,15 +129,31 @@ first_build() { # first_build server config project endpoint
   done
 
   say ""
-  "$server" exec "loaders $version" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^/  /'
+  loaders_out=$("$server" exec "loaders $version" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+  printf '%s\n' "$loaders_out" | sed 's/^/  /'
   say ""
   while [ -z "${loader:-}" ]; do
     ask loader "  Загрузчик (из списка выше):" ""
   done
-  ask loader_version "  Версия загрузчика (Enter — последняя):" ""
+
+  recipe_name=$(recipe_for "$loaders_out" "$loader")
+  if [ -n "$recipe_name" ]; then
+    recipe_summary=$(recipe_summary_for "$loaders_out" "$recipe_name")
+    say ""
+    note "$version — старая версия: она рассчитана на Java 8 и LWJGL 2"
+    note "рецепт $recipe_name — $recipe_summary"
+    ask answer "  Собрать по рецепту $recipe_name? [Д/н]:" "д"
+    case "$answer" in
+      н|Н|n|N|нет|Нет|НЕТ|no|No|NO) : ;;
+      *) recipe=$recipe_name ;;
+    esac
+  fi
+
+  [ -n "$recipe" ] || ask loader_version "  Версия загрузчика (Enter — последняя):" ""
 
   local build_cmd="install $name $version loader=$loader"
   [ -n "$loader_version" ] && build_cmd="$build_cmd loaderVersion=$loader_version"
+  [ -n "$recipe" ] && build_cmd="$build_cmd compat=$recipe"
 
   section "Собираю"
   note "это надолго: качается Minecraft, библиотеки и Java под каждую платформу"

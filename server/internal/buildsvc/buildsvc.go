@@ -15,6 +15,8 @@ import (
 	"github.com/laminara/laminara/server/internal/buildview"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/compat"
+	"github.com/laminara/laminara/server/internal/httpx"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -77,7 +79,7 @@ func (s *Service) Commands() []command.Command {
 	return []command.Command{
 		{Name: "versions", Synopsis: "версии Minecraft (versions [фильтр])", Run: s.versions},
 		{Name: "loaders", Synopsis: "загрузчики модов для версии (loaders <версия>)", Run: s.loaders},
-		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "собрать клиент (install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..])", Run: s.prepare},
+		{Name: "install", Aliases: []string{"prepare"}, Synopsis: "собрать клиент (install <имя> <версия> [loader=..] [loaderVersion=..] [compat=..] [platform=..] [java=..])", Run: s.prepare},
 		{Name: "publish", Aliases: []string{"release"}, Synopsis: "опубликовать сборку — лаунчеры увидят её (publish <имя>)", Run: s.publish},
 		{Name: "builds", Aliases: []string{"clients"}, Synopsis: "сборки проекта и их состояние", Run: s.builds},
 		{Name: "build", Aliases: []string{"info"}, Synopsis: "всё об одной сборке (build <имя>)", Run: s.buildInfo},
@@ -114,6 +116,9 @@ func (s *Service) builds(_ context.Context, _ []string, out io.Writer) error {
 }
 
 func buildLine(build admin.BuildEntry) string {
+	if build.Trouble != "" {
+		return build.Trouble
+	}
 	if build.Minecraft == "" {
 		return ""
 	}
@@ -154,6 +159,11 @@ func (s *Service) Builds() ([]admin.BuildEntry, error) {
 		}
 		name := entry.Name()
 		build := admin.BuildEntry{Name: name, Status: "prepared", Prepared: s.layout(name).platforms}
+		if recipe, err := s.rememberedRecipe(name); err == nil {
+			build.Compat = recipe
+		} else {
+			build.Trouble = err.Error()
+		}
 		if len(s.manifestsOf(name)) > 0 {
 			build.Status = "published"
 		}
@@ -285,12 +295,16 @@ func (s *Service) loaders(ctx context.Context, args []string, out io.Writer) err
 		return err
 	}
 	for _, entry := range loaders {
-		if len(entry.Versions) == 0 {
+		switch {
+		case entry.Trouble != "":
+			fmt.Fprintf(out, "%-10s список версий не пришёл: %s\n", entry.Name, entry.Trouble)
+		case len(entry.Versions) == 0:
 			fmt.Fprintln(out, entry.Name)
-			continue
+		default:
+			fmt.Fprintf(out, "%-10s последняя %s, всего %s\n", entry.Name, entry.Versions[0], humanize.Count(len(entry.Versions), "версия", "версии", "версий"))
 		}
-		fmt.Fprintf(out, "%-10s последняя %s, всего %s\n", entry.Name, entry.Versions[0], humanize.Count(len(entry.Versions), "версия", "версии", "версий"))
 	}
+	writeRecipes(out, compat.For(args[0]))
 	return nil
 }
 
@@ -298,7 +312,13 @@ func (s *Service) Loaders(ctx context.Context, mcVersion string) ([]admin.Loader
 	loaders := []admin.LoaderEntry{{Name: "vanilla"}}
 	for _, l := range loader.All() {
 		versions, err := l.Versions(ctx, mcVersion)
-		if err != nil || len(versions) == 0 {
+		if err != nil {
+			if !httpx.NothingThere(err) {
+				loaders = append(loaders, admin.LoaderEntry{Name: l.Name(), Trouble: err.Error()})
+			}
+			continue
+		}
+		if len(versions) == 0 {
 			continue
 		}
 		loaders = append(loaders, admin.LoaderEntry{Name: l.Name(), Versions: versions})
@@ -306,9 +326,18 @@ func (s *Service) Loaders(ctx context.Context, mcVersion string) ([]admin.Loader
 	return loaders, nil
 }
 
+func (s *Service) Recipes(mcVersion string) []admin.RecipeEntry {
+	recipes := compat.For(mcVersion)
+	entries := make([]admin.RecipeEntry, 0, len(recipes))
+	for _, recipe := range recipes {
+		entries = append(entries, admin.RecipeEntry{Name: recipe.Name(), Summary: recipe.Summary(), Loader: recipe.Loader()})
+	}
+	return entries
+}
+
 func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) < 2 {
-		return fmt.Errorf("напишите имя и версию: install <имя> <версия> [loader=..] [loaderVersion=..] [platform=..] [java=..]")
+		return fmt.Errorf("напишите имя и версию: install <имя> <версия> [loader=..] [loaderVersion=..] [compat=..] [platform=..] [java=..]")
 	}
 	name, mcVersion := args[0], args[1]
 	if !safeName(name) {
@@ -333,7 +362,20 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 
 	loaderName := opts["loader"]
 	loaderVersion := opts["loaderVersion"]
-	if loaderName != "" && loaderName != "vanilla" && loaderVersion == "" {
+
+	plan, err := s.compatPlan(ctx, name, opts, id, out)
+	if err != nil {
+		return err
+	}
+	if plan != nil {
+		announceRecipe(out, plan, loaderName, loaderVersion)
+		if java := opts["java"]; java != "" {
+			fmt.Fprintf(out, "Java взята ваша (%s), а не та, что просит рецепт — на ней он может не запуститься.\n", java)
+		}
+		versionURL = plan.VersionURL
+		loaderName = plan.LoaderName
+		loaderVersion = plan.LoaderVersion
+	} else if loaderName != "" && loaderName != "vanilla" && loaderVersion == "" {
 		l, ok := loader.Get(loaderName)
 		if !ok {
 			return fmt.Errorf("загрузчика «%s» нет — какие есть для версии, покажет loaders <версия>", loaderName)
@@ -346,6 +388,9 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 			return fmt.Errorf("у загрузчика «%s» нет версий под Minecraft %s", loaderName, id)
 		}
 		loaderVersion = versions[0]
+	}
+	if plan == nil && loader.Prerelease(loaderVersion) {
+		fmt.Fprintf(out, "Загрузчик %s %s — предварительная версия, сбои в ней ожидаемы.\n", buildview.LoaderWord(loaderName), loaderVersion)
 	}
 
 	layout := s.layout(name)
@@ -362,6 +407,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	}
 
 	var failures []string
+	built := 0
 	for _, target := range targets {
 		key, _ := platform.Key(target)
 		goos, arch, ok := platform.Mojang(target)
@@ -377,15 +423,18 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 		}
 		fmt.Fprintf(out, "Собираю «%s»: Minecraft %s, загрузчик %s %s, платформа %s…\n", name, id, buildview.LoaderWord(loaderName), loaderVersion, key)
 		if _, err := s.preparer.Prepare(ctx, prepare.Options{
-			ProfileDir:    placed.shared,
-			PlatformDir:   placed.platform,
-			VersionURL:    versionURL,
-			OS:            goos,
-			Arch:          arch,
-			PlatformKey:   key,
-			LoaderName:    loaderName,
-			LoaderVersion: loaderVersion,
-			JavaComponent: opts["java"],
+			ProfileDir:       placed.shared,
+			PlatformDir:      placed.platform,
+			VersionURL:       versionURL,
+			OS:               goos,
+			Arch:             arch,
+			PlatformKey:      key,
+			MinecraftVersion: id,
+			LoaderName:       loaderName,
+			LoaderVersion:    loaderVersion,
+			LoaderInManifest: plan != nil,
+			JavaComponent:    opts["java"],
+			Files:            planFiles(plan),
 		}); err != nil {
 			fmt.Fprintf(out, "Платформа %s не собралась: %v\n", key, err)
 			failures = append(failures, key)
@@ -399,11 +448,15 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 				return err
 			}
 		}
+		built++
 		fmt.Fprintf(out, "Готово: %s\n", placed.platform)
 	}
 	prepared := s.layout(name)
-	if !prepared.exists() {
+	if built == 0 || !prepared.exists() {
 		return fmt.Errorf("ни одну платформу собрать не вышло: %s", strings.Join(failures, ", "))
+	}
+	if err := s.rememberRecipe(prepared.root, plan, out); err != nil {
+		return err
 	}
 	s.fire("build.prepared", name)
 	if len(failures) > 0 {

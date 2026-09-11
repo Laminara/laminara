@@ -11,21 +11,33 @@ import (
 const LaunchProfileName = "laminara.profile.json"
 
 type LaunchProfile struct {
-	MainClass     string   `json:"mainClass"`
-	JavaComponent string   `json:"javaComponent"`
-	JavaMajor     int      `json:"javaMajor"`
-	OS            string   `json:"os"`
-	Arch          string   `json:"arch"`
-	PlatformKey   string   `json:"platformKey"`
-	JavaBin       string   `json:"javaBin,omitempty"`
-	VersionID     string   `json:"versionId"`
-	AssetIndex    string   `json:"assetIndex"`
-	ClientJar     string   `json:"clientJar"`
-	Classpath     []string `json:"classpath"`
-	Natives       []string `json:"natives"`
-	JvmArgs       []string `json:"jvmArgs,omitempty"`
-	GameArgs      []string `json:"gameArgs,omitempty"`
-	Runtime       string   `json:"runtime"`
+	MainClass        string   `json:"mainClass"`
+	JavaComponent    string   `json:"javaComponent"`
+	JavaMajor        int      `json:"javaMajor"`
+	OS               string   `json:"os"`
+	Arch             string   `json:"arch"`
+	PlatformKey      string   `json:"platformKey"`
+	MinecraftVersion string   `json:"minecraftVersion,omitempty"`
+	JavaBin          string   `json:"javaBin,omitempty"`
+	VersionID        string   `json:"versionId"`
+	AssetIndex       string   `json:"assetIndex"`
+	ClientJar        string   `json:"clientJar"`
+	Classpath        []string `json:"classpath"`
+	Natives          []string `json:"natives"`
+	JvmArgs          []string `json:"jvmArgs,omitempty"`
+	GameArgs         []string `json:"gameArgs,omitempty"`
+	Runtime          string   `json:"runtime"`
+}
+
+func minecraftVersionOf(launch LaunchProfile) string {
+	if launch.MinecraftVersion != "" {
+		return launch.MinecraftVersion
+	}
+	return launch.VersionID
+}
+
+func ReadLaunchProfile(root string) (LaunchProfile, error) {
+	return readLaunchProfile(root)
 }
 
 func readLaunchProfile(root string) (LaunchProfile, error) {

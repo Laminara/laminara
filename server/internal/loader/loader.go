@@ -46,6 +46,10 @@ type Installer interface {
 	Install(ctx context.Context, req InstallRequest) (*InstallResult, error)
 }
 
+type JavaProvider interface {
+	JavaComponent() string
+}
+
 var registry = map[string]Loader{}
 
 func Register(l Loader) {

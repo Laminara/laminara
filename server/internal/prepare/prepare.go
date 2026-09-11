@@ -16,6 +16,8 @@ import (
 
 	"github.com/laminara/laminara/server/internal/atomicfile"
 	"github.com/laminara/laminara/server/internal/authlib"
+	"github.com/laminara/laminara/server/internal/compat"
+	"github.com/laminara/laminara/server/internal/httpx"
 	"github.com/laminara/laminara/server/internal/jre"
 	"github.com/laminara/laminara/server/internal/loader"
 	"github.com/laminara/laminara/server/internal/manifest"
@@ -39,7 +41,7 @@ func NewPreparer() *Preparer {
 	return &Preparer{
 		mojang:        mojang.NewClient(),
 		jre:           jre.NewClient(),
-		http:          &http.Client{Timeout: 5 * time.Minute},
+		http:          httpx.NewClient(5 * time.Minute),
 		assetsBaseURL: defaultAssetsBaseURL,
 		workers:       defaultWorkers,
 	}
@@ -56,15 +58,18 @@ func NewPreparerWith(httpClient *http.Client, assetsBaseURL, jreAllURL string, w
 }
 
 type Options struct {
-	ProfileDir    string
-	PlatformDir   string
-	VersionURL    string
-	OS            string
-	Arch          string
-	PlatformKey   string
-	LoaderName    string
-	LoaderVersion string
-	JavaComponent string
+	ProfileDir       string
+	PlatformDir      string
+	VersionURL       string
+	OS               string
+	Arch             string
+	PlatformKey      string
+	MinecraftVersion string
+	LoaderName       string
+	LoaderVersion    string
+	LoaderInManifest bool
+	JavaComponent    string
+	Files            []compat.File
 }
 
 func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile, error) {
@@ -79,10 +84,14 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 
 	var loaderProfile *loader.LoaderProfile
 	var loaderInstaller loader.Installer
-	if opts.LoaderName != "" && opts.LoaderName != "vanilla" {
+	loaderJava := ""
+	if opts.LoaderName != "" && opts.LoaderName != "vanilla" && !opts.LoaderInManifest {
 		selected, ok := loader.Get(opts.LoaderName)
 		if !ok {
 			return nil, fmt.Errorf("загрузчика «%s» нет — какие есть для версии, покажет loaders <версия>", opts.LoaderName)
+		}
+		if raiser, ok := selected.(loader.JavaProvider); ok {
+			loaderJava = raiser.JavaComponent()
 		}
 		if installer, ok := selected.(loader.Installer); ok {
 			loaderInstaller = installer
@@ -100,20 +109,23 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	}
 	javaComponent := profile.JavaComponent
 	javaMajor := profile.JavaMajor
-	if opts.JavaComponent != "" {
-		javaComponent = opts.JavaComponent
-		if major, known := componentMajors[javaComponent]; known {
+	for _, override := range []string{loaderJava, opts.JavaComponent} {
+		if override == "" {
+			continue
+		}
+		javaComponent = override
+		if major, known := componentMajors[override]; known {
 			javaMajor = major
 		}
 	}
 
 	dl := &downloader{http: p.http, root: opts.ProfileDir, workers: p.workers}
-	jobs := []job{{url: profile.ClientJar.URL, path: profile.ClientJar.Path, sha1: profile.ClientJar.SHA1}}
+	jobs := []job{{url: profile.ClientJar.URL, path: profile.ClientJar.Path, digest: sha1Digest(profile.ClientJar.SHA1)}}
 	for _, lib := range profile.Libraries {
-		jobs = append(jobs, job{url: lib.URL, path: lib.Path, sha1: lib.SHA1})
+		jobs = append(jobs, job{url: lib.URL, path: lib.Path, digest: sha1Digest(lib.SHA1)})
 	}
 	for _, native := range profile.Natives {
-		jobs = append(jobs, job{url: native.URL, path: native.Path, sha1: native.SHA1})
+		jobs = append(jobs, job{url: native.URL, path: native.Path, digest: sha1Digest(native.SHA1)})
 	}
 	if err := dl.run(ctx, jobs, "Клиент и библиотеки"); err != nil {
 		return nil, err
@@ -135,6 +147,9 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 		}
 	}
 
+	if err := p.downloadExtraFiles(ctx, opts); err != nil {
+		return nil, err
+	}
 	if err := p.writeLaunchProfile(opts, profile, javaComponent, javaMajor, javaBin, detail.ID, installResult); err != nil {
 		return nil, err
 	}
@@ -154,10 +169,22 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	return profile, nil
 }
 
+func (p *Preparer) downloadExtraFiles(ctx context.Context, opts Options) error {
+	if len(opts.Files) == 0 {
+		return nil
+	}
+	dl := &downloader{http: p.http, root: opts.ProfileDir, workers: p.workers}
+	jobs := make([]job, 0, len(opts.Files))
+	for _, file := range opts.Files {
+		jobs = append(jobs, job{url: file.URL, path: file.Path, digest: sha256Digest(file.SHA256)})
+	}
+	return dl.run(ctx, jobs, "Моды рецепта")
+}
+
 func (p *Preparer) ensureAuthlib(ctx context.Context, dir string) error {
 	progress.Phase(ctx, "Вход в игре")
 	version, err := authlib.Ensure(ctx, p.http, dir, func(ctx context.Context, url, dest, sha1 string) error {
-		return downloadFile(ctx, p.http, url, dest, sha1, false)
+		return downloadFile(ctx, p.http, url, dest, sha1Digest(sha1), false)
 	})
 	if err != nil {
 		return fmt.Errorf("не удалось получить %s, без него игрок не войдёт на сервер: %w", authlib.FileName, err)
@@ -185,7 +212,7 @@ func (p *Preparer) runInstaller(ctx context.Context, opts Options, mcVersion, ja
 		MinecraftJar:  filepath.Join(opts.ProfileDir, filepath.FromSlash(clientJarPath)),
 		JavaBin:       javaBin,
 		Download: func(ctx context.Context, url, dest, sha1 string) error {
-			return downloadFile(ctx, p.http, url, dest, sha1, false)
+			return downloadFile(ctx, p.http, url, dest, sha1Digest(sha1), false)
 		},
 		Fetch: func(ctx context.Context, url string) ([]byte, error) {
 			return fetchSmall(ctx, p.http, url)
@@ -235,12 +262,17 @@ func (p *Preparer) serverJavaBin(ctx context.Context, root, component string) (s
 	dl := &downloader{http: p.http, root: dir, workers: p.workers}
 	jobs := make([]job, 0, len(files))
 	for _, file := range files {
-		jobs = append(jobs, job{url: file.Download.URL, path: file.Path, sha1: file.Download.SHA1, executable: file.Executable})
+		jobs = append(jobs, job{url: file.Download.URL, path: file.Path, digest: sha1Digest(file.Download.SHA1), executable: file.Executable})
 	}
 	if err := dl.run(ctx, jobs, "Java для сборки"); err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "bin", "java"), nil
+}
+
+func movedToAnotherJava(platformDir, component string) bool {
+	previous, err := manifest.ReadLaunchProfile(platformDir)
+	return err == nil && previous.JavaComponent != "" && previous.JavaComponent != component
 }
 
 func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, component string) (string, error) {
@@ -252,24 +284,48 @@ func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, compo
 	if err != nil {
 		return "", err
 	}
+
+	inside := "runtime/" + platformKey
+	if movedToAnotherJava(root, component) {
+		inside = "runtime/." + platformKey + ".new"
+		if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(inside))); err != nil {
+			return "", err
+		}
+	}
+
 	dl := &downloader{http: p.http, root: root, workers: p.workers}
 	jobs := make([]job, 0, len(files))
 	for _, file := range files {
 		jobs = append(jobs, job{
 			url:        file.Download.URL,
-			path:       "runtime/" + platformKey + "/" + file.Path,
-			sha1:       file.Download.SHA1,
+			path:       inside + "/" + file.Path,
+			digest:     sha1Digest(file.Download.SHA1),
 			executable: file.Executable,
 		})
 	}
 	if err := dl.run(ctx, jobs, "Java рантайм"); err != nil {
 		return "", err
 	}
+	if inside != "runtime/"+platformKey {
+		if err := swapRuntime(root, inside, "runtime/"+platformKey, component); err != nil {
+			return "", err
+		}
+	}
 	javaBin, err := resolveJavaBin(files, platformKey)
 	if err != nil {
 		return "", err
 	}
 	return javaBin, nil
+}
+
+func swapRuntime(root, fresh, live, component string) error {
+	freshDir := filepath.Join(root, filepath.FromSlash(fresh))
+	liveDir := filepath.Join(root, filepath.FromSlash(live))
+	slog.Info("сборка переезжает на другую Java, старый рантайм заменяю", "стало", component, "папка", liveDir)
+	if err := os.RemoveAll(liveDir); err != nil {
+		return err
+	}
+	return os.Rename(freshDir, liveDir)
 }
 
 func noRuntimeHint(err error, platformKey, remedy string) error {
@@ -300,12 +356,13 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 
 	mainClass := profile.MainClass
 	clientJar := profile.ClientJar.Path
-	var jvmArgs, gameArgs []string
+	jvmArgs := profile.JvmArgs
+	gameArgs := profile.GameArgs
 	if install != nil {
 		mainClass = install.MainClass
 		clientJar = install.ClientJar
-		jvmArgs = install.JVMArgs
-		gameArgs = install.GameArgs
+		jvmArgs = append(jvmArgs, install.JVMArgs...)
+		gameArgs = append(gameArgs, install.GameArgs...)
 		classpath = mergeUnique(classpath, install.Libraries)
 	}
 	classpath = append(classpath, clientJar)
@@ -316,21 +373,22 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	}
 
 	launch := manifest.LaunchProfile{
-		MainClass:     mainClass,
-		JavaComponent: javaComponent,
-		JavaMajor:     javaMajor,
-		OS:            opts.OS,
-		Arch:          opts.Arch,
-		PlatformKey:   opts.PlatformKey,
-		JavaBin:       javaBin,
-		VersionID:     versionID,
-		AssetIndex:    profile.AssetIndexID,
-		ClientJar:     clientJar,
-		Classpath:     classpath,
-		Natives:       natives,
-		JvmArgs:       jvmArgs,
-		GameArgs:      gameArgs,
-		Runtime:       "runtime/" + opts.PlatformKey,
+		MainClass:        mainClass,
+		JavaComponent:    javaComponent,
+		JavaMajor:        javaMajor,
+		OS:               opts.OS,
+		Arch:             opts.Arch,
+		PlatformKey:      opts.PlatformKey,
+		JavaBin:          javaBin,
+		VersionID:        versionID,
+		MinecraftVersion: opts.MinecraftVersion,
+		AssetIndex:       profile.AssetIndexID,
+		ClientJar:        clientJar,
+		Classpath:        classpath,
+		Natives:          natives,
+		JvmArgs:          jvmArgs,
+		GameArgs:         gameArgs,
+		Runtime:          "runtime/" + opts.PlatformKey,
 	}
 	data, err := json.MarshalIndent(launch, "", "  ")
 	if err != nil {
@@ -374,4 +432,5 @@ var componentMajors = map[string]int{
 	"java-runtime-gamma":          17,
 	"java-runtime-gamma-snapshot": 17,
 	"java-runtime-delta":          21,
+	"java-runtime-epsilon":        25,
 }

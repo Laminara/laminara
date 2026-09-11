@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/laminara/laminara/server/internal/humanize"
+	"github.com/laminara/laminara/server/internal/launchargs"
 	"github.com/laminara/laminara/server/internal/maven"
 	"github.com/laminara/laminara/server/internal/progress"
 	"github.com/laminara/laminara/server/internal/safepath"
@@ -83,7 +84,7 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 		GameArgs:  i.version.Arguments.Game,
 	}
 	if len(launch.GameArgs) == 0 {
-		launch.GameArgs = tweakArgs(i.version.MinecraftArguments)
+		launch.GameArgs = launchargs.Legacy(i.version.MinecraftArguments)
 	}
 	for _, library := range i.Libraries() {
 		path, err := libraryPath(library)

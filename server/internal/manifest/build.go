@@ -181,7 +181,7 @@ func (b *Builder) BuildPlatform(ctx context.Context, sources Sources, settingsRo
 		SchemaVersion:        SchemaVersion,
 		Modpack:              modpack,
 		Version:              version,
-		MinecraftVersion:     launch.VersionID,
+		MinecraftVersion:     minecraftVersionOf(launch),
 		JavaMajor:            uint32(launch.JavaMajor),
 		GeneratedAtUnixNanos: b.now().UnixNano(),
 		Files:                files,

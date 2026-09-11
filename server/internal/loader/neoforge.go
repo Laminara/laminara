@@ -22,7 +22,7 @@ type neoForge struct {
 }
 
 func newNeoForge() *neoForge {
-	return &neoForge{http: &http.Client{Timeout: 30 * time.Second}, versionsURL: neoForgeVersionsURL}
+	return &neoForge{http: httpx.NewClient(30 * time.Second), versionsURL: neoForgeVersionsURL}
 }
 
 func (n *neoForge) Name() string { return "neoforge" }

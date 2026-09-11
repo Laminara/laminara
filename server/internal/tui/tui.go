@@ -64,7 +64,10 @@ type versionsMsg struct {
 	latestRelease  string
 	latestSnapshot string
 }
-type loadersMsg struct{ loaders []*adminv1.LoaderInfo }
+type loadersMsg struct {
+	loaders []*adminv1.LoaderInfo
+	recipes []*adminv1.RecipeInfo
+}
 type statusTickMsg struct{}
 type commandsMsg struct{ names []string }
 type statusMsg struct {
@@ -797,7 +800,7 @@ func fetchLoaders(ctx context.Context, client adminv1connect.AdminServiceClient,
 		if err != nil {
 			return errMsg{err}
 		}
-		return loadersMsg{loaders: resp.Msg.Loaders}
+		return loadersMsg{loaders: resp.Msg.Loaders, recipes: resp.Msg.Recipes}
 	}
 }
 

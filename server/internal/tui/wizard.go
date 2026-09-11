@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
 )
 
@@ -16,8 +17,11 @@ const (
 	wzVersion wizardStep = iota
 	wzLoader
 	wzLoaderVersion
+	wzRecipe
 	wzName
 )
+
+const recipeDecline = "-"
 
 type wizard struct {
 	ctx    context.Context
@@ -33,7 +37,9 @@ type wizard struct {
 	mc            string
 	loader        string
 	loaderVersion string
+	recipe        string
 	loaderIndex   map[string][]string
+	recipes       []*adminv1.RecipeInfo
 
 	done        bool
 	cancel      bool
@@ -72,8 +78,12 @@ func (w wizard) Update(msg tea.Msg) (wizard, tea.Cmd) {
 		return w, nil
 	case loadersMsg:
 		w.loaderIndex = map[string][]string{}
+		w.recipes = msg.recipes
 		items := make([]pickItem, 0, len(msg.loaders))
 		for _, l := range msg.loaders {
+			if l.Trouble != "" {
+				continue
+			}
 			w.loaderIndex[l.Name] = l.Versions
 			hint := "нет версий"
 			if len(l.Versions) > 0 {
@@ -127,32 +137,77 @@ func (w wizard) advance(value string) (wizard, tea.Cmd) {
 		return w, fetchLoaders(w.ctx, w.client, w.mc)
 	case wzLoader:
 		w.loader = value
-		if value == "vanilla" {
-			w.step = wzName
-			w.name.Focus()
-			return w, textinput.Blink
+		return w.askRecipe()
+	case wzRecipe:
+		if value == recipeDecline {
+			return w.askLoaderVersion()
 		}
-		items := make([]pickItem, 0)
-		for _, version := range w.loaderIndex[value] {
-			items = append(items, pickItem{label: version, value: version})
-		}
-		w.pick = newPicker("Версия "+value+" — какую взять?", items, w.icons, w.styles)
-		w.step = wzLoaderVersion
-		return w, nil
+		w.recipe = value
+		return w.askName()
 	case wzLoaderVersion:
 		w.loaderVersion = value
-		w.step = wzName
-		w.name.Focus()
-		return w, textinput.Blink
+		return w.askName()
 	}
 	return w, nil
 }
 
-func (w wizard) buildCommand() string {
-	if w.loader == "" || w.loader == "vanilla" {
-		return fmt.Sprintf("install %s %s", w.name.Value(), w.mc)
+func (w wizard) fittingRecipes() []*adminv1.RecipeInfo {
+	var fitting []*adminv1.RecipeInfo
+	for _, recipe := range w.recipes {
+		if recipe.Loader == w.loader {
+			fitting = append(fitting, recipe)
+		}
 	}
-	return fmt.Sprintf("install %s %s loader=%s loaderVersion=%s", w.name.Value(), w.mc, w.loader, w.loaderVersion)
+	return fitting
+}
+
+func (w wizard) askName() (wizard, tea.Cmd) {
+	w.step = wzName
+	w.name.Focus()
+	return w, textinput.Blink
+}
+
+func (w wizard) askLoaderVersion() (wizard, tea.Cmd) {
+	versions := w.loaderIndex[w.loader]
+	if w.loader == "vanilla" || len(versions) == 0 {
+		return w.askName()
+	}
+	items := make([]pickItem, 0, len(versions))
+	for _, version := range versions {
+		items = append(items, pickItem{label: version, value: version})
+	}
+	w.pick = newPicker("Версия "+w.loader+" — какую взять?", items, w.icons, w.styles)
+	w.step = wzLoaderVersion
+	return w, nil
+}
+
+func (w wizard) askRecipe() (wizard, tea.Cmd) {
+	fitting := w.fittingRecipes()
+	if len(fitting) == 0 {
+		return w.askLoaderVersion()
+	}
+	items := make([]pickItem, 0, len(fitting)+1)
+	for _, recipe := range fitting {
+		items = append(items, pickItem{label: recipe.Name, value: recipe.Name, hint: recipe.Summary})
+	}
+	items = append(items, pickItem{label: "без рецепта", value: recipeDecline, hint: "как эта версия выходила — Java 8 и старый LWJGL"})
+	w.pick = newPicker("Эта версия старая. Запустить её на современной Java?", items, w.icons, w.styles)
+	w.step = wzRecipe
+	return w, nil
+}
+
+func (w wizard) buildCommand() string {
+	command := fmt.Sprintf("install %s %s", w.name.Value(), w.mc)
+	if w.loader != "" && w.loader != "vanilla" {
+		command += " loader=" + w.loader
+	}
+	if w.loaderVersion != "" {
+		command += " loaderVersion=" + w.loaderVersion
+	}
+	if w.recipe != "" {
+		command += " compat=" + w.recipe
+	}
+	return command
 }
 
 func (w wizard) View() string {
@@ -165,6 +220,9 @@ func (w wizard) View() string {
 			summary += "  ·  " + w.loader + " " + w.loaderVersion
 		} else {
 			summary += "  ·  vanilla"
+		}
+		if w.recipe != "" {
+			summary += "  ·  " + w.recipe
 		}
 		body := w.styles.wizardTitle.Render("Как назвать сборку?") + "\n" +
 			w.styles.dim.Render(summary) + "\n\n" +

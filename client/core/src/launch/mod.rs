@@ -61,10 +61,16 @@ fn version_id(profile: &LaunchProfile) -> String {
         .to_string()
 }
 
-fn substitute(arg: &str, libraries_dir: &str, sep: &str, version: &str) -> String {
-    arg.replace("${library_directory}", libraries_dir)
+fn substitute(arg: &str, dirs: &LaunchDirs, sep: &str, version: &str) -> String {
+    arg.replace("${library_directory}", &dirs.libraries)
+        .replace("${natives_directory}", &dirs.natives)
         .replace("${classpath_separator}", sep)
         .replace("${version_name}", version)
+}
+
+struct LaunchDirs {
+    libraries: String,
+    natives: String,
 }
 
 pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
@@ -72,8 +78,11 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
     let sep = separator(&profile.os);
     let version = version_id(profile);
     let join = |rel: &str| input.profile_dir.join(rel).to_string_lossy().into_owned();
-    let libraries_dir = join("libraries");
     let natives_dir = input.natives_dir.to_string_lossy().into_owned();
+    let dirs = LaunchDirs {
+        libraries: join("libraries"),
+        natives: natives_dir.clone(),
+    };
 
     let mut argv: Vec<String> = vec![input.java_bin.to_string_lossy().into_owned()];
 
@@ -116,7 +125,7 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
     argv.push(classpath);
 
     for arg in profile.jvm_args.iter().chain(input.extras.jvm_args.iter()) {
-        argv.push(substitute(arg, &libraries_dir, sep, &version));
+        argv.push(substitute(arg, &dirs, sep, &version));
     }
 
     argv.push(
@@ -160,7 +169,7 @@ pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
         .iter()
         .chain(input.extras.game_args.iter())
     {
-        argv.push(substitute(arg, &libraries_dir, sep, &version));
+        argv.push(substitute(arg, &dirs, sep, &version));
     }
 
     argv
@@ -358,6 +367,33 @@ mod tests {
         assert!(line.contains("--add-modules ALL-MODULE-PATH"));
         assert!(line.contains("--launchTarget forgeclient"));
         assert!(line.contains("--fml.mcVersion 1.21.1"));
+        assert!(!line.contains("${"), "no unsubstituted placeholders remain");
+    }
+
+    #[test]
+    fn recipe_args_resolve_the_natives_directory() {
+        let mut profile = base_profile();
+        profile.main_class = "com.gtnewhorizons.retrofuturabootstrap.MainStartOnFirstThread".into();
+        profile.jvm_args = vec![
+            "-Djna.tmpdir=${natives_directory}".into(),
+            "-Dio.netty.native.workdir=${natives_directory}".into(),
+            "-Djava.system.class.loader=com.gtnewhorizons.retrofuturabootstrap.RfbSystemClassLoader"
+                .into(),
+        ];
+        profile.game_args = vec![
+            "--tweakClass".into(),
+            "cpw.mods.fml.common.launcher.FMLTweaker".into(),
+        ];
+        let session = session();
+        let paths = paths();
+        let argv = build_argv(&inputs(&profile, &session, &paths, &[], &no_extras()));
+        let line = argv.join(" ");
+
+        let natives = paths.natives.to_string_lossy().into_owned();
+        assert!(line.contains(&format!("-Djna.tmpdir={natives}")));
+        assert!(line.contains(&format!("-Dio.netty.native.workdir={natives}")));
+        assert!(line.contains("RfbSystemClassLoader"));
+        assert!(line.contains("--tweakClass cpw.mods.fml.common.launcher.FMLTweaker"));
         assert!(!line.contains("${"), "no unsubstituted placeholders remain");
     }
 
