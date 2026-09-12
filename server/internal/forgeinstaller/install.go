@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/laminara/laminara/server/internal/humanize"
@@ -101,12 +102,30 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 		}
 		launch.OnDisk = append(launch.OnDisk, filepath.ToSlash(path))
 	}
+	launch.OnDisk = append(launch.OnDisk, producedInLibraries(placeholders, req.LibrariesDir)...)
 	if patched, ok := placeholders["PATCHED"]; ok {
 		if relative, err := filepath.Rel(req.LibrariesDir, patched); err == nil {
 			launch.ClientJar = filepath.ToSlash(relative)
 		}
 	}
 	return launch, nil
+}
+
+func producedInLibraries(placeholders map[string]string, librariesDir string) []string {
+	var produced []string
+	for _, value := range placeholders {
+		relative, err := filepath.Rel(librariesDir, value)
+		if err != nil || strings.HasPrefix(relative, "..") {
+			continue
+		}
+		info, err := os.Stat(value)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		produced = append(produced, filepath.ToSlash(relative))
+	}
+	sort.Strings(produced)
+	return produced
 }
 
 func (i *Installer) downloadLibraries(ctx context.Context, req Request) error {

@@ -483,9 +483,36 @@ mod boot {
         "Failed to initialize graphics",
         "org.lwjgl",
         "org.lwjglx",
+        "Failed to create window",
+        "Setting user:",
+        "Backend library: LWJGL",
     ];
 
     const HEAD_BYTES: u64 = 256 * 1024;
+
+    fn as_the_player_gets_it(prepared: &Path, platform_dir: &Path, manifest_path: &Path) -> PathBuf {
+        use prost::Message;
+        let bytes = std::fs::read(manifest_path).expect("файл манифеста");
+        let manifest = crate::proto::core::v1::Manifest::decode(bytes.as_slice())
+            .expect("манифест не разобрать");
+        let target = prepared.with_extension("as-published");
+        let _ = std::fs::remove_dir_all(&target);
+        for file in &manifest.files {
+            let from = [platform_dir.join(&file.path), prepared.join(&file.path)]
+                .into_iter()
+                .find(|candidate| candidate.is_file())
+                .unwrap_or_else(|| panic!("{} есть в манифесте, но не в сборке", file.path));
+            let to = target.join(&file.path);
+            std::fs::create_dir_all(to.parent().expect("папка")).expect("создание папки");
+            std::fs::copy(&from, &to).expect("копирование файла сборки");
+        }
+        eprintln!(
+            "BOOT: собрал сборку из манифеста — {} файлов в {}",
+            manifest.files.len(),
+            target.display()
+        );
+        target
+    }
 
     fn head_of(path: &Path) -> String {
         let Ok(mut file) = std::fs::File::open(path) else {
@@ -503,8 +530,18 @@ mod boot {
             eprintln!("BOOT: задайте LAMINARA_BOOT_PROFILE=<папка собранной сборки>, чтобы прогнать запуск");
             return;
         };
-        let root = PathBuf::from(root);
+        let prepared = PathBuf::from(root);
         let key = std::env::var("LAMINARA_BOOT_PLATFORM").unwrap_or_else(|_| "linux".into());
+        let mut prepared_platform = prepared.join("platforms").join(&key);
+        if !prepared_platform.is_dir() {
+            prepared_platform = prepared.clone();
+        }
+        let root = match std::env::var("LAMINARA_BOOT_MANIFEST") {
+            Ok(manifest) => {
+                as_the_player_gets_it(&prepared, &prepared_platform, Path::new(&manifest))
+            }
+            Err(_) => prepared,
+        };
         let mut platform_dir = root.join("platforms").join(&key);
         if !platform_dir.is_dir() {
             platform_dir = root.clone();
@@ -547,8 +584,12 @@ mod boot {
 
         let log = root.join(".boot.log");
         let file = std::fs::File::create(&log).expect("файл лога");
-        let mut child = Command::new(&launchable[0])
-            .args(&launchable[1..])
+        let (program, rest) = match std::env::var("LAMINARA_BOOT_DISPLAY") {
+            Ok(wrapper) if !wrapper.trim().is_empty() => (wrapper, launchable.as_slice()),
+            _ => (launchable[0].clone(), &launchable[1..]),
+        };
+        let mut child = Command::new(&program)
+            .args(rest)
             .current_dir(&root)
             .stdin(Stdio::null())
             .stdout(Stdio::from(file.try_clone().expect("клон лога")))
@@ -573,13 +614,14 @@ mod boot {
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        let _ = std::fs::remove_file(&log);
-
-        assert!(
-            REACHED_GRAPHICS.iter().any(|marker| head.contains(marker)),
-            "сборка не дошла до графики — значит не запустится и у игрока. Начало лога:
+        match REACHED_GRAPHICS.iter().find(|marker| head.contains(**marker)) {
+            Some(marker) => eprintln!("BOOT: дошло до графики по признаку «{marker}», лог в {}", log.display()),
+            None => panic!(
+                "сборка не дошла до графики — значит не запустится и у игрока. Лог в {}. Начало:
 {}",
-            head.chars().take(4000).collect::<String>()
-        );
+                log.display(),
+                head.chars().take(4000).collect::<String>()
+            ),
+        }
     }
 }

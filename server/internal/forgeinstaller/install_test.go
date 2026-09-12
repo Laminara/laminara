@@ -183,3 +183,39 @@ func TestToolsOfTheInstallerStayOutOfTheGameClasspath(t *testing.T) {
 		}
 	}
 }
+
+func TestWhatTheProcessorsProducedInsideLibrariesIsKept(t *testing.T) {
+	libraries := t.TempDir()
+	outside := t.TempDir()
+
+	patched := filepath.Join(libraries, "net", "minecraftforge", "forge", "1", "forge-1-client.jar")
+	srg := filepath.Join(libraries, "net", "minecraft", "client", "1", "client-1-srg.jar")
+	for _, path := range []string{patched, srg} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("артефакт"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stranger := filepath.Join(outside, "installer.jar")
+	if err := os.WriteFile(stranger, []byte("установщик"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	produced := producedInLibraries(map[string]string{
+		"PATCHED":   patched,
+		"MC_SRG":    srg,
+		"INSTALLER": stranger,
+		"SIDE":      "client",
+		"MISSING":   filepath.Join(libraries, "нет", "такого.jar"),
+	}, libraries)
+
+	want := []string{
+		"net/minecraft/client/1/client-1-srg.jar",
+		"net/minecraftforge/forge/1/forge-1-client.jar",
+	}
+	if strings.Join(produced, " ") != strings.Join(want, " ") {
+		t.Fatalf("в сборку попадёт %v — FML собирает игру из этих файлов по пути, и без них она не стартует", produced)
+	}
+}
