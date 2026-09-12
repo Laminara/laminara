@@ -23,6 +23,7 @@ type LaunchProfile struct {
 	AssetIndex       string   `json:"assetIndex"`
 	ClientJar        string   `json:"clientJar"`
 	Classpath        []string `json:"classpath"`
+	ExtraLibraries   []string `json:"extraLibraries,omitempty"`
 	Natives          []string `json:"natives"`
 	JvmArgs          []string `json:"jvmArgs,omitempty"`
 	GameArgs         []string `json:"gameArgs,omitempty"`

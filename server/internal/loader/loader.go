@@ -39,6 +39,7 @@ type InstallResult struct {
 	JVMArgs   []string
 	GameArgs  []string
 	Libraries []string
+	OnDisk    []string
 	ClientJar string
 }
 

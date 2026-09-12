@@ -35,6 +35,7 @@ type LaunchInfo struct {
 	JVMArgs   []string
 	GameArgs  []string
 	Libraries []string
+	OnDisk    []string
 	ClientJar string
 }
 
@@ -92,6 +93,13 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 			return nil, err
 		}
 		launch.Libraries = append(launch.Libraries, filepath.ToSlash(path))
+	}
+	for _, library := range i.Libraries() {
+		path, err := libraryPath(library)
+		if err != nil {
+			return nil, err
+		}
+		launch.OnDisk = append(launch.OnDisk, filepath.ToSlash(path))
 	}
 	if patched, ok := placeholders["PATCHED"]; ok {
 		if relative, err := filepath.Rel(req.LibrariesDir, patched); err == nil {

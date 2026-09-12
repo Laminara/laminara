@@ -160,3 +160,58 @@ func TestBuildRefusesUnreadableTree(t *testing.T) {
 		t.Fatal("a tree with an unreadable directory must fail the build")
 	}
 }
+
+func TestALibraryTheLoaderOpensByPathIsPublishedToo(t *testing.T) {
+	ctx := context.Background()
+	cas, _ := newCAS(t)
+
+	shared := writeTree(t, map[string]string{
+		"libraries/net/minecraftforge/fmlloader/1/fmlloader-1.jar":           "на classpath",
+		"libraries/net/minecraftforge/fmlcore/1/fmlcore-1.jar":               "грузится по пути",
+		"libraries/net/minecraftforge/installertools/1/installertools-1.jar": "инструмент установщика",
+		"versions/1.20.1/1.20.1.jar":                                         "клиент",
+		"mods/a.jar":                                                         "мод",
+	})
+	platformDir := filepath.Join(shared, "platforms", "linux")
+	if err := os.MkdirAll(platformDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := manifest.LaunchProfile{
+		MainClass:   "cpw.mods.bootstraplauncher.BootstrapLauncher",
+		PlatformKey: "linux",
+		ClientJar:   "versions/1.20.1/1.20.1.jar",
+		Classpath: []string{
+			"libraries/net/minecraftforge/fmlloader/1/fmlloader-1.jar",
+			"versions/1.20.1/1.20.1.jar",
+		},
+		ExtraLibraries: []string{"libraries/net/minecraftforge/fmlcore/1/fmlcore-1.jar"},
+	}
+	data, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(platformDir, manifest.LaunchProfileName), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	built, err := manifest.NewBuilder(cas).BuildPlatform(ctx,
+		manifest.Sources{Shared: shared, Platform: platformDir},
+		shared, "test-pack", "1.0.0", corev1.Platform_PLATFORM_LINUX)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	shipped := map[string]bool{}
+	for _, file := range built.Files {
+		shipped[file.Path] = true
+	}
+	if !shipped["libraries/net/minecraftforge/fmlcore/1/fmlcore-1.jar"] {
+		t.Fatal("fmlcore не уехал игроку: FML открывает его по пути мимо classpath, и без него игра падает на старте")
+	}
+	if !shipped["libraries/net/minecraftforge/fmlloader/1/fmlloader-1.jar"] {
+		t.Fatal("библиотека с classpath обязана публиковаться")
+	}
+	if shipped["libraries/net/minecraftforge/installertools/1/installertools-1.jar"] {
+		t.Fatal("инструмент установщика игроку не нужен")
+	}
+}

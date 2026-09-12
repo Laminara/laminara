@@ -358,7 +358,9 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 	clientJar := profile.ClientJar.Path
 	jvmArgs := profile.JvmArgs
 	gameArgs := profile.GameArgs
+	var onDisk []string
 	if install != nil {
+		onDisk = install.OnDisk
 		mainClass = install.MainClass
 		clientJar = install.ClientJar
 		jvmArgs = append(jvmArgs, install.JVMArgs...)
@@ -385,6 +387,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 		AssetIndex:       profile.AssetIndexID,
 		ClientJar:        clientJar,
 		Classpath:        classpath,
+		ExtraLibraries:   onDisk,
 		Natives:          natives,
 		JvmArgs:          jvmArgs,
 		GameArgs:         gameArgs,

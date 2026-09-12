@@ -69,6 +69,9 @@ func installFromJar(ctx context.Context, req InstallRequest, installerPath strin
 	for _, library := range launch.Libraries {
 		result.Libraries = append(result.Libraries, "libraries/"+library)
 	}
+	for _, library := range launch.OnDisk {
+		result.OnDisk = append(result.OnDisk, "libraries/"+library)
+	}
 	return result, nil
 }
 

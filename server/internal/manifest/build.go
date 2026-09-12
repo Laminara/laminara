@@ -210,8 +210,8 @@ func neededLibraries(platformDir string, settings Settings) (map[string]bool, er
 	if err != nil {
 		return nil, err
 	}
-	needed := make(map[string]bool, len(launch.Classpath)+len(launch.Natives))
-	for _, group := range [][]string{launch.Classpath, launch.Natives, settings.Classpath} {
+	needed := make(map[string]bool, len(launch.Classpath)+len(launch.ExtraLibraries)+len(launch.Natives))
+	for _, group := range [][]string{launch.Classpath, launch.ExtraLibraries, launch.Natives, settings.Classpath} {
 		for _, path := range group {
 			needed[path] = true
 		}
