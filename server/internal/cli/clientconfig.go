@@ -18,6 +18,10 @@ func clientConfigCmd() *cobra.Command {
 		Short: "напечатать конфигурацию, которую запекают в лаунчер: адреса, ключи подписи, оформление",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			configPath, err := config.Discover(configPath)
+			if err != nil {
+				return err
+			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
@@ -46,6 +50,5 @@ func clientConfigCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
 	cmd.Flags().StringArrayVar(&endpoints, "endpoint", nil, "публичный адрес, по которому придут игроки (можно несколько раз, по порядку предпочтения)")
-	_ = cmd.MarkFlagRequired("config")
 	return cmd
 }

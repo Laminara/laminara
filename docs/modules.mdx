@@ -170,7 +170,7 @@ go build -o /var/lib/laminara/modules/greeter ./greeter
 Укажите каталог и (необязательно) конфигурацию модулей в конфиге сервера —
 ключ конфигурации совпадает с именем файла модуля:
 
-```json
+```json config.json
 {
   "modules": {
     "dir": "/var/lib/laminara/modules",
@@ -184,7 +184,7 @@ go build -o /var/lib/laminara/modules/greeter ./greeter
 Блок `modules.config` — настройки самого модуля. Провайдер настраивается там, где
 сервер его выбирает, поэтому модуль с провайдером аутентификации выглядит так:
 
-```json
+```json config.json
 {
   "modules": {
     "dir": "/var/lib/laminara/modules"

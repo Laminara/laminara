@@ -40,6 +40,10 @@ func doctorCmd() *cobra.Command {
 			"Разделы: " + strings.Join(doctor.Sections(), " "),
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath, err := config.Discover(configPath)
+			if err != nil {
+				return err
+			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
@@ -76,6 +80,7 @@ func doctorCmd() *cobra.Command {
 					return err
 				}
 			} else {
+				fmt.Fprintf(out, "Конфиг сервера: %s\n", configPath)
 				doctor.Write(out, results)
 			}
 			if fix {
@@ -97,7 +102,6 @@ func doctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "вывести результат как JSON")
 	cmd.Flags().BoolVar(&fix, "fix", false, "исправить то, что чинится безопасно")
 	cmd.Flags().BoolVar(&deep, "deep", false, "проверять все файлы сборок, а не выборку")
-	_ = cmd.MarkFlagRequired("config")
 	return cmd
 }
 
@@ -142,6 +146,10 @@ func backupCmd() *cobra.Command {
 		Short: "сохранить ключи, настройки и базу компьютеров в один архив",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			configPath, err := config.Discover(configPath)
+			if err != nil {
+				return err
+			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
@@ -170,7 +178,6 @@ func backupCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
 	cmd.Flags().StringVar(&target, "out", "", "куда положить архив")
-	_ = cmd.MarkFlagRequired("config")
 	return cmd
 }
 

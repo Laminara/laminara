@@ -148,7 +148,7 @@ https://launcher.example.com/console/enter?t=…
 
 Консоль в браузере держит связь по WebSocket, поэтому обратный прокси перед сервером должен пробрасывать апгрейд соединения (заголовки `Upgrade`/`Connection`). Конфиг от `nginx-config` это уже делает; если вы писали nginx сами и видите «сеанс закрыт» сразу после входа — добавьте проброс, см. [Продакшен](/server/production).
 
-```json
+```json config.json
 {
   "console": {
     "publicUrl": "https://launcher.example.com",

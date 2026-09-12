@@ -108,7 +108,7 @@ laminara-server restore --archive /srv/backups/laminara.tar.gz
 Логи всегда идут в консоль, а её подхватывает systemd или docker — там же и ротация. Файл нужен,
 когда сервер запускают иначе:
 
-```json
+```json config.json
 {
   "log": {
     "file": "/var/log/laminara/server.log",

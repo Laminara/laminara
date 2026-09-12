@@ -30,8 +30,9 @@ func nginxConfigCmd() *cobra.Command {
 		Short: "напечатать конфиг nginx под этот сервер",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if configPath == "" {
-				return fmt.Errorf("укажите конфиг сервера: --config <путь>")
+			configPath, err := config.Discover(configPath)
+			if err != nil {
+				return err
 			}
 			if len(domains) == 0 {
 				return fmt.Errorf("укажите домен проекта: --domain launcher.example.com")

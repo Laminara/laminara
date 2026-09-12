@@ -31,8 +31,9 @@ func systemdConfigCmd() *cobra.Command {
 		Short: "напечатать unit systemd под этот сервер",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if configPath == "" {
-				return fmt.Errorf("укажите конфиг сервера: --config <путь>")
+			configPath, err := config.Discover(configPath)
+			if err != nil {
+				return err
 			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
