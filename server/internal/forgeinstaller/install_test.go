@@ -141,3 +141,45 @@ func TestProcessorCommandSkipsServerAndBuildsClient(t *testing.T) {
 		t.Fatalf("args = %q", joined)
 	}
 }
+
+const profileWithToolLibraries = `{
+  "spec": 1, "minecraft": "1.20.1", "version": "forge-47.4.23", "json": "/version.json",
+  "data": {}, "processors": [],
+  "libraries": [
+    { "name": "net.sf.jopt-simple:jopt-simple:6.0-alpha-3", "downloads": { "artifact": { "path": "net/sf/jopt-simple/jopt-simple/6.0-alpha-3/jopt-simple-6.0-alpha-3.jar", "url": "https://example/jopt6.jar" } } },
+    { "name": "net.minecraftforge:installertools:1.4.1", "downloads": { "artifact": { "path": "net/minecraftforge/installertools/1.4.1/installertools-1.4.1.jar", "url": "https://example/tools.jar" } } }
+  ]
+}`
+
+const versionWithGameLibraries = `{
+  "id": "forge-47.4.23", "inheritsFrom": "1.20.1",
+  "mainClass": "cpw.mods.bootstraplauncher.BootstrapLauncher",
+  "arguments": { "jvm": ["-p", "modules"], "game": [] },
+  "libraries": [ { "name": "net.minecraftforge:forge:1.20.1-47.4.23", "downloads": { "artifact": { "url": "https://example/forge.jar" } } } ]
+}`
+
+func TestToolsOfTheInstallerStayOutOfTheGameClasspath(t *testing.T) {
+	jarPath := filepath.Join(t.TempDir(), "installer.jar")
+	writeJar(t, jarPath, map[string]string{
+		"install_profile.json": profileWithToolLibraries,
+		"version.json":         versionWithGameLibraries,
+	})
+
+	installer, err := Open(jarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installer.Libraries()) != 3 {
+		t.Fatalf("скачать нужно всё: и инструменты установщика, и библиотеки игры, а вышло %d", len(installer.Libraries()))
+	}
+
+	runtime := installer.RuntimeLibraries()
+	if len(runtime) != 1 || runtime[0].Name != "net.minecraftforge:forge:1.20.1-47.4.23" {
+		t.Fatalf("в classpath игры попало лишнее: %+v", runtime)
+	}
+	for _, library := range runtime {
+		if strings.Contains(library.Name, "jopt-simple") {
+			t.Fatal("jopt-simple установщика перекроет ванильный, и modlauncher не найдёт модуль jopt.simple")
+		}
+	}
+}

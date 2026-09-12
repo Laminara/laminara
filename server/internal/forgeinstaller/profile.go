@@ -123,6 +123,13 @@ func (i *Installer) Libraries() []Library {
 	return libraries
 }
 
+func (i *Installer) RuntimeLibraries() []Library {
+	if i.legacy != nil {
+		return nil
+	}
+	return i.version.Libraries
+}
+
 func readZipJSON(reader *zip.Reader, name string, target any) error {
 	data, err := readZipFile(reader, name)
 	if err != nil {

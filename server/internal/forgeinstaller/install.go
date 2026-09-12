@@ -86,7 +86,7 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 	if len(launch.GameArgs) == 0 {
 		launch.GameArgs = launchargs.Legacy(i.version.MinecraftArguments)
 	}
-	for _, library := range i.Libraries() {
+	for _, library := range i.RuntimeLibraries() {
 		path, err := libraryPath(library)
 		if err != nil {
 			return nil, err

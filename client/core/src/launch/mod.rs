@@ -465,3 +465,121 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod boot {
+    use super::*;
+    use crate::features::LaunchExtras;
+    use std::io::{Read, Seek, SeekFrom};
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    const REACHED_GRAPHICS: &[&str] = &[
+        "glfwInit",
+        "Unable to initialize GLFW",
+        "Failed to initialize GLFW",
+        "No available video device",
+        "libXcursor",
+        "Failed to initialize graphics",
+        "org.lwjgl",
+        "org.lwjglx",
+    ];
+
+    const HEAD_BYTES: u64 = 256 * 1024;
+
+    fn head_of(path: &Path) -> String {
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return String::new();
+        };
+        let mut buffer = Vec::new();
+        let _ = file.seek(SeekFrom::Start(0));
+        let _ = file.take(HEAD_BYTES).read_to_end(&mut buffer);
+        String::from_utf8_lossy(&buffer).into_owned()
+    }
+
+    #[test]
+    fn a_prepared_build_starts_the_game_up_to_graphics() {
+        let Ok(root) = std::env::var("LAMINARA_BOOT_PROFILE") else {
+            eprintln!("BOOT: задайте LAMINARA_BOOT_PROFILE=<папка собранной сборки>, чтобы прогнать запуск");
+            return;
+        };
+        let root = PathBuf::from(root);
+        let key = std::env::var("LAMINARA_BOOT_PLATFORM").unwrap_or_else(|_| "linux".into());
+        let mut platform_dir = root.join("platforms").join(&key);
+        if !platform_dir.is_dir() {
+            platform_dir = root.clone();
+        }
+
+        let raw = std::fs::read_to_string(platform_dir.join(LAUNCH_PROFILE_NAME))
+            .expect("laminara.profile.json");
+        let profile: LaunchProfile = serde_json::from_str(&raw).expect("разбор профиля запуска");
+
+        let natives = root.join(".natives-boot");
+        extract_natives(&profile, &root, &natives).expect("распаковка нативов");
+
+        let session = GameSession {
+            uuid: "00000000000000000000000000000001".into(),
+            name: "Boot".into(),
+            access_token: "boot".into(),
+            client_token: "boot".into(),
+        };
+        let java = platform_dir.join(&profile.java_bin);
+        let extras = LaunchExtras::default();
+        let argv = build_argv(&LaunchInputs {
+            profile: &profile,
+            profile_dir: &root,
+            game_dir: &root,
+            java_bin: &java,
+            natives_dir: &natives,
+            yggdrasil_root: "http://127.0.0.1:1/yggdrasil/",
+            authlib_jar: &root.join("authlib-injector.jar"),
+            prefetch_b64: "",
+            session: &session,
+            jvm_tuning: &["-Xmx2G".to_string()],
+            extras: &extras,
+            client_version: "boot",
+        });
+
+        let launchable: Vec<String> = argv
+            .into_iter()
+            .filter(|arg| !arg.starts_with("-javaagent:") && !arg.starts_with("-Dauthlibinjector."))
+            .collect();
+
+        let log = root.join(".boot.log");
+        let file = std::fs::File::create(&log).expect("файл лога");
+        let mut child = Command::new(&launchable[0])
+            .args(&launchable[1..])
+            .current_dir(&root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(file.try_clone().expect("клон лога")))
+            .stderr(Stdio::from(file))
+            .spawn()
+            .expect("запуск java");
+
+        let seconds: u64 = std::env::var("LAMINARA_BOOT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(120);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+        let mut head = String::new();
+        loop {
+            head = head_of(&log);
+            let decided = REACHED_GRAPHICS.iter().any(|marker| head.contains(marker));
+            let finished = child.try_wait().expect("ожидание java").is_some();
+            if decided || finished || std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        let _ = std::fs::remove_file(&log);
+
+        assert!(
+            REACHED_GRAPHICS.iter().any(|marker| head.contains(marker)),
+            "сборка не дошла до графики — значит не запустится и у игрока. Начало лога:
+{}",
+            head.chars().take(4000).collect::<String>()
+        );
+    }
+}
