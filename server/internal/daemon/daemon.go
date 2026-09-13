@@ -391,12 +391,14 @@ func authCommand(service *auth.Service) command.Command {
 	return command.Command{
 		Name:     "auth",
 		Secret:   true,
-		Synopsis: "проверить вход игроков и выпустить код 2ФА (auth test | auth validate | auth totp)",
+		Synopsis: "аккаунты игроков и проверка входа (auth list | add | passwd | remove | test | validate | totp)",
 		Run: func(ctx context.Context, args []string, out io.Writer) error {
 			if len(args) == 0 {
-				return errors.New("auth test <игрок> <пароль> [код] | auth validate <токен> | auth totp <игрок>")
+				return errors.New("auth list | auth add <игрок> [пароль] | auth passwd <игрок> [пароль] | auth remove <игрок> | auth test <игрок> <пароль> [код] | auth validate <токен> | auth totp <игрок>")
 			}
 			switch args[0] {
+			case "list", "add", "passwd", "remove":
+				return accounts(ctx, service, args, out)
 			case "test":
 				if len(args) < 3 {
 					return errors.New("напишите игрока и пароль: auth test <игрок> <пароль> [код]")
@@ -434,10 +436,10 @@ func authCommand(service *auth.Service) command.Command {
 				}
 				fmt.Fprintf(out, "секрет:  %s\nстрока для приложения-аутентификатора:\n%s\n", secret, totp.URI(secret, args[1]))
 				fmt.Fprintln(out, "впишите секрет игроку в источник аккаунтов — вход без кода будет закрыт")
-				fmt.Fprintln(out, "sql подхватывает секрет сразу, jsonfile — после перезапуска проекта")
+				fmt.Fprintln(out, "секрет подхватывается сразу, перезапускать проект не нужно")
 				return nil
 			default:
-				return fmt.Errorf("у auth нет действия «%s» — есть test, validate и totp", args[0])
+				return fmt.Errorf("у auth нет действия «%s» — есть list, add, passwd, remove, test, validate и totp", args[0])
 			}
 		},
 	}

@@ -70,6 +70,13 @@ import ParamField from "@site/components/ParamField.astro";
   Удаляет сборку (папку профиля и опубликованный манифест). Алиасы: `deletebuild`, `remove`.
 </ParamField>
 
+<ParamField path="auth list | add | passwd | remove">
+  Аккаунты игроков, когда их хранит сам Laminara (адаптер `jsonfile`). `auth add <логин> [пароль] [uuid]`
+  заводит игрока — без пароля придумает его сам и покажет один раз; `auth passwd <логин> [пароль]`
+  меняет пароль, `auth remove <логин>` убирает, `auth list` показывает всех. С адаптерами `sql` и
+  `http` аккаунты заводятся там, где вы их храните, и команда об этом скажет.
+</ParamField>
+
 <ParamField path="auth test <логин> <пароль> [код]">
   Проверяет пару логин/пароль через настроенный адаптер; для игрока с двухфакторкой укажите
   код третьим. `auth validate <токен>` проверяет токен доступа. `auth totp <логин>` выпускает

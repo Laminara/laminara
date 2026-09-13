@@ -49,3 +49,10 @@ func BuildProvider(name string, config json.RawMessage) (Provider, error) {
 	}
 	return factory(config)
 }
+
+type Accounts interface {
+	Add(ctx context.Context, username, password, uuid string) (Identity, error)
+	SetPassword(ctx context.Context, username, password string) error
+	Remove(ctx context.Context, username string) error
+	List(ctx context.Context) ([]Identity, error)
+}
