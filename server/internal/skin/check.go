@@ -10,12 +10,12 @@ import (
 	"github.com/laminara/laminara/server/internal/diag"
 )
 
-const probeUsername = "Steve"
+const ProbeUsername = "Steve"
 
-var probeUUID = "8667ba71b85a4004af54457a9734eed7"
+var ProbeUUID = "8667ba71-b85a-4004-af54-457a9734eed7"
 
 func (p *templateProvider) Check(ctx context.Context, probe *diag.Probe) {
-	textures, err := p.Textures(ctx, probeUsername, probeUUID)
+	textures, err := p.Textures(ctx, ProbeUsername, ProbeUUID)
 	if err != nil {
 		probe.Fail("скины", fmt.Sprintf("шаблон не разворачивается: %v", err), diag.Remedy{
 			Hint: "проверьте yggdrasil.skinConfig.skin",
@@ -32,7 +32,7 @@ func (p *jsonProvider) Check(ctx context.Context, probe *diag.Probe) {
 	started := time.Now()
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	textures, err := p.Textures(callCtx, probeUsername, probeUUID)
+	textures, err := p.Textures(callCtx, ProbeUsername, ProbeUUID)
 	if err != nil {
 		probe.Warn("скины", fmt.Sprintf("%s не отвечает: %v", p.url, err), diag.Remedy{
 			Hint: "игроки будут выглядеть стандартным Стивом; проверьте адрес источника скинов",
@@ -40,9 +40,7 @@ func (p *jsonProvider) Check(ctx context.Context, probe *diag.Probe) {
 		return
 	}
 	if textures.SkinURL == "" {
-		probe.Warn("скины", fmt.Sprintf("%s отвечает, но не отдаёт ссылку на скин для %s", p.url, probeUsername), diag.Remedy{
-			Hint: "ожидается JSON с полем skin; проверьте формат ответа",
-		})
+		probe.OK("скины", "%s отвечает (для %s скина нет — это нормально)", p.url, ProbeUsername)
 		return
 	}
 	probe.OK("скины", "%s отвечает за %s", p.url, time.Since(started).Round(time.Millisecond))
@@ -58,7 +56,7 @@ func (p *sqlProvider) Check(ctx context.Context, probe *diag.Probe) {
 		})
 		return
 	}
-	if _, err := p.Textures(ctx, probeUsername, probeUUID); err != nil {
+	if _, err := p.Textures(ctx, ProbeUsername, ProbeUUID); err != nil {
 		probe.Fail("скины", fmt.Sprintf("запрос не выполняется: %v", err), diag.Remedy{
 			Hint: "проверьте таблицу и колонки в yggdrasil.skinConfig",
 		})
@@ -90,7 +88,7 @@ func reachable(ctx context.Context, probe *diag.Probe, what, raw string) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
-		probe.OK(what, "%s отвечает (для %s скина нет — это нормально)", parsed.Host, probeUsername)
+		probe.OK(what, "%s отвечает (для %s скина нет — это нормально)", parsed.Host, ProbeUsername)
 		return
 	}
 	if response.StatusCode >= 400 {

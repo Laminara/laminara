@@ -5,25 +5,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/hwid"
+	"github.com/laminara/laminara/server/internal/skin"
 )
 
-func checkConsistency(_ context.Context, opts Options, probe *diag.Probe) {
-	checkSkinDomains(opts, probe)
+func checkConsistency(ctx context.Context, opts Options, probe *diag.Probe) {
+	checkSkinDomains(ctx, opts, probe)
 	checkXAccel(opts, probe)
 	checkMachineDurability(opts, probe)
 	checkEndpointsMatchConsole(opts, probe)
 }
 
-func checkSkinDomains(opts Options, probe *diag.Probe) {
+func checkSkinDomains(ctx context.Context, opts Options, probe *diag.Probe) {
 	cfg := opts.Config
 	if cfg.Yggdrasil == nil || !cfg.Yggdrasil.Enabled {
 		return
 	}
 	hosts := skinHosts(cfg.Yggdrasil.SkinConfig)
+	served := servedHosts(ctx, opts)
+	for _, host := range served {
+		if !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
 	if len(hosts) == 0 {
 		return
 	}
@@ -38,10 +47,36 @@ func checkSkinDomains(opts Options, probe *diag.Probe) {
 		probe.OK("домены скинов", "%s разрешены", strings.Join(hosts, ", "))
 		return
 	}
+	hint := "игра не станет загружать скины с домена, которого нет в этом списке — игроки будут стандартными Стивами"
+	for _, host := range missing {
+		if slices.Contains(served, host) && !slices.Contains(skinHosts(cfg.Yggdrasil.SkinConfig), host) {
+			hint += "; этот адрес приходит в ответе источника скинов, а не стоит в настройках — в yggdrasil.skinConfig его не видно"
+			break
+		}
+	}
 	probe.Fail("домены скинов", fmt.Sprintf("%s нет в yggdrasil.skinDomains", strings.Join(missing, ", ")), diag.Remedy{
-		Hint:    "игра не станет загружать скины с домена, которого нет в этом списке — игроки будут стандартными Стивами",
+		Hint:    hint,
 		Command: fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s", strings.Join(append(allowed, missing...), ",")),
 	})
+}
+
+func servedHosts(ctx context.Context, opts Options) []string {
+	if opts.Wired == nil || opts.Wired.Skins == nil {
+		return nil
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	textures, err := opts.Wired.Skins.Textures(callCtx, skin.ProbeUsername, skin.ProbeUUID)
+	if err != nil {
+		return nil
+	}
+	var hosts []string
+	for _, raw := range []string{textures.SkinURL, textures.CapeURL} {
+		if host := hostOf(raw); host != "" && !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
 }
 
 func skinHosts(raw json.RawMessage) []string {

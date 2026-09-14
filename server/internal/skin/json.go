@@ -125,6 +125,10 @@ func (p *jsonProvider) Textures(ctx context.Context, username, uuid string) (Tex
 	}
 	var document skinDocument
 	if err := httpx.GetJSONWithHeaders(ctx, p.http, target, p.headers, &document); err != nil {
+		if httpx.NothingThere(err) {
+			p.remember(target, Textures{})
+			return Textures{}, nil
+		}
 		return Textures{}, err
 	}
 	textures := document.textures()

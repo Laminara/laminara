@@ -105,10 +105,21 @@ func newSQL(raw json.RawMessage) (Provider, error) {
 }
 
 func (p *sqlProvider) Textures(ctx context.Context, username, uuid string) (Textures, error) {
-	key := username
-	if p.byUUID {
-		key = uuid
+	if !p.byUUID {
+		return p.lookup(ctx, username)
 	}
+	textures, err := p.lookup(ctx, uuid)
+	if err != nil || textures.SkinURL != "" {
+		return textures, err
+	}
+	dashless := strings.ReplaceAll(uuid, "-", "")
+	if dashless == uuid {
+		return textures, nil
+	}
+	return p.lookup(ctx, dashless)
+}
+
+func (p *sqlProvider) lookup(ctx context.Context, key string) (Textures, error) {
 	rows, err := p.db.QueryContext(ctx, p.query, key)
 	if err != nil {
 		return Textures{}, err

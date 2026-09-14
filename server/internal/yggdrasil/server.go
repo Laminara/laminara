@@ -292,7 +292,7 @@ func (s *Server) profilesByName(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeProfile(w http.ResponseWriter, r *http.Request, identity auth.Identity, signed bool) {
 	uuid := dashless(identity.UUID)
 	properties := []property{}
-	if textures, err := s.skin.Textures(r.Context(), identity.Username, uuid); err == nil {
+	if textures, err := s.skin.Textures(r.Context(), identity.Username, identity.UUID.String()); err == nil {
 		if prop, err := s.texturesProperty(uuid, identity.Username, textures); err == nil {
 			if !signed {
 				prop.Signature = ""

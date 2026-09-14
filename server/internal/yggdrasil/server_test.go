@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/laminara/laminara/server/internal/auth"
@@ -211,4 +212,56 @@ func parseRSAPublic(t *testing.T, pemString string) *rsa.PublicKey {
 		t.Fatal(err)
 	}
 	return key.(*rsa.PublicKey)
+}
+
+type uuidRecorder struct{ asked chan string }
+
+func (r uuidRecorder) Textures(_ context.Context, _, uuid string) (skin.Textures, error) {
+	select {
+	case r.asked <- uuid:
+	default:
+	}
+	return skin.Textures{SkinURL: "https://skins.example/Steve.png"}, nil
+}
+
+func TestTheSkinSourceGetsTheUUIDWithDashes(t *testing.T) {
+	asked := make(chan string, 1)
+	authService := auth.NewService(stubProvider{}, auth.NewMemorySessionStore(), auth.DefaultConfig())
+	server, err := yggdrasil.NewServer(authService, uuidRecorder{asked: asked}, nil, nil,
+		yggdrasil.Config{ServerName: "Laminara", SkinDomains: []string{"skins.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := httptest.NewServer(server.Handler())
+	defer live.Close()
+
+	body := strings.NewReader(`{"username":"neo","password":"matrix"}`)
+	response, err := http.Post(live.URL+"/authserver/authenticate", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var authenticated struct {
+		SelectedProfile struct {
+			ID string `json:"id"`
+		} `json:"selectedProfile"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&authenticated); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := http.Get(live.URL + "/sessionserver/session/minecraft/profile/" + authenticated.SelectedProfile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.Body.Close()
+
+	select {
+	case got := <-asked:
+		if !strings.Contains(got, "-") {
+			t.Fatalf("источнику скинов ушёл uuid %q без дефисов — сайты и базы хранят его с дефисами, и ответом будет 404", got)
+		}
+	default:
+		t.Fatal("источник скинов не спросили вовсе")
+	}
 }
