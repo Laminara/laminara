@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -331,10 +332,10 @@ func checkYggdrasilFlow(ctx context.Context, opts Options, probe *diag.Probe, ba
 		return
 	}
 	probe.OK("вход в игре", "профиль %s получен", answer.SelectedProfile.Name)
-	checkJoinFlow(ctx, probe, base, answer.AccessToken, answer.SelectedProfile.ID, answer.SelectedProfile.Name)
+	checkJoinFlow(ctx, opts, probe, base, answer.AccessToken, answer.SelectedProfile.ID, answer.SelectedProfile.Name)
 }
 
-func checkJoinFlow(ctx context.Context, probe *diag.Probe, base, token, profileID, username string) {
+func checkJoinFlow(ctx context.Context, opts Options, probe *diag.Probe, base, token, profileID, username string) {
 	server := fmt.Sprintf("%040d", time.Now().UnixNano()%1e9)
 	join, err := json.Marshal(map[string]string{
 		"accessToken":     token,
@@ -383,4 +384,98 @@ func checkJoinFlow(ctx context.Context, probe *diag.Probe, base, token, profileI
 		return
 	}
 	probe.OK("вход на сервер игры", "вход подтверждается")
+	checkServedTextures(ctx, opts, probe, verified)
+}
+
+func checkServedTextures(ctx context.Context, opts Options, probe *diag.Probe, response *http.Response) {
+	var profile struct {
+		Properties []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"properties"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&profile); err != nil {
+		probe.Warn("скин в игре", fmt.Sprintf("ответ о профиле не разбирается: %v", err), diag.Remedy{})
+		return
+	}
+	raw := ""
+	for _, property := range profile.Properties {
+		if property.Name == "textures" {
+			raw = property.Value
+			break
+		}
+	}
+	if raw == "" {
+		probe.Warn("скин в игре", "профиль уходит без текстур — игрок будет стандартным Стивом", diag.Remedy{
+			Hint: "источник скинов ничего не вернул для этого игрока; что именно у него спрашивают, видно в строке «скины» выше",
+		})
+		return
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		probe.Warn("скин в игре", fmt.Sprintf("текстуры не раскодировать: %v", err), diag.Remedy{})
+		return
+	}
+	var payload struct {
+		Textures map[string]struct {
+			URL string `json:"url"`
+		} `json:"textures"`
+	}
+	if err := json.Unmarshal(decoded, &payload); err != nil {
+		probe.Warn("скин в игре", fmt.Sprintf("текстуры не разбираются: %v", err), diag.Remedy{})
+		return
+	}
+	skinURL := payload.Textures["SKIN"].URL
+	if skinURL == "" {
+		probe.Warn("скин в игре", "в профиле нет ссылки на скин", diag.Remedy{
+			Hint: "источник скинов ответил без поля skin",
+		})
+		return
+	}
+	host := hostOf(skinURL)
+	allowed := []string(nil)
+	if opts.Config != nil && opts.Config.Yggdrasil != nil {
+		allowed = opts.Config.Yggdrasil.SkinDomains
+	}
+	if !domainAllowed(host, allowed) {
+		probe.Fail("скин в игре", fmt.Sprintf("игра пойдёт за скином на %s, а этого домена нет в yggdrasil.skinDomains", skinURL), diag.Remedy{
+			Hint:    "агент входа не станет качать текстуру с домена не из списка — скина не будет, и ошибки игрок не увидит",
+			Command: fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s", strings.Join(append(allowed, host), ",")),
+		})
+		return
+	}
+	probe.OK("скин в игре", "%s — домен разрешён", skinURL)
+	reachableTexture(ctx, probe, skinURL)
+}
+
+func reachableTexture(ctx context.Context, probe *diag.Probe, raw string) {
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(callCtx, http.MethodGet, raw, nil)
+	if err != nil {
+		return
+	}
+	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	if err != nil {
+		probe.Fail("файл скина", fmt.Sprintf("%s не скачивается: %v", raw, err), diag.Remedy{
+			Hint: "игра качает текстуру сама, без токена и без прокси — адрес должен открываться снаружи",
+		})
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		probe.Fail("файл скина", fmt.Sprintf("%s отвечает %s", raw, response.Status), diag.Remedy{
+			Hint: "по этому адресу игра ждёт PNG 64×64",
+		})
+		return
+	}
+	head := make([]byte, 8)
+	read, _ := io.ReadFull(response.Body, head)
+	if read < 8 || string(head[1:4]) != "PNG" {
+		probe.Fail("файл скина", fmt.Sprintf("%s отдаёт не PNG", raw), diag.Remedy{
+			Hint: "игра ждёт файл PNG; проверьте, что по адресу лежит картинка, а не страница или JSON",
+		})
+		return
+	}
+	probe.OK("файл скина", "%s отдаёт PNG", hostOf(raw))
 }
