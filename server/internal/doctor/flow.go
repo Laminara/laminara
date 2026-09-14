@@ -457,14 +457,14 @@ func reachableTexture(ctx context.Context, probe *diag.Probe, raw string) {
 	}
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
 	if err != nil {
-		probe.Fail("файл скина", fmt.Sprintf("%s не скачивается: %v", raw, err), diag.Remedy{
+		probe.Warn("файл скина", fmt.Sprintf("%s не скачивается: %v", raw, err), diag.Remedy{
 			Hint: "игра качает текстуру сама, без токена и без прокси — адрес должен открываться снаружи",
 		})
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		probe.Fail("файл скина", fmt.Sprintf("%s отвечает %s", raw, response.Status), diag.Remedy{
+		probe.Warn("файл скина", fmt.Sprintf("%s отвечает %s", raw, response.Status), diag.Remedy{
 			Hint: "по этому адресу игра ждёт PNG 64×64",
 		})
 		return
@@ -472,7 +472,7 @@ func reachableTexture(ctx context.Context, probe *diag.Probe, raw string) {
 	head := make([]byte, 8)
 	read, _ := io.ReadFull(response.Body, head)
 	if read < 8 || string(head[1:4]) != "PNG" {
-		probe.Fail("файл скина", fmt.Sprintf("%s отдаёт не PNG", raw), diag.Remedy{
+		probe.Warn("файл скина", fmt.Sprintf("%s отдаёт не PNG", raw), diag.Remedy{
 			Hint: "игра ждёт файл PNG; проверьте, что по адресу лежит картинка, а не страница или JSON",
 		})
 		return
