@@ -218,10 +218,15 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 	if err != nil {
 		return nil, err
 	}
+	if base := TextureMirrorBase(cfg); base != "" {
+		mirror := skin.NewMirror(skinProvider, base)
+		skinProvider = mirror
+		mux.Handle(TextureMirrorPath+"/", mirror)
+	}
 	wired.Skins = skinProvider
 	yggServer, err := yggdrasil.NewServer(authService, skinProvider, wired.Machines, wired.Limits, yggdrasil.Config{
 		ServerName:  cfg.Yggdrasil.ServerName,
-		SkinDomains: cfg.Yggdrasil.SkinDomains,
+		SkinDomains: TextureDomains(cfg),
 		RSAKeyPath:  cfg.Yggdrasil.RSAKeyPath,
 		Proxies:     proxies,
 		Sessions:    gameSessionStore(cfg),

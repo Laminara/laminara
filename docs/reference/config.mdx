@@ -64,6 +64,7 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="skinProvider" type="string">`template`, `json` или `sql`.</ParamField>
 <ParamField path="skinConfig" type="object">Настройки адаптера скинов.</ParamField>
 <ParamField path="skinDomains" type="array">Домены, с которых игра примет текстуры.</ParamField>
+<ParamField path="mirrorTextures" type="boolean" default="true">Сервер скачивает картинку скина и отдаёт её по адресу с хешем — только так игра замечает, что скин сменился.</ParamField>
 
 Подробнее — [Вход в игре и скины](/auth/yggdrasil).
 

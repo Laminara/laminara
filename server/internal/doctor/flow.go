@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/manifest"
+	"github.com/laminara/laminara/server/internal/serversetup"
 	"github.com/laminara/laminara/server/internal/storage"
 )
 
@@ -433,18 +435,23 @@ func checkServedTextures(ctx context.Context, opts Options, probe *diag.Probe, r
 		return
 	}
 	host := hostOf(skinURL)
-	allowed := []string(nil)
-	if opts.Config != nil && opts.Config.Yggdrasil != nil {
-		allowed = opts.Config.Yggdrasil.SkinDomains
-	}
+	allowed := serversetup.TextureDomains(opts.Config)
 	if !domainAllowed(host, allowed) {
+		configured := []string(nil)
+		if opts.Config != nil && opts.Config.Yggdrasil != nil {
+			configured = opts.Config.Yggdrasil.SkinDomains
+		}
 		probe.Fail("скин в игре", fmt.Sprintf("игра пойдёт за скином на %s, а этого домена нет в yggdrasil.skinDomains", skinURL), diag.Remedy{
 			Hint:    "агент входа не станет качать текстуру с домена не из списка — скина не будет, и ошибки игрок не увидит",
-			Command: fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s", strings.Join(append(allowed, host), ",")),
+			Command: fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s", strings.Join(append(slices.Clone(configured), host), ",")),
 		})
 		return
 	}
-	probe.OK("скин в игре", "%s — домен разрешён", skinURL)
+	if strings.HasPrefix(skinURL, serversetup.TextureMirrorBase(opts.Config)+"/") {
+		probe.OK("скин в игре", "%s — картинку раздаёт сам сервер, игра заметит смену скина", skinURL)
+	} else {
+		probe.OK("скин в игре", "%s — домен разрешён", skinURL)
+	}
 	reachableTexture(ctx, probe, skinURL)
 }
 

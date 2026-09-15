@@ -167,6 +167,7 @@ var schema = []Section{
 			{Key: "serverName", Label: "Как сервер зовётся в игре", Kind: KindText, Default: "Laminara", Hint: "Этим именем сервер представляется authlib-injector: игра показывает его при входе и пишет в свои логи. На сборки, лаунчер и папки игрока не влияет."},
 			{Key: "rsaKeyPath", Label: "Ключ подписи скинов", Kind: KindText, Hint: "Создаётся сам при первом запуске."},
 			{Key: "skinDomains", Label: "Домены скинов", Kind: KindList, Hint: "Откуда игре разрешено брать картинки скинов. Через запятую."},
+			{Key: "mirrorTextures", Label: "Раздавать скины самому", Kind: KindBool, Default: "true", Hint: "Сервер скачивает картинку и отдаёт её по адресу с хешем — только так игра замечает, что скин сменился."},
 			{Key: "skinProvider", Label: "Откуда брать скины", Kind: KindChoice, Default: "template", Options: skin.ProviderNames},
 			{Key: "skinConfig", Label: "Настройки скинов", VariantOf: "skinProvider", Variants: map[string][]Field{
 				"template": {

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/hwid"
+	"github.com/laminara/laminara/server/internal/serversetup"
 	"github.com/laminara/laminara/server/internal/skin"
 )
 
@@ -26,8 +28,14 @@ func checkSkinDomains(ctx context.Context, opts Options, probe *diag.Probe) {
 	if cfg.Yggdrasil == nil || !cfg.Yggdrasil.Enabled {
 		return
 	}
-	hosts := skinHosts(cfg.Yggdrasil.SkinConfig)
+	sources := skinHosts(cfg.Yggdrasil.SkinConfig)
 	served := servedHosts(ctx, opts)
+	mirror := serversetup.TextureMirrorHost(cfg)
+	if mirror != "" && len(served) == 1 && served[0] == mirror {
+		mirroredSkinDomains(cfg, sources, probe)
+		return
+	}
+	hosts := slices.Clone(sources)
 	for _, host := range served {
 		if !slices.Contains(hosts, host) {
 			hosts = append(hosts, host)
@@ -36,28 +44,50 @@ func checkSkinDomains(ctx context.Context, opts Options, probe *diag.Probe) {
 	if len(hosts) == 0 {
 		return
 	}
-	allowed := cfg.Yggdrasil.SkinDomains
-	var missing []string
-	for _, host := range hosts {
-		if !domainAllowed(host, allowed) {
-			missing = append(missing, host)
-		}
-	}
+	allowed := serversetup.TextureDomains(cfg)
+	missing := notAllowed(hosts, allowed)
 	if len(missing) == 0 {
 		probe.OK("домены скинов", "%s разрешены", strings.Join(hosts, ", "))
 		return
 	}
 	hint := "игра не станет загружать скины с домена, которого нет в этом списке — игроки будут стандартными Стивами"
 	for _, host := range missing {
-		if slices.Contains(served, host) && !slices.Contains(skinHosts(cfg.Yggdrasil.SkinConfig), host) {
+		if slices.Contains(served, host) && !slices.Contains(sources, host) {
 			hint += "; этот адрес приходит в ответе источника скинов, а не стоит в настройках — в yggdrasil.skinConfig его не видно"
 			break
 		}
 	}
 	probe.Fail("домены скинов", fmt.Sprintf("%s нет в yggdrasil.skinDomains", strings.Join(missing, ", ")), diag.Remedy{
 		Hint:    hint,
-		Command: fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s", strings.Join(append(allowed, missing...), ",")),
+		Command: addDomains(cfg, missing),
 	})
+}
+
+func mirroredSkinDomains(cfg *config.Config, sources []string, probe *diag.Probe) {
+	probe.OK("домены скинов", "картинки раздаёт сам сервер — доменов источника в списке не требуется")
+	missing := notAllowed(sources, cfg.Yggdrasil.SkinDomains)
+	if len(missing) == 0 {
+		return
+	}
+	probe.Warn("запасной путь к скинам", fmt.Sprintf("%s нет в yggdrasil.skinDomains", strings.Join(missing, ", ")), diag.Remedy{
+		Hint:    "пока зеркало работает, этот домен не нужен; но если картинка перестанет скачиваться, сервер отдаст игре прямую ссылку — и без домена в списке игрок останется Стивом",
+		Command: addDomains(cfg, missing),
+	})
+}
+
+func notAllowed(hosts, allowed []string) []string {
+	var missing []string
+	for _, host := range hosts {
+		if !domainAllowed(host, allowed) {
+			missing = append(missing, host)
+		}
+	}
+	return missing
+}
+
+func addDomains(cfg *config.Config, missing []string) string {
+	return fmt.Sprintf("laminara-server settings yggdrasil.skinDomains %s",
+		strings.Join(append(slices.Clone(cfg.Yggdrasil.SkinDomains), missing...), ","))
 }
 
 func servedHosts(ctx context.Context, opts Options) []string {

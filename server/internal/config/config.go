@@ -119,12 +119,17 @@ type APIConfig struct {
 }
 
 type YggdrasilConfig struct {
-	Enabled      bool            `json:"enabled"`
-	ServerName   string          `json:"serverName"`
-	RSAKeyPath   string          `json:"rsaKeyPath"`
-	SkinProvider string          `json:"skinProvider"`
-	SkinConfig   json.RawMessage `json:"skinConfig"`
-	SkinDomains  []string        `json:"skinDomains"`
+	Enabled        bool            `json:"enabled"`
+	ServerName     string          `json:"serverName"`
+	RSAKeyPath     string          `json:"rsaKeyPath"`
+	SkinProvider   string          `json:"skinProvider"`
+	SkinConfig     json.RawMessage `json:"skinConfig"`
+	SkinDomains    []string        `json:"skinDomains"`
+	MirrorTextures *bool           `json:"mirrorTextures"`
+}
+
+func (y *YggdrasilConfig) Mirrors() bool {
+	return y != nil && (y.MirrorTextures == nil || *y.MirrorTextures)
 }
 
 type AuthConfig struct {
