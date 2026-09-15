@@ -169,15 +169,35 @@ func (s *store) join(serverID string) (auth.Identity, bool) {
 	return record.identity, true
 }
 
-func (s *store) rememberProfile(identity auth.Identity) {
+func (s *store) rememberProfile(ctx context.Context, identity auth.Identity) {
+	key := dashless(identity.UUID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.profiles[dashless(identity.UUID)] = identity
+	s.profiles[key] = identity
+	s.mu.Unlock()
+	if s.remote == nil {
+		return
+	}
+	if err := s.remote.putProfile(ctx, key, identity); err != nil {
+		slog.Error("профиль игрока не записался в redis", "source", "yggdrasil", "ошибка", err)
+	}
 }
 
-func (s *store) profile(uuid string) (auth.Identity, bool) {
+func (s *store) profile(ctx context.Context, uuid string) (auth.Identity, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	identity, ok := s.profiles[uuid]
-	return identity, ok
+	s.mu.Unlock()
+	if ok || s.remote == nil {
+		return identity, ok
+	}
+	identity, found, err := s.remote.getProfile(ctx, uuid)
+	if err != nil {
+		slog.Error("профиль игрока не читается из redis", "source", "yggdrasil", "ошибка", err)
+		return auth.Identity{}, false
+	}
+	if found {
+		s.mu.Lock()
+		s.profiles[uuid] = identity
+		s.mu.Unlock()
+	}
+	return identity, found
 }

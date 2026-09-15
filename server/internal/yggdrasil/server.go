@@ -146,7 +146,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 	}
 	accessToken := randomToken()
 	s.store.putSession(r.Context(), accessToken, clientToken, identity, tokenTTL)
-	s.store.rememberProfile(identity)
+	s.store.rememberProfile(r.Context(), identity)
 
 	profile := gameProfile(identity)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -176,6 +176,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
+	s.store.rememberProfile(r.Context(), sess.identity)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accessToken":     newAccess,
 		"clientToken":     sess.clientToken,
@@ -253,6 +254,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.putJoin(req.ServerID, sess.identity, joinTTL)
+	s.store.rememberProfile(r.Context(), sess.identity)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -268,7 +270,7 @@ func (s *Server) hasJoined(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.store.profile(r.PathValue("uuid"))
+	identity, ok := s.store.profile(r.Context(), r.PathValue("uuid"))
 	if !ok {
 		w.WriteHeader(http.StatusNoContent)
 		return

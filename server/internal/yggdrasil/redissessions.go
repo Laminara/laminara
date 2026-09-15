@@ -30,6 +30,35 @@ func gameUserKey(username string) string {
 	return "laminara:ygg:user:" + strings.ToLower(username)
 }
 
+func gameProfileKey(uuid string) string {
+	return "laminara:ygg:profile:" + uuid
+}
+
+const profileTTL = 30 * 24 * time.Hour
+
+func (r *redisSessions) putProfile(ctx context.Context, uuid string, identity auth.Identity) error {
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+	return r.client.Set(ctx, gameProfileKey(uuid), data, profileTTL).Err()
+}
+
+func (r *redisSessions) getProfile(ctx context.Context, uuid string) (auth.Identity, bool, error) {
+	data, err := r.client.Get(ctx, gameProfileKey(uuid)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return auth.Identity{}, false, nil
+	}
+	if err != nil {
+		return auth.Identity{}, false, err
+	}
+	var identity auth.Identity
+	if err := json.Unmarshal(data, &identity); err != nil {
+		return auth.Identity{}, false, err
+	}
+	return identity, true, nil
+}
+
 func (r *redisSessions) put(ctx context.Context, accessToken string, sess session, ttl time.Duration) error {
 	data, err := json.Marshal(storedSession{
 		ClientToken: sess.clientToken,
