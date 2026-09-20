@@ -37,7 +37,7 @@ func TestBundleOnARealMacKeepsItsSignature(t *testing.T) {
 		Name:       "Пример",
 		Version:    "1.0.0",
 		Executable: executable,
-		Config:     []byte(`{"endpoints":[{"id":"play","baseUrl":"https://play.example"}]}`),
+		Config:     []byte(`{"endpoints":[{"id":"play","baseUrl":"https://play.example"}],"serverPublicKeyHex":"941703c38de5ded1f9906e0a69b8d3af81a35f339ba20ee57a0bce427ff9cbd3"}`),
 	}
 	archive, err := bundle.TarGz()
 	if err != nil {
