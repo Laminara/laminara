@@ -135,6 +135,8 @@ if [ "$target" = "macos" ]; then
 	codesign --force --sign - "$universal"
 	codesign --verify --verbose "$universal"
 	app="$(go run ../server/cmd/macbundle --config "$config" --binary "$universal" --name "$name" --version "$version" --out "$out")"
+	codesign --force --deep --sign - "$app"
+	codesign --verify --deep --strict "$app"
 	tar -C "$out" -czf "$out/${name}.app.tar.gz" "$(basename "$app")"
 	echo "==> $app"
 	echo "==> $out/${name}.app.tar.gz"

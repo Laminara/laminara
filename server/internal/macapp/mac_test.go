@@ -1,10 +1,12 @@
 package macapp
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,7 +87,10 @@ func TestBundleOnARealMacKeepsItsSignature(t *testing.T) {
 
 func survives(t *testing.T, path string) {
 	t.Helper()
+	var said bytes.Buffer
 	command := exec.Command(path)
+	command.Stdout = &said
+	command.Stderr = &said
 	if err := command.Start(); err != nil {
 		t.Fatalf("лаунчер из пакета не запускается: %v", err)
 	}
@@ -93,10 +98,10 @@ func survives(t *testing.T, path string) {
 	go func() { done <- command.Wait() }()
 	select {
 	case err := <-done:
-		if command.ProcessState != nil && command.ProcessState.ExitCode() == -1 {
-			t.Fatalf("система убила лаунчер сигналом — так выглядит отвергнутая подпись: %v", err)
+		if err != nil && strings.Contains(err.Error(), "signal: killed") {
+			t.Fatalf("ядро убило лаунчер — значит подпись Mach-O не принята:\n%s", said.String())
 		}
-		t.Logf("лаунчер завершился сам (%v) — для проверки подписи это неважно", err)
+		t.Logf("лаунчер завершился сам (%v) — подпись тут ни при чём, на раннере нет графической сессии:\n%s", err, said.String())
 	case <-time.After(8 * time.Second):
 		_ = command.Process.Kill()
 		_ = command.Wait()

@@ -138,7 +138,9 @@ func (s *Service) macBundle(ctx context.Context, shipped, target string, documen
 		written = artifact
 		fmt.Fprintf(out, "  %-28s %s\n", filepath.Base(artifact), humanize.Bytes(uint64(len(archive))))
 	}
-	fmt.Fprintf(out, "  на маке приложение не заверено у Apple: первый запуск — правой кнопкой «Открыть»\n")
+	fmt.Fprintln(out, "  на маке приложение печать целостности не несёт — сервер кладёт в него ваши настройки,")
+	fmt.Fprintln(out, "  а запечатать пакет может только сам мак. Первый запуск у игрока:")
+	fmt.Fprintf(out, "    xattr -dr com.apple.quarantine \"/Applications/%s.app\"\n", name)
 	return nil
 }
 
