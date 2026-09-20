@@ -1,7 +1,9 @@
 package launchersvc
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -9,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +24,7 @@ import (
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/bake"
 	"github.com/laminara/laminara/server/internal/clientconfig"
+	"github.com/laminara/laminara/server/internal/macapp"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/storage"
 )
@@ -126,6 +130,110 @@ func TestBuildBakesTheConfigAndPublishes(t *testing.T) {
 	}
 	if decoded.Version != "1.2.3" || len(decoded.Artifacts) != 2 {
 		t.Fatalf("published release = %+v", decoded)
+	}
+}
+
+func TestBuildWrapsMacOSIntoAnAppBundle(t *testing.T) {
+	templates := map[string][]byte{
+		linuxTemplate:   []byte("linux launcher template"),
+		windowsTemplate: []byte("windows launcher template"),
+		macTemplate:     []byte("universal mach-o, signed by apple's own tooling"),
+	}
+	releases := fakeReleases(t, "v1.2.3", templates)
+	service, dir := bakingService(t, releases, demoDocument())
+
+	var out bytes.Buffer
+	if err := service.build(context.Background(), nil, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+
+	archive, err := os.ReadFile(filepath.Join(dir, "1.2.3", "Пример-mac-os-arm64.app.tar.gz"))
+	if err != nil {
+		t.Fatalf("пакет для Apple Silicon не собрался: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "1.2.3", "Пример-mac-os.app.tar.gz")); err != nil {
+		t.Fatalf("пакет для маков на Intel не собрался: %v", err)
+	}
+
+	entries := map[string][]byte{}
+	unzipped, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies := tar.NewReader(unzipped)
+	for {
+		header, err := bodies.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(bodies)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[header.Name] = body
+	}
+
+	if !bytes.Equal(entries["Пример.app/Contents/MacOS/laminara"], templates[macTemplate]) {
+		t.Fatal("исполняемый файл тронули — на Apple Silicon такой лаунчер система не запустит")
+	}
+	if !bytes.Contains(entries["Пример.app/Contents/Resources/"+macapp.ConfigName], []byte("https://play.example")) {
+		t.Fatalf("настройки не легли в пакет: %s", entries["Пример.app/Contents/Resources/"+macapp.ConfigName])
+	}
+
+	release, _, err := NewReleases(dir).Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := map[corev1.Platform]bool{
+		corev1.Platform_PLATFORM_MAC_OS:       false,
+		corev1.Platform_PLATFORM_MAC_OS_ARM64: false,
+	}
+	for _, artifact := range decoded.Artifacts {
+		if _, ok := wanted[artifact.Platform]; !ok {
+			continue
+		}
+		if artifact.Kind != corev1.LauncherArtifactKind_LAUNCHER_ARTIFACT_KIND_APP_BUNDLE_TAR_GZ {
+			t.Fatalf("%v опубликован как %v", artifact.Platform, artifact.Kind)
+		}
+		wanted[artifact.Platform] = true
+	}
+	for target, published := range wanted {
+		if !published {
+			t.Fatalf("для %v лаунчер не опубликован — обновляться будет нечем", target)
+		}
+	}
+}
+
+func TestBuildSkipsMacOSWhenTheReleaseHasNoBinary(t *testing.T) {
+	templates := map[string][]byte{
+		linuxTemplate:   []byte("linux launcher template"),
+		windowsTemplate: []byte("windows launcher template"),
+	}
+	releases := fakeReleases(t, "v1.2.3", templates)
+	service, dir := bakingService(t, releases, demoDocument())
+
+	var out bytes.Buffer
+	if err := service.build(context.Background(), nil, &out); err != nil {
+		t.Fatalf("старый релиз без macOS обязан собираться дальше: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), macTemplate) {
+		t.Fatalf("пропуск macOS должен быть виден оператору:\n%s", out.String())
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "1.2.3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".app.tar.gz") {
+			t.Fatalf("появился пакет для macOS, хотя собирать его было не из чего: %s", entry.Name())
+		}
 	}
 }
 

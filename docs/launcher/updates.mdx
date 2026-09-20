@@ -19,13 +19,15 @@ description: Как выкладывать новые версии лаунче�
   0.2.0/
     Laminara.exe
     Laminara
+    Laminara-mac-os-arm64.app.tar.gz
+    Laminara-mac-os.app.tar.gz
 ```
 
-Здесь `Laminara.exe` — Windows-сборка, файл без расширения — Linux-сборка; имя берётся из
-брендинга проекта (`--name` в `build-launcher.sh`). Понимаются и другие форматы:
-`.msi`, `.AppImage`, `.deb`, `.rpm`, образы macOS (`.dmg`, `.app.tar.gz`) — тип и платформа
-определяются по расширению или упоминанию платформы в имени. Своими руками скрипт собирает
-Windows и Linux; остальное кладите в каталог, если собрали сами. Затем:
+Здесь `Laminara.exe` — Windows-сборка, файл без расширения — Linux-сборка, архивы
+`.app.tar.gz` — приложения для macOS; имя берётся из брендинга проекта (`--name` в
+`build-launcher.sh`). Понимаются и другие форматы: `.msi`, `.AppImage`, `.deb`, `.rpm`,
+`.dmg` — тип и платформа определяются по расширению или упоминанию платформы в имени.
+Затем:
 
 ```
 laminara-server exec "launcher publish 0.2.0"

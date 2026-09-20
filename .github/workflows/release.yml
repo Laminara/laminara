@@ -87,6 +87,7 @@ jobs:
     needs: version
     if: needs.version.outputs.publish == 'true'
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'macos-15' }}
     strategy:
       fail-fast: false
       matrix:
@@ -97,6 +98,9 @@ jobs:
           - os: windows-2025
             artifact: laminara-launcher-windows-x86_64.exe
             built: laminara.exe
+          - os: macos-15
+            artifact: laminara-launcher-macos-universal
+            built: laminara
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -137,8 +141,25 @@ jobs:
           pnpm build
 
       - name: Собрать лаунчер
+        if: runner.os != 'macOS'
         working-directory: client
         run: cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml
+
+      - name: Собрать лаунчер под оба процессора Apple
+        if: runner.os == 'macOS'
+        working-directory: client
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml --target "$target"
+          done
+          mkdir -p target/release
+          lipo -create -output target/release/laminara \
+            target/aarch64-apple-darwin/release/laminara \
+            target/x86_64-apple-darwin/release/laminara
+          codesign --force --sign - target/release/laminara
+          codesign --verify --verbose target/release/laminara
+          lipo -info target/release/laminara
 
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
@@ -156,6 +177,12 @@ jobs:
           LAMINARA_LAUNCHER_TEMPLATE: ${{ runner.os == 'Windows' && format('{0}/client/target/release/{1}', github.workspace, matrix.built) || '' }}
           LAMINARA_WINRES_EXE: ${{ runner.os == 'Windows' && format('{0}/client/target/release/{1}', github.workspace, matrix.built) || '' }}
         run: go test ./server/internal/winres/... ./server/internal/launchersvc/...
+
+      - name: Проверить пакет для macOS на настоящем маке
+        if: runner.os == 'macOS'
+        env:
+          LAMINARA_MACAPP_BINARY: ${{ github.workspace }}/client/target/release/laminara
+        run: go test ./server/internal/macapp/... -run Mac -v
 
       - name: Разложить артефакт
         shell: bash

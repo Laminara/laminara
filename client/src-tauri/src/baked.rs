@@ -4,9 +4,23 @@ use std::path::Path;
 
 const MAGIC: &[u8; 16] = b"LAMINARA_CONFIG1";
 const TRAILER_LEN: u64 = 24;
+const BUNDLE_CONFIG: &str = "laminara.client.json";
 
 pub fn read() -> Option<String> {
-    read_from(&std::env::current_exe().ok()?)
+    read_for(&std::env::current_exe().ok()?)
+}
+
+fn read_for(exe: &Path) -> Option<String> {
+    read_from(exe).or_else(|| read_beside(exe))
+}
+
+fn read_beside(exe: &Path) -> Option<String> {
+    let resources = exe.parent()?.parent()?.join("Resources").join(BUNDLE_CONFIG);
+    let payload = std::fs::read_to_string(resources).ok()?;
+    if payload.trim().is_empty() {
+        return None;
+    }
+    Some(payload)
 }
 
 fn read_from(path: &Path) -> Option<String> {
@@ -72,6 +86,42 @@ mod tests {
         let path = write_candidate(&dir, "plain", b"just a launcher binary");
 
         assert_eq!(read_from(&path), None);
+    }
+
+    fn bundle(name: &str, executable: &[u8], config: Option<&str>) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(name).join("Laminara.app");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Contents/MacOS")).unwrap();
+        std::fs::create_dir_all(root.join("Contents/Resources")).unwrap();
+        let exe = root.join("Contents/MacOS/laminara");
+        std::fs::write(&exe, executable).unwrap();
+        if let Some(payload) = config {
+            std::fs::write(root.join("Contents/Resources").join(BUNDLE_CONFIG), payload).unwrap();
+        }
+        exe
+    }
+
+    #[test]
+    fn reads_the_config_that_lies_next_to_the_app_bundle() {
+        let config = r#"{"endpoints":[{"id":"main","baseUrl":"https://bundle.example"}]}"#;
+        let exe = bundle("laminara-bundle-read", b"signed mach-o", Some(config));
+
+        assert_eq!(read_for(&exe).as_deref(), Some(config));
+    }
+
+    #[test]
+    fn a_bundle_without_the_file_stays_unconfigured() {
+        let exe = bundle("laminara-bundle-empty", b"signed mach-o", None);
+
+        assert_eq!(read_for(&exe), None);
+    }
+
+    #[test]
+    fn the_trailer_wins_over_the_file_in_the_bundle() {
+        let config = r#"{"endpoints":[{"id":"main","baseUrl":"https://trailer.example"}]}"#;
+        let exe = bundle("laminara-bundle-both", &baked(config), Some("{\"endpoints\":[]}"));
+
+        assert_eq!(read_for(&exe).as_deref(), Some(config));
     }
 
     #[test]

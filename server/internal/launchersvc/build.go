@@ -14,12 +14,14 @@ import (
 	"github.com/laminara/laminara/server/internal/clientconfig"
 	"github.com/laminara/laminara/server/internal/ghrelease"
 	"github.com/laminara/laminara/server/internal/humanize"
+	"github.com/laminara/laminara/server/internal/macapp"
 	"github.com/laminara/laminara/server/internal/version"
 )
 
 const (
 	linuxTemplate   = "laminara-launcher-linux-x86_64"
 	windowsTemplate = "laminara-launcher-windows-x86_64.exe"
+	macTemplate     = "laminara-launcher-macos-universal"
 	templatesDir    = ".templates"
 )
 
@@ -78,7 +80,7 @@ func (s *Service) build(ctx context.Context, args []string, out io.Writer) error
 		{linuxTemplate, ""},
 		{windowsTemplate, ".exe"},
 	} {
-		source, err := s.bakery.template(ctx, shipped, template.asset, s.dir, out)
+		source, err := s.bakery.template(ctx, shipped, template.asset, s.dir, out, true)
 		if err != nil {
 			return err
 		}
@@ -100,7 +102,64 @@ func (s *Service) build(ctx context.Context, args []string, out io.Writer) error
 		fmt.Fprintf(out, "  %-28s %s\n", filepath.Base(artifact), humanize.Bytes(uint64(len(baked))))
 	}
 
+	if err := s.macBundle(ctx, shipped, target, document, payload, dir, out); err != nil {
+		return err
+	}
+
 	return s.publish(ctx, target, out)
+}
+
+func (s *Service) macBundle(ctx context.Context, shipped, target string, document clientconfig.Document, payload []byte, dir string, out io.Writer) error {
+	source, err := s.bakery.template(ctx, shipped, macTemplate, s.dir, out, false)
+	if err != nil || source == "" {
+		return err
+	}
+	executable, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	name := document.LauncherName()
+	archive, err := macapp.Bundle{
+		Name:       name,
+		Version:    target,
+		Executable: executable,
+		Icon:       macIcon(document, out),
+		Config:     payload,
+	}.TarGz()
+	if err != nil {
+		return err
+	}
+	written := ""
+	for _, key := range []string{"mac-os-arm64", "mac-os"} {
+		artifact := filepath.Join(dir, fmt.Sprintf("%s-%s.app.tar.gz", name, key))
+		if err := writeOrLink(written, artifact, archive); err != nil {
+			return err
+		}
+		written = artifact
+		fmt.Fprintf(out, "  %-28s %s\n", filepath.Base(artifact), humanize.Bytes(uint64(len(archive))))
+	}
+	fmt.Fprintf(out, "  на маке приложение не заверено у Apple: первый запуск — правой кнопкой «Открыть»\n")
+	return nil
+}
+
+func writeOrLink(existing, artifact string, body []byte) error {
+	_ = os.Remove(artifact)
+	if existing != "" && os.Link(existing, artifact) == nil {
+		return nil
+	}
+	return os.WriteFile(artifact, body, 0o644)
+}
+
+func macIcon(document clientconfig.Document, out io.Writer) []byte {
+	if document.Branding == nil {
+		return nil
+	}
+	painted, err := macapp.Icon(document.Branding.LogoDataURI)
+	if err != nil {
+		fmt.Fprintf(out, "  иконку для macOS взять не вышло, оставляю стандартную: %v\n", err)
+		return nil
+	}
+	return painted
 }
 
 func (s *Service) Catch(ctx context.Context, log *slog.Logger) {
@@ -147,7 +206,16 @@ func (s *Service) roomFor(candidate string) error {
 	return fmt.Errorf("версия %s не новее уже опубликованной %s — назовите новую: launcher build %s", candidate, decoded.Version, version.NextPatch(decoded.Version))
 }
 
-func (b *Bakery) template(ctx context.Context, tag, asset, root string, out io.Writer) (string, error) {
+func (b *Bakery) template(ctx context.Context, tag, asset, root string, out io.Writer, required bool) (string, error) {
+	path, err := b.fetchTemplate(ctx, tag, asset, root, out)
+	if err != nil && !required {
+		fmt.Fprintf(out, "  %s взять не вышло, эту систему пропускаю: %v\n", asset, err)
+		return "", nil
+	}
+	return path, err
+}
+
+func (b *Bakery) fetchTemplate(ctx context.Context, tag, asset, root string, out io.Writer) (string, error) {
 	dir := filepath.Join(root, templatesDir, tag)
 	path := filepath.Join(dir, asset)
 	if _, err := os.Stat(path); err == nil {

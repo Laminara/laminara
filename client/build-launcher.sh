@@ -9,9 +9,9 @@ cd "$(dirname "$0")"
 
 usage() {
 	cat >&2 <<'EOF'
-usage: ./build-launcher.sh <client-config.json> [--target linux|windows] [--name <файл>] [--out <каталог>]
+usage: ./build-launcher.sh <client-config.json> [--target linux|windows|macos] [--name <файл>] [--out <каталог>]
 
-  --target   для какой системы собирать (по умолчанию linux)
+  --target   для какой системы собирать (по умолчанию linux); macos — только на маке
   --name     как назвать готовый файл (по умолчанию — из брендинга конфига)
   --out      куда его положить (по умолчанию ./dist-launcher)
 EOF
@@ -72,6 +72,19 @@ windows)
 	}
 	runner=(cargo xwin build)
 	;;
+macos)
+	rust_target=""
+	suffix=""
+	runner=(cargo build)
+	[ "$(uname -s)" = "Darwin" ] || {
+		echo "лаунчер для macOS собирается только на маке: нужны Xcode, lipo и codesign" >&2
+		exit 1
+	}
+	command -v go >/dev/null || {
+		echo "для пакета .app нужен Go: им собирается ../server/cmd/macbundle (перед этим — make generate)" >&2
+		exit 1
+	}
+	;;
 *)
 	echo "неизвестная система: $target" >&2
 	exit 2
@@ -91,17 +104,44 @@ pnpm build
 echo "==> $target"
 args=(--release --features custom-protocol --manifest-path src-tauri/Cargo.toml)
 [ -n "$rust_target" ] && args+=(--target "$rust_target")
+version="$(tr -d '[:space:]' < ../VERSION 2>/dev/null || echo 0.0.0)"
 # The operator named their launcher once, in the server config. Patching it in
 # here keeps that the only place: the window title, the file and the properties
 # Windows shows all come from it.
-TAURI_CONFIG="$(node -e '
+tauri_config="$(node -e '
 const branding = (JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).branding) || {};
 process.stdout.write(JSON.stringify({
   productName: process.argv[2],
   bundle: { publisher: branding.name || process.argv[2] },
 }));
-' "$config" "$product")" \
-	LAMINARA_CLIENT_CONFIG="$config" "${runner[@]}" "${args[@]}"
+' "$config" "$product")"
+
+run_cargo() {
+	TAURI_CONFIG="$tauri_config" LAMINARA_CLIENT_CONFIG="$config" "${runner[@]}" "$@"
+}
+
+mkdir -p "$out"
+
+if [ "$target" = "macos" ]; then
+	slices=()
+	for apple in aarch64-apple-darwin x86_64-apple-darwin; do
+		rustup target add "$apple" >/dev/null 2>&1 || true
+		run_cargo "${args[@]}" --target "$apple"
+		slices+=("target/$apple/release/laminara")
+	done
+	universal="target/release/laminara"
+	mkdir -p target/release
+	lipo -create -output "$universal" "${slices[@]}"
+	codesign --force --sign - "$universal"
+	codesign --verify --verbose "$universal"
+	app="$(go run ../server/cmd/macbundle --config "$config" --binary "$universal" --name "$name" --version "$version" --out "$out")"
+	tar -C "$out" -czf "$out/${name}.app.tar.gz" "$(basename "$app")"
+	echo "==> $app"
+	echo "==> $out/${name}.app.tar.gz"
+	exit 0
+fi
+
+run_cargo "${args[@]}"
 
 # productName renames the bundle, never the cargo binary.
 built="target/${rust_target:+$rust_target/}release/laminara${suffix}"
@@ -110,6 +150,5 @@ built="target/${rust_target:+$rust_target/}release/laminara${suffix}"
 	exit 1
 }
 
-mkdir -p "$out"
 cp "$built" "$out/${name}${suffix}"
 echo "==> $out/${name}${suffix}"
