@@ -157,8 +157,9 @@ jobs:
           lipo -create -output target/release/laminara \
             target/aarch64-apple-darwin/release/laminara \
             target/x86_64-apple-darwin/release/laminara
-          codesign --force --sign - target/release/laminara
+          codesign --force --sign - --entitlements src-tauri/macos.entitlements target/release/laminara
           codesign --verify --verbose target/release/laminara
+          codesign -d --entitlements - target/release/laminara
           lipo -info target/release/laminara
 
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0

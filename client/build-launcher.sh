@@ -132,10 +132,10 @@ if [ "$target" = "macos" ]; then
 	universal="target/release/laminara"
 	mkdir -p target/release
 	lipo -create -output "$universal" "${slices[@]}"
-	codesign --force --sign - "$universal"
+	codesign --force --sign - --entitlements src-tauri/macos.entitlements "$universal"
 	codesign --verify --verbose "$universal"
 	app="$(go run ../server/cmd/macbundle --config "$config" --binary "$universal" --name "$name" --version "$version" --out "$out")"
-	codesign --force --deep --sign - "$app"
+	codesign --force --deep --sign - --entitlements src-tauri/macos.entitlements "$app"
 	codesign --verify --deep --strict "$app"
 	tar -C "$out" -czf "$out/${name}.app.tar.gz" "$(basename "$app")"
 	echo "==> $app"

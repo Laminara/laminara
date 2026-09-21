@@ -20,6 +20,9 @@ const (
 	IconName       = "icon.icns"
 	ExecutableName = "laminara"
 	minimumSystem  = "10.15"
+
+	microphoneReason   = "Микрофон нужен модам голосового чата — игра спрашивает его через лаунчер."
+	localNetworkReason = "Доступ к локальной сети нужен, чтобы видеть игровые серверы и миры по локальной сети."
 )
 
 var ErrNoExecutable = errors.New("в пакете для macOS нечего запускать")
@@ -185,6 +188,8 @@ func (b Bundle) infoPlist() ([]byte, error) {
 		{"CFBundleShortVersionString", version},
 		{"CFBundleVersion", version},
 		{"LSMinimumSystemVersion", minimumSystem},
+		{"NSMicrophoneUsageDescription", microphoneReason},
+		{"NSLocalNetworkUsageDescription", localNetworkReason},
 	}
 	if len(b.Icon) > 0 {
 		entries = append(entries, plistEntry{"CFBundleIconFile", strings.TrimSuffix(IconName, ".icns")})

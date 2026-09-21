@@ -80,6 +80,8 @@ func TestBundleCarriesEverythingMacOSNeeds(t *testing.T) {
 		"<key>CFBundleExecutable</key>\n\t<string>laminara</string>",
 		"<key>CFBundleIconFile</key>\n\t<string>icon</string>",
 		"<string>1.13.0</string>",
+		"<key>NSMicrophoneUsageDescription</key>",
+		"<key>NSLocalNetworkUsageDescription</key>",
 	} {
 		if !strings.Contains(plist.Linkname, want) {
 			t.Fatalf("в Info.plist нет %q:\n%s", want, plist.Linkname)

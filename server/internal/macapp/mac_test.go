@@ -53,8 +53,16 @@ func TestBundleOnARealMacKeepsItsSignature(t *testing.T) {
 	}
 
 	app := filepath.Join(root, BundleName(bundle.Name))
-	if output, err := exec.Command("plutil", "-lint", filepath.Join(app, "Contents/Info.plist")).CombinedOutput(); err != nil {
+	plist := filepath.Join(app, "Contents/Info.plist")
+	if output, err := exec.Command("plutil", "-lint", plist).CombinedOutput(); err != nil {
 		t.Fatalf("Info.plist не проходит проверку: %v\n%s", err, output)
+	}
+	for _, key := range []string{"NSMicrophoneUsageDescription", "NSLocalNetworkUsageDescription"} {
+		output, err := exec.Command("plutil", "-extract", key, "raw", plist).CombinedOutput()
+		if err != nil {
+			t.Fatalf("без %s macOS убьёт игру, как только мод попросит разрешение: %v\n%s", key, err, output)
+		}
+		t.Logf("%s: %s", key, strings.TrimSpace(string(output)))
 	}
 	inside := filepath.Join(app, "Contents/MacOS", ExecutableName)
 	info, err := os.Stat(inside)
@@ -63,6 +71,10 @@ func TestBundleOnARealMacKeepsItsSignature(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("распакованный файл не исполняемый: %v", info.Mode())
+	}
+	entitlements, err := exec.Command("codesign", "-d", "--entitlements", "-", "--xml", inside).CombinedOutput()
+	if err != nil || !strings.Contains(string(entitlements), "com.apple.security.device.audio-input") {
+		t.Fatalf("в подписи нет разрешения на микрофон — моды голосового чата работать не будут: %v\n%s", err, entitlements)
 	}
 
 	unpacked, err := os.ReadFile(inside)
