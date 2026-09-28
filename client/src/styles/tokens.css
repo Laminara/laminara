@@ -18,9 +18,10 @@
 
   --lm-text: #f4f0ea;
   --lm-dim: #9c9186;
-  --lm-mute: #6a6058;
+  --lm-mute: #897e75;
 
   --lm-online: #67d391;
+  --lm-warn: #e6b450;
   --lm-danger: #e5836f;
 
   --lm-radius-sm: 10px;
@@ -28,6 +29,8 @@
   --lm-radius-lg: 20px;
 
   --lm-font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --lm-font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --lm-log-line: 18px;
 
   --lm-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.8);
   --lm-scrim-x: linear-gradient(90deg, var(--lm-bg) 0%, rgba(13, 10, 9, 0.82) 34%, rgba(13, 10, 9, 0.28) 62%, rgba(13, 10, 9, 0.35) 100%);

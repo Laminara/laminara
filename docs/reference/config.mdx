@@ -178,6 +178,8 @@ import ParamField from "@site/components/ParamField.astro";
 
 <ParamField path="enabled" type="boolean">Принимать отчёты о падениях из лаунчера. По умолчанию `false`.</ParamField>
 <ParamField path="maxPerHour" type="number">Сколько отчётов принимать от одного игрока в час. По умолчанию `20`.</ParamField>
+<ParamField path="anonymous" type="boolean">Принимать журнал лаунчера от игрока, который не вошёл. По умолчанию `true`.</ParamField>
+<ParamField path="anonymousPerHour" type="number">Сколько журналов без входа принимать с одного адреса в час. По умолчанию `3`.</ParamField>
 <ParamField path="sinks" type="object">Куда отправлять: `{ "имя": { "type": "discord|telegram|http|file", "config": { … } } }`. Отчёт уходит во все адреса сразу.</ParamField>
 
 Подробнее — [Отчёты о падениях](/launcher/crashes).

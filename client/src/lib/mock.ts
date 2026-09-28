@@ -1,4 +1,4 @@
-import type { Account, Build, BuildFeatures, EndpointStatus, LoginFailure, ServerPlayers } from "@/lib/types";
+import type { Account, Build, BuildFeatures, EndpointStatus, GameConsoleSnapshot, GameLevel, GameLine, GameStream, LoginFailure, ServerPlayers } from "@/lib/types";
 
 export const mockEndpoint: EndpointStatus = {
   id: "eu-1",
@@ -13,6 +13,15 @@ export const mockAccount: Account = {
   name: "Mykyta",
   endpointId: "eu-1",
 };
+
+export const mockFace = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8" shape-rendering="crispEdges">' +
+    '<rect width="8" height="8" fill="#c8967a"/><rect width="8" height="2" fill="#5a3214"/>' +
+    '<rect y="2" width="1" height="2" fill="#5a3214"/><rect x="7" y="2" width="1" height="2" fill="#5a3214"/>' +
+    '<rect x="1" y="4" width="2" height="1" fill="#ffffff"/><rect x="2" y="4" width="1" height="1" fill="#283cc8"/>' +
+    '<rect x="5" y="4" width="2" height="1" fill="#ffffff"/><rect x="5" y="4" width="1" height="1" fill="#283cc8"/>' +
+    '<rect x="3" y="6" width="2" height="1" fill="#8a5a44"/></svg>',
+)}`;
 
 export const mockLoginFailures: Record<LoginFailure["kind"], string> = {
   secondFactor: "Введите код из приложения-аутентификатора",
@@ -83,5 +92,48 @@ export function mockFeatures(): BuildFeatures {
     ],
     selection: { selected: {} },
     active: [],
+  };
+}
+
+const mockLogScript: [GameStream, GameLevel, string][] = [
+  ["out", "info", "[main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher running: args [--username, Mykyta, --version, 1.20.1]"],
+  ["out", "info", "[main/INFO] [net.minecraftforge.fml.loading.ImmediateWindowHandler/]: Loading ImmediateWindowProvider fmlearlywindow"],
+  ["out", "debug", "[main/DEBUG] [net.minecraftforge.fml.loading.moddiscovery.ModDiscoverer/SCAN]: Found mod file sodium-0.5.11.jar of type MOD"],
+  ["out", "info", "[main/INFO] [mixin/]: SpongePowered MIXIN Subsystem Version=0.8.5 Source=union:/libraries/org/spongepowered/mixin/0.8.5/mixin-0.8.5.jar"],
+  ["out", "warn", "[main/WARN] [mixin/]: Reference map 'journeymap.refmap.json' for journeymap.mixins.json could not be read. If this is a development environment you can ignore this message"],
+  ["err", "warn", "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release."],
+  ["out", "info", "[Render thread/INFO] [minecraft/Minecraft]: Setting user: Mykyta"],
+  ["out", "info", "[Render thread/INFO] [minecraft/Minecraft]: Backend library: LWJGL version 3.3.1 build 7"],
+  ["out", "info", "[modloading-worker-0/INFO] [net.minecraftforge.common.ForgeMod/FORGEMOD]: Forge mod loading, version 47.3.0, for MC 1.20.1 with MCP 20230612.114412"],
+  ["out", "warn", "[modloading-worker-0/WARN] [net.minecraftforge.common.ForgeConfigSpec/CORE]: Configuration file config/create-client.toml is not correct. Correcting"],
+  ["out", "error", "[Render thread/ERROR] [minecraft/TextureManager]: Failed to load texture: journeymap:textures/ui/minimap/frame.png"],
+  ["out", "error", "java.io.FileNotFoundException: journeymap:textures/ui/minimap/frame.png"],
+  ["out", "error", "	at net.minecraft.server.packs.resources.ResourceProvider.lambda$getResourceOrThrow$1(ResourceProvider.java:17) ~[client-1.20.1-20230612.114412-srg.jar%23312!/:?]"],
+  ["out", "error", "	at net.minecraft.client.renderer.texture.SimpleTexture$TextureImage.load(SimpleTexture.java:73) ~[client-1.20.1-20230612.114412-srg.jar%23312!/:?]"],
+  ["out", "info", "[Render thread/INFO] [minecraft/SoundEngine]: Sound engine started"],
+  ["out", "info", "[Render thread/INFO] [minecraft/TextureAtlas]: Created: 1024x1024x4 minecraft:textures/atlas/blocks.png-atlas"],
+  ["out", "info", "[Render thread/INFO] [journeymap/]: Журнал JourneyMap: карта мира «Мир Приключений» загружена за 412 мс"],
+  ["out", "info", "[Render thread/INFO] [minecraft/ChatComponent]: [CHAT] Добро пожаловать на сервер, Mykyta!"],
+];
+
+export function mockGameLines(from: number, count: number): GameLine[] {
+  return Array.from({ length: count }, (_, offset) => {
+    const seq = from + offset;
+    const [stream, level, text] = mockLogScript[seq % mockLogScript.length];
+    const seconds = String(Math.floor(seq / 3) % 60).padStart(2, "0");
+    const stamped = text.startsWith("[") ? `[19:22:${seconds}] ${text}` : text;
+    return { seq, stream, level, text: stamped };
+  });
+}
+
+export function mockGameConsole(): GameConsoleSnapshot {
+  return {
+    session: 1,
+    build: "Anarchy Universe",
+    status: { state: "running" },
+    dropped: 0,
+    limit: 50_000,
+    textLimit: 16 * 1024 * 1024,
+    lines: mockGameLines(0, 240),
   };
 }

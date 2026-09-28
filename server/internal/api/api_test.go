@@ -134,6 +134,49 @@ func TestObjectHandler(t *testing.T) {
 	}
 }
 
+func TestObjectHandlerResumesFromAnOffset(t *testing.T) {
+	config, _ := json.Marshal(map[string]string{"root": t.TempDir()})
+	backend, err := storage.BuildBackend("fs", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Put(context.Background(), "objects/blake3/ab/cd/abcd", bytes.NewReader([]byte("HELLO")), 5); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(api.ObjectHandler(backend, false, "public, immutable, max-age=31536000"))
+	defer server.Close()
+
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/objects/objects/blake3/ab/cd/abcd", nil)
+	request.Header.Set("Range", "bytes=2-")
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", resp.StatusCode)
+	}
+	if string(body) != "LLO" {
+		t.Fatalf("body = %q, want the tail after the offset", body)
+	}
+	if got := resp.Header.Get("Content-Range"); got != "bytes 2-4/5" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+	if got := resp.Header.Get("ETag"); got != `"objects/blake3/ab/cd/abcd"` {
+		t.Fatalf("ETag = %q", got)
+	}
+
+	whole, err := http.Get(server.URL + "/objects/objects/blake3/ab/cd/abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole.Body.Close()
+	if whole.ContentLength != 5 {
+		t.Fatalf("Content-Length = %d, want 5", whole.ContentLength)
+	}
+}
+
 func TestObjectHandlerXAccel(t *testing.T) {
 	config, _ := json.Marshal(map[string]string{"root": t.TempDir(), "xaccelPrefix": "/internal-objects/"})
 	backend, err := storage.BuildBackend("fs", config)

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CaretDown, Gear, SignOut } from "@phosphor-icons/react";
 import { useLauncher } from "@/store";
 import { labels } from "@/config/branding";
@@ -13,6 +14,8 @@ export function Header() {
   const closeMenu = useLauncher((state) => state.closeMenu);
   const openModal = useLauncher((state) => state.openModal);
   const logout = useLauncher((state) => state.logout);
+  const face = useLauncher((state) => state.face);
+  const [brokenFace, setBrokenFace] = useState<string | null>(null);
   const initial = account?.name?.[0]?.toUpperCase() ?? "?";
 
   return (
@@ -20,7 +23,7 @@ export function Header() {
       <BrandMark />
       <div className="flex shrink-0 items-center gap-3">
         {players && players.total.max > 0 && (
-          <div className="flex items-center gap-2.5 rounded-full border border-border bg-panel px-4 py-2.5 backdrop-blur-md">
+          <div data-no-stretch className="flex h-10 items-center gap-2.5 rounded-full border border-border bg-panel px-4 backdrop-blur-md">
             <OnlineDot />
             <span className="text-sm font-semibold tabular-nums">
               {formatCount(players.total.online)}
@@ -46,9 +49,18 @@ export function Header() {
             }}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="flex items-center gap-2.5 rounded-full border border-border bg-surface py-2 pl-2 pr-3.5 transition-colors hover:bg-surface-2"
+            className="flex h-10 items-center gap-2.5 rounded-full border border-border bg-surface pl-1 pr-3.5 transition-colors hover:bg-surface-2"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-ink">{initial}</span>
+            {face && face !== brokenFace ? (
+              <img
+                src={face}
+                alt=""
+                onError={() => setBrokenFace(face)}
+                className="h-8 w-8 rounded-full bg-surface-2 [image-rendering:pixelated]"
+              />
+            ) : (
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-ink">{initial}</span>
+            )}
             <span className="max-w-40 truncate text-sm font-semibold">{account?.name ?? "Гость"}</span>
             <CaretDown size={14} className={`text-dim transition-transform ${menuOpen ? "rotate-180" : ""}`} />
           </button>

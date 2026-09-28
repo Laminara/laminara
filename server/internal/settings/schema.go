@@ -331,10 +331,12 @@ var schema = []Section{
 	{
 		Key:   "crashReports",
 		Title: "Отчёты о падениях",
-		Hint:  "Игрок нажимает кнопку в окне падения, и журнал игры уходит вам.",
+		Hint:  "Игрок нажимает кнопку в окне падения или в настройках лаунчера, и журнал игры или лаунчера уходит вам.",
 		Fields: []Field{
 			{Key: "enabled", Label: "Принимать отчёты", Kind: KindBool, Default: "false"},
 			{Key: "maxPerHour", Label: "Отчётов от игрока в час", Kind: KindInt, Default: "20", Hint: "Защита от того, кто зажал кнопку."},
+			{Key: "anonymous", Label: "Журнал лаунчера без входа", Kind: KindBool, Default: "true", Hint: "Журнал чаще всего нужен тому, кто не может войти. Без входа отчёт подписан адресом игрока."},
+			{Key: "anonymousPerHour", Label: "Журналов без входа с адреса в час", Kind: KindInt, Default: "3", Hint: "Защита вашего Discord или Telegram от спама."},
 		},
 		Collections: []Collection{
 			{

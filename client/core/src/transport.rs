@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use prost::Message;
 use serde::Deserialize;
 
-use crate::error::RpcError;
+use crate::error::{describe, RpcError};
 
 #[derive(Clone)]
 pub struct Transport {
@@ -29,15 +29,26 @@ struct ConnectErrorDetail {
 
 const SECOND_FACTOR_DETAIL: &str = "laminara.api.v1.TwoFactorRequired";
 
-pub fn default_http_client() -> reqwest::Client {
+fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .http1_only()
         .use_rustls_tls()
         .redirect(reqwest::redirect::Policy::limited(5))
         .connect_timeout(std::time::Duration::from_secs(10))
         .read_timeout(std::time::Duration::from_secs(60))
-        .build()
-        .expect("build http client")
+}
+
+pub fn default_http_client() -> reqwest::Client {
+    client_builder().build().unwrap_or_else(|error| {
+        tracing::warn!(
+            error = %describe(&error),
+            "сертификаты системы не прочитались, лаунчер доверяет только встроенному набору"
+        );
+        client_builder()
+            .tls_built_in_native_certs(false)
+            .build()
+            .expect("build http client")
+    })
 }
 
 impl Transport {
@@ -92,13 +103,13 @@ impl Transport {
             .body(body)
             .send()
             .await
-            .map_err(|e| RpcError::PreSend(e.to_string()))?;
+            .map_err(|e| RpcError::PreSend(describe(&e)))?;
 
         let status = response.status();
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| RpcError::PostSend(e.to_string()))?;
+            .map_err(|e| RpcError::PostSend(describe(&e)))?;
 
         if status.is_success() {
             return Resp::decode(bytes).map_err(|e| RpcError::PostSend(format!("decode: {e}")));

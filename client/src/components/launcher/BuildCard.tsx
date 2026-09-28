@@ -9,8 +9,10 @@ import { StatusDot } from "@/components/ui/atoms";
 export function BuildCard({ build, selected, onClick }: { build: Build; selected: boolean; onClick: () => void }) {
   const block = buildBlock(build);
   const online = useLauncher((state) => state.players?.perBuild[build.name]);
+  const faint = selected ? "text-dim" : "text-mute";
   return (
     <button
+      data-no-scale
       onClick={onClick}
       className={cn(
         "flex w-full flex-col gap-3 rounded-lg border p-4 text-left transition-colors",
@@ -19,7 +21,7 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-mute">
+        <span className={cn("min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em]", faint)}>
           {build.loader ? loaderLabels[build.loader] : "Сборка"}
           {build.minecraft && <span className="text-dim"> · {build.minecraft}</span>}
         </span>
@@ -36,10 +38,10 @@ export function BuildCard({ build, selected, onClick }: { build: Build; selected
       <span className="truncate text-[15px] font-bold leading-tight" title={build.name}>{build.name}</span>
       <div className="flex items-center gap-3">
         {online && online.max > 0 && (
-          <span className="flex items-center gap-1.5 text-xs tabular-nums text-dim">
+          <span data-no-stretch className="flex items-center gap-1.5 text-xs tabular-nums text-dim">
             <span className="h-1.5 w-1.5 rounded-full bg-online" />
             {formatCount(online.online)}
-            <span className="text-mute">/ {formatCount(online.max)}</span>
+            <span className={faint}>/ {formatCount(online.max)}</span>
           </span>
         )}
       </div>

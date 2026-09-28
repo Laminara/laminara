@@ -25,7 +25,8 @@ export function MemoryField({ valueMb, onChange, min = 1024, max = 16384 }: Memo
         step={512}
         value={valueMb}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full accent-[var(--lm-primary)]"
+        aria-label="Оперативная память"
+        className="h-6 w-full cursor-pointer accent-[var(--lm-primary)]"
       />
       <div className="mt-1 flex justify-between text-[11px] text-mute">
         <span>{gbLabel(min)}</span>

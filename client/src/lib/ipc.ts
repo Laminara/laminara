@@ -1,11 +1,17 @@
 import type {
   Account,
+  AppView,
   AuthStatus,
   Build,
   BuildFeatures,
   BuildSettings,
   EndpointStatus,
   FeatureSelection,
+  GameConsoleSnapshot,
+  GameExit,
+  GameLine,
+  GameLogBatch,
+  GameStarted,
   GeneralSettings,
   LauncherUpdate,
   LoginFailure,
@@ -13,20 +19,38 @@ import type {
   PlayerCounts,
   SyncEvent,
 } from "@/lib/types";
-import { mockAccount, mockBuilds, mockEndpoint, mockFeatures, mockLoginFailures, mockPlayerCounts } from "@/lib/mock";
+import { mockAccount, mockBuilds, mockEndpoint, mockFace, mockFeatures, mockGameConsole, mockGameLines, mockLoginFailures, mockPlayerCounts } from "@/lib/mock";
 
 export const isTauri =
   !import.meta.env.DEV || (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window);
+
+const CONSOLE_WINDOW = "console";
+const MOCK_LOG_EVERY_MS = 700;
 
 async function core<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, args);
 }
 
+async function subscribe<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(event, (message) => handler(message.payload));
+}
+
+function mockLogStream(handler: (batch: GameLogBatch) => void): () => void {
+  let next = mockGameConsole().lines.length;
+  const timer = setInterval(() => {
+    const count = 1 + Math.floor(Math.random() * 3);
+    handler({ session: 1, lines: mockGameLines(next, count) });
+    next += count;
+  }, MOCK_LOG_EVERY_MS);
+  return () => clearInterval(timer);
+}
+
 async function mockSync(onEvent: (event: SyncEvent) => void): Promise<void> {
   const filesTotal = 1200;
   const bytesTotal = 2_400_000_000;
-  onEvent({ event: "started", data: { filesTotal, bytesTotal } });
+  onEvent({ event: "started" });
   for (let step = 1; step <= 12; step += 1) {
     await new Promise((resolve) => setTimeout(resolve, 110));
     onEvent({
@@ -61,6 +85,8 @@ export const ipc = {
 
   logout: (): Promise<void> => (isTauri ? core("logout") : Promise.resolve()),
 
+  playerFace: (): Promise<string | null> => (isTauri ? core("player_face") : Promise.resolve(mockFace)),
+
   listBuilds: (): Promise<Build[]> => (isTauri ? core("list_builds") : Promise.resolve(mockBuilds)),
 
   syncProfile: async (profile: string, onEvent: (event: SyncEvent) => void): Promise<void> => {
@@ -71,7 +97,7 @@ export const ipc = {
     await invoke("sync_profile", { profile, onEvent: channel });
   },
 
-  cancelJob: (job: string): Promise<void> => (isTauri ? core("cancel_job", { job }) : Promise.resolve()),
+  cancelSync: (): Promise<void> => (isTauri ? core("cancel_sync") : Promise.resolve()),
 
   repairBuild: (profile: string): Promise<number> => (isTauri ? core("repair_build", { profile }) : Promise.resolve(0)),
 
@@ -80,10 +106,10 @@ export const ipc = {
     buildVersion: string;
     loader: string;
     exitCode: number;
-    log: string;
+    session: number;
   }): Promise<string> => (isTauri ? core("report_crash", report) : Promise.resolve("Отчёт отправлен, спасибо")),
 
-  launch: (profile: string): Promise<void> => (isTauri ? core("launch", { profile }) : Promise.resolve()),
+  launch: (profile: string): Promise<number> => (isTauri ? core("launch", { profile }) : Promise.resolve(1)),
 
   stop: (): Promise<void> => (isTauri ? core("stop") : Promise.resolve()),
 
@@ -106,10 +132,13 @@ export const ipc = {
           defaultMemoryMb: 4096,
           endpoints: [{ id: "local", baseUrl: "http://127.0.0.1:8099" }],
           version: "0.1.0",
+          gameConsole: false,
         }),
 
 
   setInstallDir: (path: string): Promise<void> => (isTauri ? core("set_install_dir", { path }) : Promise.resolve()),
+
+  setGameConsole: (enabled: boolean): Promise<void> => (isTauri ? core("set_game_console", { enabled }) : Promise.resolve()),
 
   pickFolder: async (defaultPath?: string): Promise<string | null> => {
     if (!isTauri) return null;
@@ -142,16 +171,45 @@ export const ipc = {
     await invoke("apply_update", { version, onEvent: channel });
   },
 
-  onGameExit: async (handler: (code: number) => void): Promise<() => void> => {
-    if (!isTauri) return () => {};
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<number>("game:exit", (event) => handler(event.payload));
+  view: async (): Promise<AppView> => {
+    if (!isTauri) return new URLSearchParams(window.location.search).get("view") === CONSOLE_WINDOW ? "console" : "main";
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return getCurrentWindow().label === CONSOLE_WINDOW ? "console" : "main";
   },
 
-  onGameLog: async (handler: (line: string) => void): Promise<() => void> => {
-    if (!isTauri) return () => {};
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<string>("game:log", (event) => handler(event.payload));
+  onGameStarted: (handler: (started: GameStarted) => void): Promise<() => void> =>
+    isTauri ? subscribe("game:started", handler) : Promise.resolve(() => {}),
+
+  onGameLog: (handler: (batch: GameLogBatch) => void): Promise<() => void> =>
+    isTauri ? subscribe("game:log", handler) : Promise.resolve(mockLogStream(handler)),
+
+  onGameExit: (handler: (exit: GameExit) => void): Promise<() => void> =>
+    isTauri ? subscribe("game:exit", handler) : Promise.resolve(() => {}),
+
+  gameConsoleSnapshot: (): Promise<GameConsoleSnapshot> =>
+    isTauri ? core("game_console_snapshot") : Promise.resolve(mockGameConsole()),
+
+  gameLogTail: (lines: number): Promise<GameLine[]> =>
+    isTauri ? core("game_log_tail", { lines }) : Promise.resolve(mockGameConsole().lines.slice(-lines)),
+
+  openGameConsole: async (): Promise<void> => {
+    if (isTauri) return core("open_game_console");
+    window.open(`${window.location.pathname}?view=${CONSOLE_WINDOW}`, CONSOLE_WINDOW, "width=1080,height=640");
+  },
+
+  openGameLogs: (): Promise<void> => (isTauri ? core("open_game_logs") : Promise.resolve()),
+
+  sendLauncherLog: (): Promise<string> =>
+    isTauri ? core("send_launcher_log") : new Promise((resolve) => setTimeout(() => resolve("Журнал отправлен, спасибо"), 600)),
+
+  openLauncherLogs: (): Promise<void> => (isTauri ? core("open_launcher_logs") : Promise.resolve()),
+
+  revealWindow: async (): Promise<void> => {
+    if (!isTauri) return;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const current = getCurrentWindow();
+    await current.show();
+    await current.setFocus();
   },
 
   buildFeatures: (profile: string): Promise<BuildFeatures> =>

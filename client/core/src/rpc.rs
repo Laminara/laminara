@@ -1,11 +1,12 @@
 use crate::error::RpcError;
-use crate::proto::api::v1::CrashReport;
+use crate::proto::api::v1::{CrashReport, LauncherLogReport};
 use crate::proto::api::v1::{
     CheckUpdateRequest, CheckUpdateResponse, GetChallengeRequest, GetChallengeResponse,
     GetManifestRequest, GetManifestResponse, GetNewsRequest, GetNewsResponse, ListProfilesRequest,
     ListProfilesResponse, LoginRequest, LoginResponse, MachineReport, NewsItem, ProfileSummary,
-    RefreshRequest, RefreshResponse, ReportCrashRequest, ReportCrashResponse, ReportMachineRequest,
-    ReportMachineResponse, Tokens,
+    RefreshRequest, RefreshResponse, ReportCrashRequest, ReportCrashResponse,
+    ReportLauncherLogRequest, ReportLauncherLogResponse, ReportMachineRequest, ReportMachineResponse,
+    Tokens,
 };
 use crate::transport::Transport;
 
@@ -61,6 +62,21 @@ impl<'a> LauncherClient<'a> {
                 self.base_url,
                 &format!("{SERVICE}/ReportCrash"),
                 &ReportCrashRequest { crash: Some(crash) },
+            )
+            .await
+    }
+
+    pub async fn report_launcher_log(
+        &self,
+        report: LauncherLogReport,
+    ) -> Result<ReportLauncherLogResponse, RpcError> {
+        self.transport
+            .unary(
+                self.base_url,
+                &format!("{SERVICE}/ReportLauncherLog"),
+                &ReportLauncherLogRequest {
+                    report: Some(report),
+                },
             )
             .await
     }

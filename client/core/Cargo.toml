@@ -12,7 +12,7 @@ prost = "0.13"
 prost-types = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "sync", "io-util", "time", "net"] }
 tokio-util = "0.7"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "system-proxy", "json", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ed25519-dalek = "2"
@@ -37,6 +37,8 @@ tar = "0.4.46"
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "crypto-rust", "tokio"] }
 dirs = "5"
 tracing = "0.1"
+encoding_rs = "0.8.42"
+png = "0.18.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

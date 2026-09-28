@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { Account, ActiveModal, Build, EndpointStatus, LauncherUpdate, LoginFailure, NewsItem, Phase, PlayerCounts, SyncEvent, SyncState } from "@/lib/types";
+import type { Account, ActiveModal, Build, EndpointStatus, GameExit, GameLine, LauncherUpdate, LogReport, LoginFailure, NewsItem, Phase, PlayerCounts, Problem, SyncEvent, SyncState } from "@/lib/types";
 import { ipc } from "@/lib/ipc";
 import { buildBlock, isPlayable } from "@/lib/buildState";
 
-const LOG_LIMIT = 400;
 const NEWS_SEEN_KEY = "laminara.news.seen";
+const FACE_RECHECK_MS = 120_000;
 
 const quietly = async (task: () => Promise<void>) => {
   try {
@@ -14,30 +14,41 @@ const quietly = async (task: () => Promise<void>) => {
   }
 };
 const CRASH_LOG_LINES = 40;
-const CRASH_LOG_SETTLE_MS = 400;
+
+export interface Crash {
+  session: number;
+  code: number;
+  log: GameLine[];
+  build: string;
+  loader: string;
+  version: string;
+}
 
 interface LauncherState {
   phase: Phase;
   endpoint: EndpointStatus | null;
   account: Account | null;
+  face: string | null;
+  faceCheckedAt: number;
   builds: Build[];
   selected: string | null;
   sync: SyncState | null;
   players: PlayerCounts | null;
   news: NewsItem[];
   unreadNews: number;
-  error: string | null;
+  error: Problem | null;
+  logReport: LogReport;
   twoFactor: boolean;
   modal: ActiveModal;
   menuOpen: boolean;
-  gameLog: string[];
-  crash: { code: number; log: string[]; build: string; loader: string; version: string; full: string[] } | null;
+  crash: Crash | null;
   crashSending: boolean;
   crashSent: string | null;
   crashError: string | null;
-  crashTimer: ReturnType<typeof setTimeout> | null;
-  stoppedByUser: boolean;
   cancelRequested: boolean;
+  syncRun: number;
+  runningSession: number | null;
+  lastExit: GameExit | null;
   staleBuilds: string[];
   update: LauncherUpdate | null;
   updateProgress: { done: number; total: number } | null;
@@ -55,6 +66,7 @@ interface LauncherState {
   sendCrash: () => Promise<void>;
   dismissError: () => void;
   refreshNews: () => Promise<void>;
+  refreshFace: (force?: boolean) => Promise<void>;
   checkUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
   continueStartup: () => Promise<void>;
@@ -68,6 +80,10 @@ interface LauncherState {
   play: () => Promise<void>;
   cancelSync: () => Promise<void>;
   stopGame: () => Promise<void>;
+  openConsole: () => Promise<void>;
+  sendLauncherLog: () => Promise<void>;
+  openLauncherLogs: () => Promise<void>;
+  settleExit: (exit: GameExit) => Promise<void>;
   refreshPlayers: () => Promise<void>;
   refreshBuilds: () => Promise<void>;
   repairBuild: (name: string) => Promise<number>;
@@ -76,9 +92,14 @@ interface LauncherState {
 export const useLauncher = create<LauncherState>((set, get) => ({
   phase: "connecting",
   cancelRequested: false,
+  syncRun: 0,
+  runningSession: null,
+  lastExit: null,
   staleBuilds: [],
   endpoint: null,
   account: null,
+  face: null,
+  faceCheckedAt: 0,
   builds: [],
   selected: null,
   sync: null,
@@ -86,16 +107,14 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   news: [],
   unreadNews: 0,
   error: null,
+  logReport: { state: "idle" },
   twoFactor: false,
   modal: null,
   menuOpen: false,
-  gameLog: [],
   crash: null,
   crashSending: false,
   crashError: null,
-  crashTimer: null,
   crashSent: null,
-  stoppedByUser: false,
   update: null,
   updateProgress: null,
   updateDismissed: false,
@@ -116,7 +135,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
         buildVersion: crash.version,
         loader: crash.loader,
         exitCode: crash.code,
-        log: crash.full.join("\n"),
+        session: crash.session,
       });
       set({ crashSent: message, crashError: null });
     } catch (err) {
@@ -125,7 +144,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ crashSending: false });
     }
   },
-  dismissError: () => set({ error: null }),
+  dismissError: () => set({ error: null, logReport: { state: "idle" } }),
   dismissUpdate: () => set({ updateDismissed: true }),
   openModal: (modal) => {
     if (modal?.kind === "news") {
@@ -167,6 +186,13 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ news, unreadNews: news.filter((item) => !seen.includes(item.id)).length });
     }),
 
+  refreshFace: (force = false) => {
+    if (!get().account) return Promise.resolve();
+    if (!force && Date.now() - get().faceCheckedAt < FACE_RECHECK_MS) return Promise.resolve();
+    set({ faceCheckedAt: Date.now() });
+    return quietly(async () => set({ face: await ipc.playerFace() }));
+  },
+
   checkUpdate: () => quietly(async () => set({ update: await ipc.checkUpdate() })),
 
   installUpdate: async () => {
@@ -176,7 +202,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     try {
       await ipc.applyUpdate(update.version, (done, total) => set({ updateProgress: { done, total } }));
     } catch (err) {
-      set({ updateProgress: null, update: null, error: String(err) });
+      set({ updateProgress: null, update: null, error: problem(err) });
       await get().continueStartup();
     }
   },
@@ -196,11 +222,12 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       } catch (err) {
         trouble = String(err);
       }
-      set({ account, builds, selected: pickBuild(builds), phase: "home", error: trouble });
+      set({ account, builds, selected: pickBuild(builds), phase: "home", error: trouble === null ? null : problem(trouble) });
       void get().refreshPlayers();
       void get().refreshNews();
+      void get().refreshFace(true);
     } catch (err) {
-      set({ phase: "login", error: String(err) });
+      set({ phase: "login", error: problem(err) });
     }
   },
 
@@ -212,35 +239,9 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     const binding = (async () => {
       try {
         attached.push(
-          await ipc.onGameLog((line) =>
-            set((state) => ({
-              gameLog: state.gameLog.length >= LOG_LIMIT ? [...state.gameLog.slice(-(LOG_LIMIT - 1)), line] : [...state.gameLog, line],
-            })),
-          ),
-        );
-        attached.push(
-          await ipc.onGameExit((code) => {
-            const stoppedByUser = get().stoppedByUser;
-            set({ stoppedByUser: false });
-            if (get().phase === "running") set({ phase: "home" });
-            if (code === 0 || stoppedByUser) return;
-            const timer = setTimeout(() => {
-              const state = get();
-              const build = state.builds.find((item) => item.name === state.selected);
-              set({
-                crash: {
-                  code,
-                  log: state.gameLog.slice(-CRASH_LOG_LINES),
-                  full: state.gameLog,
-                  build: state.selected ?? "",
-                  loader: build?.loader ?? "",
-                  version: build?.minecraft ?? "",
-                },
-                crashSent: null,
-                crashTimer: null,
-              });
-            }, CRASH_LOG_SETTLE_MS);
-            set({ crashTimer: timer });
+          await ipc.onGameExit((exit) => {
+            set({ lastExit: exit });
+            if (get().runningSession === exit.session) void get().settleExit(exit);
           }),
         );
         if (get().unbinding) {
@@ -275,7 +276,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
         const endpoints = await ipc.probeEndpoints();
         set({ endpoint: endpoints.find((item) => item.isCurrent) ?? endpoints[0] ?? null });
       } catch (err) {
-        set({ phase: "login", error: String(err) });
+        set({ phase: "login", error: problem(err) });
         return;
       }
 
@@ -300,99 +301,147 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ account, builds, selected: pickBuild(builds), phase: "home", twoFactor: false });
       void get().refreshPlayers();
       void get().refreshNews();
+      void get().refreshFace(true);
     } catch (err) {
       const failure = asLoginFailure(err);
-      set({ error: failure.message, twoFactor: failure.kind === "secondFactor" });
+      set({ error: problem(failure.message), twoFactor: failure.kind === "secondFactor" });
     }
   },
 
   logout: async () => {
     await ipc.logout();
-    set({ account: null, phase: "login", error: null, twoFactor: false });
+    set({ account: null, face: null, faceCheckedAt: 0, phase: "login", error: null, twoFactor: false });
   },
 
   play: async () => {
     if (get().phase !== "home") return;
-    const pending = get().crashTimer;
-    if (pending) {
-      clearTimeout(pending);
-      set({ crashTimer: null });
-    }
     const name = get().selected;
     if (!name) return;
     const block = buildBlock(get().builds.find((item) => item.name === name));
     if (block) {
-      set({ error: block.reason });
+      set({ error: problem(block.reason) });
       return;
     }
-    set({ phase: "syncing", sync: null, error: null, crash: null, crashSent: null, crashError: null, gameLog: [], stoppedByUser: false, cancelRequested: false });
+    const run = get().syncRun + 1;
+    const current = () => get().syncRun === run;
+    set({ phase: "syncing", syncRun: run, sync: null, error: null, crash: null, crashSent: null, crashError: null, cancelRequested: false });
     try {
-      const rate = newRateMeter();
-      await ipc.syncProfile(name, (event: SyncEvent) => {
-        if (event.event === "started") {
-          set({ sync: { stage: "planning", filesDone: 0, filesTotal: event.data.filesTotal, bytesDone: 0, bytesTotal: event.data.bytesTotal } });
-        } else if (event.event === "progress") {
-          set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
-        } else if (event.event === "finished") {
-          const current = get().sync;
-          if (current) set({ sync: { ...current, stage: "launching" } });
-        }
-      });
+      await ipc.syncProfile(name, syncTracker(set, get, run, "launching"));
+      if (!current()) return;
       set({ staleBuilds: get().staleBuilds.filter((item) => item !== name) });
       ipc.listBuilds().then((builds) => set({ builds })).catch(() => undefined);
       if (get().cancelRequested) {
         set({ phase: "home", sync: null });
         return;
       }
-      await ipc.launch(name);
-      set({ phase: "running" });
+      const session = await ipc.launch(name);
+      const early = get().lastExit;
+      if (early?.session === session) {
+        set({ phase: "home", sync: null });
+        await get().settleExit(early);
+        return;
+      }
+      set({ phase: "running", runningSession: session });
     } catch (err) {
+      if (!current()) return;
       set({ phase: "home", sync: null });
-      if (!get().cancelRequested) set({ error: String(err) });
+      if (!get().cancelRequested) set({ error: problem(err) });
     }
   },
 
   repairBuild: async (name) => {
-    set({ phase: "syncing", sync: null, error: null });
+    if (get().phase !== "home") return 0;
+    const run = get().syncRun + 1;
+    const current = () => get().syncRun === run;
+    set({ phase: "syncing", syncRun: run, sync: null, error: null, cancelRequested: false });
     try {
       const discarded = await ipc.repairBuild(name);
-      const rate = newRateMeter();
-      await ipc.syncProfile(name, (event: SyncEvent) => {
-        if (event.event === "started") {
-          set({ sync: { stage: "planning", filesDone: 0, filesTotal: event.data.filesTotal, bytesDone: 0, bytesTotal: event.data.bytesTotal } });
-        } else if (event.event === "progress") {
-          set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
-        }
-      });
+      if (!current()) return discarded;
+      if (get().cancelRequested) {
+        set({ phase: "home", sync: null });
+        return discarded;
+      }
+      await ipc.syncProfile(name, syncTracker(set, get, run, "done"));
+      if (!current()) return discarded;
       set({ builds: await ipc.listBuilds(), phase: "home", sync: null });
       return discarded;
     } catch (err) {
-      set({ phase: "home", sync: null, error: String(err) });
+      if (!current()) return 0;
+      set({ phase: "home", sync: null });
+      if (!get().cancelRequested) set({ error: problem(err) });
       return 0;
     }
   },
 
   cancelSync: async () => {
-    const name = get().selected;
+    if (get().cancelRequested) return;
     set({ cancelRequested: true });
-    try {
-      if (name) await ipc.cancelJob(name);
-    } catch {
-      void 0;
-    } finally {
-      set({ phase: "home", sync: null });
-    }
+    await ipc.cancelSync().catch(() => undefined);
   },
 
   stopGame: async () => {
-    set({ stoppedByUser: true });
     try {
       await ipc.stop();
     } catch (err) {
-      set({ stoppedByUser: false, error: String(err) });
+      set({ error: problem(err) });
     }
   },
+
+  openConsole: async () => {
+    try {
+      await ipc.openGameConsole();
+    } catch (err) {
+      set({ error: problem(err) });
+    }
+  },
+
+  sendLauncherLog: async () => {
+    if (get().logReport.state === "sending") return;
+    set({ logReport: { state: "sending" } });
+    try {
+      set({ logReport: { state: "sent", message: await ipc.sendLauncherLog() } });
+    } catch (err) {
+      set({ logReport: { state: "failed", message: problem(err).message } });
+    }
+  },
+
+  openLauncherLogs: async () => {
+    try {
+      await ipc.openLauncherLogs();
+    } catch (err) {
+      set({ error: problem(err) });
+    }
+  },
+
+  settleExit: async (exit) => {
+    set({ runningSession: null });
+    if (get().phase === "running") set({ phase: "home" });
+    if (exit.code === 0 || exit.stopped) return;
+    const tail = await ipc.gameLogTail(CRASH_LOG_LINES).catch(() => []);
+    if (get().phase !== "home") return;
+    const build = get().builds.find((item) => item.name === exit.build);
+    set({
+      crash: {
+        session: exit.session,
+        code: exit.code,
+        log: tail,
+        build: exit.build,
+        loader: build?.loader ?? "",
+        version: build?.minecraft ?? "",
+      },
+      crashSent: null,
+      crashError: null,
+    });
+  },
 }));
+
+function problem(err: unknown): Problem {
+  if (err && typeof err === "object" && "message" in err) {
+    const failure = err as { message: unknown; retry?: unknown };
+    return { message: String(failure.message), retry: failure.retry === true };
+  }
+  return { message: String(err), retry: false };
+}
 
 function asLoginFailure(err: unknown): LoginFailure {
   if (err && typeof err === "object" && "kind" in err) {
@@ -412,15 +461,36 @@ export function useSelectedBuild(): Build | null {
   return useLauncher((state) => state.builds.find((build) => build.name === state.selected) ?? null);
 }
 
+type SetLauncher = (partial: Partial<LauncherState>) => void;
+
+function syncTracker(set: SetLauncher, get: () => LauncherState, run: number, finalStage: string) {
+  const rate = newRateMeter();
+  return (event: SyncEvent) => {
+    if (get().syncRun !== run) return;
+    if (event.event === "started") {
+      set({ sync: { stage: "planning", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0 } });
+    } else if (event.event === "progress") {
+      set({ sync: { ...event.data, ...rate(event.data.bytesDone, event.data.bytesTotal) } });
+    } else if (event.event === "finished") {
+      const sync = get().sync;
+      if (sync) set({ sync: { ...sync, stage: finalStage } });
+    }
+  };
+}
+
 function newRateMeter() {
-  let lastBytes = 0;
+  let lastBytes: number | null = null;
   let lastAt = Date.now();
   let speed = 0;
   return (bytesDone: number, bytesTotal: number) => {
     const now = Date.now();
+    if (lastBytes === null || bytesDone < lastBytes) {
+      lastBytes = bytesDone;
+      lastAt = now;
+    }
     const seconds = (now - lastAt) / 1000;
     const gained = bytesDone - lastBytes;
-    if (seconds >= 0.35 && gained >= 0) {
+    if (seconds >= 0.35) {
       const sample = gained / seconds;
       speed = speed === 0 ? sample : speed * 0.7 + sample * 0.3;
       lastBytes = bytesDone;

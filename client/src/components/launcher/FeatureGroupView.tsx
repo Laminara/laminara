@@ -85,6 +85,7 @@ function Row({ active, single, blocked, onClick, title, description, badge }: Ro
   const Icon = single ? (active ? RadioButton : Circle) : active ? CheckSquare : Square;
   return (
     <button
+      data-no-scale
       onClick={onClick}
       disabled={Boolean(blocked)}
       className={cn(

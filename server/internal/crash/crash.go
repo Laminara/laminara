@@ -16,8 +16,24 @@ const (
 	maxLogInText   = 3800
 )
 
+type Kind int
+
+const (
+	GameCrash Kind = iota
+	LauncherLog
+)
+
+func (k Kind) String() string {
+	if k == LauncherLog {
+		return "launcher"
+	}
+	return "crash"
+}
+
 type Report struct {
+	Kind      Kind
 	Player    string
+	Address   string
 	UUID      string
 	Build     string
 	Version   string
@@ -59,35 +75,58 @@ type SinkConfig struct {
 }
 
 type Config struct {
-	Enabled    bool                  `json:"enabled"`
-	MaxPerHour int                   `json:"maxPerHour"`
-	Sinks      map[string]SinkConfig `json:"sinks"`
+	Enabled          bool                  `json:"enabled"`
+	MaxPerHour       int                   `json:"maxPerHour"`
+	Anonymous        *bool                 `json:"anonymous"`
+	AnonymousPerHour int                   `json:"anonymousPerHour"`
+	Sinks            map[string]SinkConfig `json:"sinks"`
+}
+
+func (c *Config) acceptsAnonymous() bool {
+	return c.Anonymous == nil || *c.Anonymous
+}
+
+const anonymousPlayer = "игрок без входа"
+
+func (r Report) who() string {
+	if r.Player != "" {
+		return r.Player
+	}
+	if r.Kind == LauncherLog {
+		return anonymousPlayer
+	}
+	return "неизвестный игрок"
 }
 
 func (r Report) Title() string {
-	who := r.Player
-	if who == "" {
-		who = "неизвестный игрок"
+	if r.Kind == LauncherLog {
+		return r.who() + " — журнал лаунчера"
 	}
-	build := r.Build
-	if build == "" {
-		build = "без сборки"
+	return fmt.Sprintf("%s — падение в сборке «%s»", r.who(), fallback(r.Build, "без сборки"))
+}
+
+func (r Report) FileName() string {
+	if r.Kind == LauncherLog {
+		return "launcher.log"
 	}
-	return fmt.Sprintf("%s — падение в сборке «%s»", who, build)
+	return "crash.log"
 }
 
 func (r Report) Lines() []string {
-	lines := []string{
-		"Игрок: " + fallback(r.Player, "неизвестен"),
-		"Сборка: " + fallback(r.Build, "не указана"),
+	lines := []string{"Игрок: " + r.who()}
+	if r.Address != "" {
+		lines = append(lines, "Адрес: "+r.Address)
 	}
-	if r.Version != "" {
-		lines = append(lines, "Версия сборки: "+r.Version)
+	if r.Kind == GameCrash {
+		lines = append(lines, "Сборка: "+fallback(r.Build, "не указана"))
+		if r.Version != "" {
+			lines = append(lines, "Версия сборки: "+r.Version)
+		}
+		if r.Loader != "" {
+			lines = append(lines, "Загрузчик: "+r.Loader)
+		}
+		lines = append(lines, fmt.Sprintf("Код выхода: %d", r.ExitCode))
 	}
-	if r.Loader != "" {
-		lines = append(lines, "Загрузчик: "+r.Loader)
-	}
-	lines = append(lines, fmt.Sprintf("Код выхода: %d", r.ExitCode))
 	if r.Platform != "" {
 		lines = append(lines, "Система: "+strings.TrimSpace(r.Platform+" "+r.OSVersion))
 	}

@@ -110,6 +110,21 @@ message ReportCrashResponse {
   string message = 2;
 }
 
+message LauncherLogReport {
+  string log = 1;
+  map<string, string> details = 2;
+  int64 happened_at_unix_nanos = 3;
+}
+
+message ReportLauncherLogRequest {
+  LauncherLogReport report = 1;
+}
+
+message ReportLauncherLogResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
 service LauncherService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc Refresh(RefreshRequest) returns (RefreshResponse);
@@ -120,4 +135,5 @@ service LauncherService {
   rpc GetChallenge(GetChallengeRequest) returns (GetChallengeResponse);
   rpc ReportMachine(ReportMachineRequest) returns (ReportMachineResponse);
   rpc ReportCrash(ReportCrashRequest) returns (ReportCrashResponse);
+  rpc ReportLauncherLog(ReportLauncherLogRequest) returns (ReportLauncherLogResponse);
 }

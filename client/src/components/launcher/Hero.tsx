@@ -55,13 +55,13 @@ export function Hero() {
           icon={<Play size={16} weight="fill" />}
           onClick={() => void play()}
           disabled={block !== null}
-          className="px-7 py-4 text-[15px]"
+          className="h-13 px-7 text-[15px]"
         >
           {block ? block.badge.toUpperCase() : actionLabel.toUpperCase()}
         </Button>
         <button
           onClick={() => openModal({ kind: "build", profile: build.name })}
-          className="flex h-[52px] w-[52px] items-center justify-center rounded-md border border-border bg-surface-2 text-dim transition-colors hover:bg-surface-3 hover:text-text"
+          className="flex h-13 w-13 items-center justify-center rounded-md border border-border bg-surface-2 text-dim transition-colors hover:bg-surface-3 hover:text-text"
           aria-label="Настройки сборки"
         >
           <Gear size={20} />
@@ -69,7 +69,7 @@ export function Hero() {
         {build.hasFeatures && (
           <button
             onClick={() => openModal({ kind: "features", profile: build.name })}
-            className="flex h-[52px] items-center gap-2 rounded-md border border-border bg-surface-2 px-4 text-sm font-medium text-dim transition-colors hover:bg-surface-3 hover:text-text"
+            className="flex h-13 items-center gap-2 rounded-md border border-border bg-surface-2 px-4 text-sm font-medium text-dim transition-colors hover:bg-surface-3 hover:text-text"
           >
             <SlidersHorizontal size={18} /> Моды
           </button>

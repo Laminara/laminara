@@ -307,6 +307,12 @@ func ObjectHandler(backend storage.Backend, xAccel bool, cachePolicy string) htt
 		}
 		defer reader.Close()
 		w.Header().Set("Cache-Control", cachePolicy)
+		if seekable, ok := reader.(io.ReadSeeker); ok {
+			w.Header().Set("ETag", strconv.Quote(key))
+			w.Header().Set("Content-Type", "application/octet-stream")
+			http.ServeContent(w, r, "", time.Time{}, seekable)
+			return
+		}
 		_, _ = io.Copy(w, reader)
 	})
 }

@@ -32,6 +32,25 @@ pub struct LoginResult {
     pub machine: Option<crate::proto::api::v1::MachineVerdict>,
 }
 
+fn report_context() -> (std::collections::HashMap<String, String>, i64) {
+    let mut details = std::collections::HashMap::new();
+    details.insert("launcher".to_string(), env!("LAMINARA_VERSION").to_string());
+    details.insert(
+        "platform".to_string(),
+        crate::platform::current().as_str_name().to_string(),
+    );
+    details.insert("os".to_string(), crate::machine::os_version());
+    let happened_at_unix_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as i64)
+        .unwrap_or_default();
+    (details, happened_at_unix_nanos)
+}
+
+const MANIFEST_ATTEMPTS: u32 = 3;
+const MANIFEST_RETRY_FIRST: std::time::Duration = std::time::Duration::from_secs(1);
+const MANIFEST_RETRY_LONGEST: std::time::Duration = std::time::Duration::from_secs(4);
+
 pub struct Core {
     paths: LaminaraPaths,
     config: ArcSwap<ClientConfig>,
@@ -152,6 +171,15 @@ impl Core {
         Ok(())
     }
 
+    pub async fn player_skin(&self, uuid: &str) -> Result<Option<String>, CoreError> {
+        let base = self.pool.current_base_url().ok_or(CoreError::NoEndpoint)?;
+        account::head::skin_url(&self.transport, &base, uuid).await
+    }
+
+    pub async fn player_face(&self, skin_url: &str) -> Result<String, CoreError> {
+        account::head::face_from_skin(&self.transport, skin_url).await
+    }
+
     pub async fn report_crash(
         &self,
         build: String,
@@ -160,19 +188,7 @@ impl Core {
         exit_code: i32,
         log: String,
     ) -> Result<String, CoreError> {
-        let mut details = std::collections::HashMap::new();
-        details.insert("launcher".to_string(), env!("LAMINARA_VERSION").to_string());
-        details.insert(
-            "platform".to_string(),
-            crate::platform::current().as_str_name().to_string(),
-        );
-        details.insert("os".to_string(), crate::machine::os_version());
-
-        let happened_at_unix_nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_nanos() as i64)
-            .unwrap_or_default();
-
+        let (details, happened_at_unix_nanos) = report_context();
         let response = self
             .pool
             .report_crash(crate::proto::api::v1::CrashReport {
@@ -188,6 +204,25 @@ impl Core {
         if !response.accepted {
             return Err(CoreError::App {
                 code: "crash".into(),
+                message: response.message,
+            });
+        }
+        Ok(response.message)
+    }
+
+    pub async fn report_launcher_log(&self, log: String) -> Result<String, CoreError> {
+        let (details, happened_at_unix_nanos) = report_context();
+        let response = self
+            .pool
+            .report_launcher_log(crate::proto::api::v1::LauncherLogReport {
+                log,
+                details,
+                happened_at_unix_nanos,
+            })
+            .await?;
+        if !response.accepted {
+            return Err(CoreError::App {
+                code: "launcher-log".into(),
                 message: response.message,
             });
         }
@@ -234,7 +269,23 @@ impl Core {
         &self,
         profile: &str,
     ) -> Result<Arc<VerifiedManifest>, CoreError> {
-        let response = self.pool.get_manifest(profile.to_string()).await?;
+        let mut attempt = 0;
+        let response = loop {
+            attempt += 1;
+            match self.pool.get_manifest(profile.to_string()).await {
+                Ok(response) => break response,
+                Err(error @ CoreError::Transport(_)) if attempt < MANIFEST_ATTEMPTS => {
+                    tracing::warn!(%profile, attempt, %error, "манифест не дошёл, прошу ещё раз");
+                    tokio::time::sleep(crate::backoff::pause(
+                        attempt,
+                        MANIFEST_RETRY_FIRST,
+                        MANIFEST_RETRY_LONGEST,
+                    ))
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         let verified = Arc::new(verify_and_decode(
             &self.verifying_keys,
             &response.manifest,
@@ -434,7 +485,6 @@ impl Core {
         authlib_jar: &Path,
         client_version: &str,
     ) -> Result<tokio::process::Child, CoreError> {
-        let config = self.config.load();
         let profile_dir = self.profile_dir(profile);
         let launch_profile =
             LaunchProfile::load(&profile_dir.join(crate::launch::LAUNCH_PROFILE_NAME))?;
@@ -450,10 +500,7 @@ impl Core {
         let yggdrasil_root = format!("{}/yggdrasil/", base.trim_end_matches('/'));
 
         let java_bin = java_binary(&profile_dir, &launch_profile);
-        let game_dir = config
-            .game_dir
-            .clone()
-            .unwrap_or_else(|| profile_dir.clone());
+        let game_dir = self.game_dir(profile);
         let jvm = self.effective_jvm(profile);
 
         let manifest = match self.cached_manifest(profile) {
@@ -492,6 +539,26 @@ impl Core {
         command
             .spawn()
             .map_err(|e| CoreError::Launch(format!("spawn java: {e}")))
+    }
+
+    pub fn game_dir(&self, profile: &str) -> PathBuf {
+        self.config
+            .load()
+            .game_dir
+            .clone()
+            .unwrap_or_else(|| self.profile_dir(profile))
+    }
+
+    pub fn game_console(&self) -> bool {
+        self.config.load().game_console
+    }
+
+    pub fn set_game_console(&self, enabled: bool) -> Result<(), CoreError> {
+        let mut next = ClientConfig::clone(&self.config.load());
+        next.game_console = enabled;
+        next.save(&self.paths.config_file())?;
+        self.config.store(Arc::new(next));
+        Ok(())
     }
 
     pub fn set_endpoints(&self, endpoints: Vec<EndpointConfig>) -> Result<(), CoreError> {
@@ -721,6 +788,7 @@ mod tests {
                 default_memory_mb: 4096,
                 build_settings: std::collections::HashMap::new(),
                 stale_update: None,
+                game_console: false,
             },
         )
         .unwrap()

@@ -14,7 +14,7 @@ export function BuildStrip() {
         <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-dim">{labels.changeBuild}</span>
         <button
           onClick={() => openModal({ kind: "library" })}
-          className="text-[11px] uppercase tracking-wider text-mute transition-colors hover:text-text"
+          className="inline-flex h-6 items-center text-[11px] uppercase tracking-wider text-mute transition-colors hover:text-text"
         >
           Все сборки ({builds.length})
         </button>

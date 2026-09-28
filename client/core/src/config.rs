@@ -58,6 +58,8 @@ pub struct ClientConfig {
     pub build_settings: std::collections::HashMap<String, BuildSettings>,
     #[serde(default)]
     pub stale_update: Option<String>,
+    #[serde(default)]
+    pub game_console: bool,
 }
 
 impl ClientConfig {

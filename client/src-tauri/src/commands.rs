@@ -1,25 +1,29 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use laminara_core::config::EndpointConfig;
 use laminara_core::features::{self, FeatureSelection};
+use laminara_core::gamelog::{GameLine, Snapshot};
 use laminara_core::launch::LAUNCH_PROFILE_NAME;
 use laminara_core::proto::core::v1::{
     FeatureGroup, FeatureModel, FeatureOption, Platform, SelectionType,
 };
 use laminara_core::slp;
 use laminara_core::sync::{SyncProgress, SyncStage};
+use laminara_core::CoreError;
 
 use crate::auth::{AuthStatus, Session};
-use crate::AppState;
+use crate::console;
+use crate::{AppState, SyncJob};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,11 +74,7 @@ pub struct EndpointInput {
 #[derive(Serialize, Clone)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum SyncEvent {
-    #[serde(rename_all = "camelCase")]
-    Started {
-        files_total: u64,
-        bytes_total: u64,
-    },
+    Started,
     #[serde(rename_all = "camelCase")]
     Progress {
         stage: String,
@@ -201,6 +201,37 @@ fn player_message(error: &laminara_core::CoreError) -> String {
         CoreError::Config(_) | CoreError::Io(_) => {
             "Ошибка на этом компьютере. Что именно — в логе лаунчера".into()
         }
+        CoreError::Cancelled => "Загрузка отменена".into(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct Failure {
+    message: String,
+    retry: bool,
+}
+
+impl Failure {
+    fn retryable(message: String) -> Self {
+        Failure {
+            message,
+            retry: true,
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Failure {
+            message,
+            retry: false,
+        }
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Self {
+        Failure::from(message.to_string())
     }
 }
 
@@ -220,16 +251,10 @@ const TOKEN_REFRESH_LEAD: i64 = 60_000_000_000;
 const FIRST_RETRY_PAUSE: Duration = Duration::from_secs(5);
 const LONGEST_RETRY_PAUSE: Duration = Duration::from_secs(120);
 
-fn longer_pause(previous: Duration) -> Duration {
-    if previous.is_zero() {
-        return FIRST_RETRY_PAUSE;
-    }
-    (previous * 2).min(LONGEST_RETRY_PAUSE)
-}
-
 fn spawn_token_keeper(app: AppHandle, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let mut retry_pause = Duration::ZERO;
+        let mut failures = 0u32;
         loop {
             let wait = {
                 let state = app.state::<AppState>();
@@ -267,9 +292,15 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
                         .auth
                         .update_access(tokens.access, tokens.access_expires_unix_nanos);
                     retry_pause = Duration::ZERO;
+                    failures = 0;
                 }
                 Err(e) if e.server_unreachable() => {
-                    retry_pause = longer_pause(retry_pause);
+                    failures += 1;
+                    retry_pause = laminara_core::backoff::pause(
+                        failures,
+                        FIRST_RETRY_PAUSE,
+                        LONGEST_RETRY_PAUSE,
+                    );
                     tracing::warn!("сервер не ответил на продление, повтор через {retry_pause:?}: {e}");
                 }
                 Err(e) => {
@@ -508,24 +539,37 @@ pub async fn open_external(url: String) -> Result<(), String> {
     if !lower.starts_with("http://") && !lower.starts_with("https://") {
         return Err("only http and https links can be opened".into());
     }
-    #[cfg(target_os = "linux")]
-    let command = ("xdg-open", vec![url]);
-    #[cfg(target_os = "macos")]
-    let command = ("/usr/bin/open", vec![url]);
-    #[cfg(target_os = "windows")]
-    let command = (
-        "rundll32.exe",
-        vec!["url.dll,FileProtocolHandler".to_string(), url],
-    );
+    open_in_system(Opened::Link(&url)).map_err(|e| {
+        tracing::error!("open external link: {e}");
+        "Не удалось открыть ссылку в браузере".to_string()
+    })
+}
 
-    laminara_core::process::async_command(command.0)
-        .args(command.1)
+enum Opened<'a> {
+    Link(&'a str),
+    Folder(&'a Path),
+}
+
+fn open_in_system(target: Opened<'_>) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let (program, prefix) = ("xdg-open", None::<&str>);
+    #[cfg(target_os = "macos")]
+    let (program, prefix) = ("/usr/bin/open", None::<&str>);
+    #[cfg(target_os = "windows")]
+    let (program, prefix) = match target {
+        Opened::Link(_) => ("rundll32.exe", Some("url.dll,FileProtocolHandler")),
+        Opened::Folder(_) => ("explorer.exe", None),
+    };
+    let argument: OsString = match target {
+        Opened::Link(url) => url.into(),
+        Opened::Folder(path) => path.into(),
+    };
+
+    laminara_core::process::async_command(program)
+        .args(prefix)
+        .arg(argument)
         .spawn()
         .map(|_| ())
-        .map_err(|e| {
-            tracing::error!("open external link: {e}");
-            "Не удалось открыть ссылку в браузере".to_string()
-        })
 }
 
 #[tauri::command]
@@ -598,47 +642,13 @@ pub async fn sync_profile(
     state: State<'_, AppState>,
     profile: String,
     on_event: Channel<SyncEvent>,
-) -> Result<(), String> {
-    tracing::info!("sync started for {profile}");
-    let manifest = state
-        .core
-        .verified_manifest(&profile)
-        .await
-        .map_err(|e| player_error(&format!("manifest verify failed for {profile}"), e))?;
-    let _ = on_event.send(SyncEvent::Started {
-        files_total: manifest.manifest.files.len() as u64,
-        bytes_total: manifest.manifest.total_size,
-    });
-
+) -> Result<(), Failure> {
     let cancel = CancellationToken::new();
-    state
-        .jobs
-        .lock()
-        .await
-        .insert(profile.clone(), cancel.clone());
+    let _slot = claim_sync(&state, &profile, &cancel)?;
+    tracing::info!("sync started for {profile}");
+    let _ = on_event.send(SyncEvent::Started);
 
-    let channel = on_event.clone();
-    let result = state
-        .core
-        .sync_profile(&profile, &manifest, cancel, move |p: SyncProgress| {
-            let stage = match p.stage {
-                SyncStage::Planning => "planning",
-                SyncStage::Downloading => "downloading",
-                SyncStage::Done => "done",
-            };
-            let _ = channel.send(SyncEvent::Progress {
-                stage: stage.into(),
-                files_done: p.files_done,
-                files_total: p.files_total,
-                bytes_done: p.bytes_done,
-                bytes_total: p.bytes_total,
-                current_path: p.current_path,
-            });
-        })
-        .await;
-
-    state.jobs.lock().await.remove(&profile);
-    match result {
+    match run_sync(&state, &profile, &on_event, cancel).await {
         Ok(outcome) => {
             tracing::info!(
                 "sync finished for {profile}: downloaded={} linked={} skipped={} pruned={}",
@@ -655,19 +665,128 @@ pub async fn sync_profile(
             Ok(())
         }
         Err(err) => {
-            tracing::error!("sync failed for {profile}: {err}");
-            let message = player_message(&err);
+            let failure = match err {
+                CoreError::Cancelled => {
+                    tracing::info!("sync of {profile} cancelled by the player");
+                    Failure::from(player_message(&err))
+                }
+                err => {
+                    tracing::error!("sync failed for {profile}: {err}");
+                    sync_failure(&err)
+                }
+            };
             let _ = on_event.send(SyncEvent::Failed {
-                message: message.clone(),
+                message: failure.message.clone(),
             });
-            Err(message)
+            Err(failure)
         }
     }
 }
 
+fn sync_failure(error: &CoreError) -> Failure {
+    if error.server_unreachable() {
+        Failure::retryable(
+            "Загрузка прервалась: сервер не отвечает или пропала связь. Нажмите «Повторить», скачанное не потеряется"
+                .into(),
+        )
+    } else {
+        Failure::from(player_message(error))
+    }
+}
+
+struct SyncSlot<'a> {
+    state: &'a AppState,
+    id: u64,
+}
+
+impl Drop for SyncSlot<'_> {
+    fn drop(&mut self) {
+        let mut slot = self
+            .state
+            .sync_job
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.as_ref().is_some_and(|job| job.id == self.id) {
+            *slot = None;
+        }
+    }
+}
+
+fn claim_sync<'a>(
+    state: &'a AppState,
+    build: &str,
+    token: &CancellationToken,
+) -> Result<SyncSlot<'a>, Failure> {
+    let mut slot = state
+        .sync_job
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(job) = slot.as_ref() {
+        return Err(Failure::from(format!(
+            "Уже идёт загрузка сборки «{}»",
+            job.build
+        )));
+    }
+    let id = state
+        .sync_jobs_started
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    *slot = Some(SyncJob {
+        id,
+        build: build.to_string(),
+        token: token.clone(),
+    });
+    Ok(SyncSlot { state, id })
+}
+
+fn refuse_while_syncing(state: &AppState) -> Result<(), String> {
+    let slot = state
+        .sync_job
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match slot.as_ref() {
+        Some(job) => Err(format!(
+            "Идёт загрузка сборки «{}», дождитесь её конца",
+            job.build
+        )),
+        None => Ok(()),
+    }
+}
+
+async fn run_sync(
+    state: &AppState,
+    profile: &str,
+    on_event: &Channel<SyncEvent>,
+    cancel: CancellationToken,
+) -> Result<laminara_core::sync::SyncOutcome, laminara_core::CoreError> {
+    let manifest = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::Cancelled),
+        manifest = state.core.verified_manifest(profile) => manifest?,
+    };
+    let channel = on_event.clone();
+    state
+        .core
+        .sync_profile(profile, &manifest, cancel, move |p: SyncProgress| {
+            let stage = match p.stage {
+                SyncStage::Planning => "planning",
+                SyncStage::Downloading => "downloading",
+                SyncStage::Done => "done",
+            };
+            let _ = channel.send(SyncEvent::Progress {
+                stage: stage.into(),
+                files_done: p.files_done,
+                files_total: p.files_total,
+                bytes_done: p.bytes_done,
+                bytes_total: p.bytes_total,
+                current_path: p.current_path,
+            });
+        })
+        .await
+}
+
 #[tauri::command]
 pub async fn repair_build(state: State<'_, AppState>, profile: String) -> Result<u64, String> {
-    if state.game_token.lock().await.is_some() {
+    refuse_while_syncing(&state)?;
+    if state.game.lock().await.is_some() {
         return Err("Сначала закройте игру".into());
     }
     tracing::info!("checking every file of {profile}");
@@ -681,11 +800,14 @@ pub async fn repair_build(state: State<'_, AppState>, profile: String) -> Result
 }
 
 #[tauri::command]
-pub async fn cancel_job(state: State<'_, AppState>, job: String) -> Result<(), String> {
-    if let Some(token) = state.jobs.lock().await.get(&job) {
-        token.cancel();
+pub fn cancel_sync(state: State<'_, AppState>) {
+    let slot = state
+        .sync_job
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(job) = slot.as_ref() {
+        job.token.cancel();
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -693,7 +815,11 @@ pub async fn launch(
     app: AppHandle,
     state: State<'_, AppState>,
     profile: String,
-) -> Result<(), String> {
+) -> Result<u64, Failure> {
+    let mut running = state.game.lock().await;
+    if running.is_some() {
+        return Err("Игра уже запущена".into());
+    }
     let game = state
         .auth
         .game_session()
@@ -723,63 +849,122 @@ pub async fn launch(
             .await
             .map_err(|e| player_error(&format!("discarding broken files of {profile}"), e))?;
         tracing::info!("discarded {discarded} broken file(s) of {profile}");
-        return Err(format!(
-            "Файлы сборки повреждены ({}) и удалены. Нажмите «Обновить», чтобы скачать их заново.",
+        return Err(Failure::retryable(format!(
+            "Файлы сборки повреждены ({}) и удалены. Нажмите «Повторить», чтобы скачать их заново",
             broken.len()
-        ));
+        )));
     }
     tracing::info!("launching {profile}");
 
-    let mut child = state
+    let child = state
         .core
         .launch(&profile, &game, &authlib, env!("LAMINARA_VERSION"))
         .await
         .map_err(|e| player_error(&format!("launch failed for {profile}"), e))?;
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let token = CancellationToken::new();
-    *state.game_token.lock().await = Some(token.clone());
+    let game = console::watch(app.clone(), state.game_log.clone(), &profile, child);
+    let session = game.session;
+    *running = Some(game);
+    drop(running);
 
-    tokio::spawn(async move {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-        if let Some(out) = stdout {
-            let app = app.clone();
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(out).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    let _ = app.emit("game:log", line);
-                }
-            });
+    if state.core.game_console() {
+        if let Err(error) = console::open_window(&app) {
+            tracing::warn!(%error, "консоль игры не открылась при запуске");
         }
-        if let Some(err) = stderr {
-            let app = app.clone();
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(err).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    let _ = app.emit("game:log", line);
-                }
-            });
-        }
-        let status = tokio::select! {
-            status = child.wait() => status.ok(),
-            _ = token.cancelled() => {
-                let _ = child.kill().await;
-                child.wait().await.ok()
-            }
-        };
-        let code = status.and_then(|s| s.code()).unwrap_or(-1);
-        *app.state::<AppState>().game_token.lock().await = None;
-        let _ = app.emit("game:exit", code);
-    });
+    }
+    Ok(session)
+}
 
-    Ok(())
+#[tauri::command]
+pub async fn game_console_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    Ok(console::lock(&state.game_log).snapshot())
+}
+
+#[tauri::command]
+pub fn game_log_tail(state: State<'_, AppState>, lines: usize) -> Vec<GameLine> {
+    console::lock(&state.game_log).tail(lines)
+}
+
+#[tauri::command]
+pub async fn player_face(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(game) = state.auth.game_session() else {
+        return Ok(None);
+    };
+    let skin = match state.core.player_skin(&game.uuid).await {
+        Ok(Some(url)) => url,
+        Ok(None) => return Ok(None),
+        Err(error) => {
+            tracing::warn!(%error, "профиль игрока не загрузился, в шапке остаётся прежнее лицо");
+            return Err(player_message(&error));
+        }
+    };
+    let mut cached = state.face.lock().await;
+    if let Some((url, face)) = cached.as_ref() {
+        if *url == skin {
+            return Ok(Some(face.clone()));
+        }
+    }
+    match state.core.player_face(&skin).await {
+        Ok(face) => {
+            *cached = Some((skin, face.clone()));
+            Ok(Some(face))
+        }
+        Err(error) => {
+            tracing::warn!(%error, %skin, "лицо скина не собралось, в шапке остаётся прежнее");
+            Err(player_message(&error))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn open_game_console(app: AppHandle) -> Result<(), String> {
+    console::open_window(&app).map_err(|error| {
+        tracing::error!(%error, "окно консоли не открылось");
+        "Не удалось открыть консоль игры".to_string()
+    })
+}
+
+#[tauri::command]
+pub async fn send_launcher_log(state: State<'_, AppState>) -> Result<String, String> {
+    let path = crate::logging::log_file(&state.log_dir);
+    let log = crate::logging::tail(&path, crate::REPORT_LOG_BYTES).map_err(|error| {
+        tracing::warn!(%error, path = %path.display(), "журнал лаунчера не прочитался");
+        "Журнал лаунчера не прочитался".to_string()
+    })?;
+    state
+        .core
+        .report_launcher_log(log)
+        .await
+        .map_err(|e| player_error("launcher log report", e))
+}
+
+#[tauri::command]
+pub async fn open_launcher_logs(state: State<'_, AppState>) -> Result<(), String> {
+    open_in_system(Opened::Folder(&state.log_dir)).map_err(|error| {
+        tracing::error!(%error, "папка журнала лаунчера не открылась");
+        "Не удалось открыть папку с журналом".to_string()
+    })
+}
+
+#[tauri::command]
+pub async fn open_game_logs(state: State<'_, AppState>) -> Result<(), String> {
+    let build = console::lock(&state.game_log).build().to_string();
+    if build.is_empty() {
+        return Err("Игра ещё не запускалась".into());
+    }
+    let game_dir = state.core.game_dir(&build);
+    let logs = game_dir.join("logs");
+    let folder = if logs.is_dir() { logs } else { game_dir };
+    open_in_system(Opened::Folder(&folder)).map_err(|error| {
+        tracing::error!(%error, folder = %folder.display(), "папка журналов не открылась");
+        "Не удалось открыть папку с журналами".to_string()
+    })
 }
 
 #[tauri::command]
 pub async fn stop(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(token) = state.game_token.lock().await.take() {
-        token.cancel();
+    if let Some(game) = state.game.lock().await.as_ref() {
+        game.token.cancel();
     }
     Ok(())
 }
@@ -798,6 +983,7 @@ pub struct GeneralSettings {
     default_memory_mb: u32,
     endpoints: Vec<EndpointDto>,
     version: String,
+    game_console: bool,
 }
 
 #[derive(Serialize)]
@@ -823,6 +1009,7 @@ pub fn general_settings(state: State<'_, AppState>) -> GeneralSettings {
             })
             .collect(),
         version: env!("LAMINARA_VERSION").into(),
+        game_console: state.core.game_console(),
     }
 }
 
@@ -833,6 +1020,7 @@ pub fn branding() -> serde_json::Value {
 
 #[tauri::command]
 pub async fn collect_garbage(state: State<'_, AppState>) -> Result<u64, String> {
+    refuse_while_syncing(&state)?;
     let removed = state
         .core
         .collect_garbage()
@@ -840,6 +1028,14 @@ pub async fn collect_garbage(state: State<'_, AppState>) -> Result<u64, String> 
         .map_err(|e| player_error("collect garbage", e))?;
     tracing::info!("cas gc removed {removed} object(s)");
     Ok(removed)
+}
+
+#[tauri::command]
+pub fn set_game_console(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    state
+        .core
+        .set_game_console(enabled)
+        .map_err(|e| player_error("set game console", e))
 }
 
 #[tauri::command]
@@ -1080,14 +1276,8 @@ mod tests {
 
     #[test]
     fn sync_event_fields_are_camel_case() {
-        let started = serde_json::to_string(&SyncEvent::Started {
-            files_total: 4432,
-            bytes_total: 1104859674,
-        })
-        .unwrap();
-        assert!(started.contains("\"event\":\"started\""), "{started}");
-        assert!(started.contains("\"filesTotal\":4432"), "{started}");
-        assert!(started.contains("\"bytesTotal\":1104859674"), "{started}");
+        let started = serde_json::to_string(&SyncEvent::Started).unwrap();
+        assert_eq!(started, "{\"event\":\"started\"}");
 
         let progress = serde_json::to_string(&SyncEvent::Progress {
             stage: "downloading".into(),
@@ -1166,7 +1356,7 @@ pub async fn apply_update(
     version: String,
     on_event: Channel<UpdateProgress>,
 ) -> Result<(), String> {
-    if state.game_token.lock().await.is_some() {
+    if state.game.lock().await.is_some() {
         return Err("Сначала закройте игру".into());
     }
     let channel = on_event.clone();
@@ -1203,8 +1393,15 @@ pub async fn report_crash(
     build_version: String,
     loader: String,
     exit_code: i32,
-    log: String,
+    session: u64,
 ) -> Result<String, String> {
+    let log = {
+        let log = console::lock(&state.game_log);
+        if log.session() != session {
+            return Err("Журнал этой игры уже сменился новым запуском".into());
+        }
+        log.tail_text(crate::REPORT_LOG_BYTES)
+    };
     state
         .core
         .report_crash(build, build_version, loader, exit_code, log)

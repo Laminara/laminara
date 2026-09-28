@@ -159,7 +159,7 @@ pub fn compare(a: &str, b: &str) -> i32 {
     0
 }
 
-use crate::error::CoreError;
+use crate::error::{describe, CoreError};
 use crate::transport::Transport;
 use std::path::{Path, PathBuf};
 
@@ -195,9 +195,9 @@ pub async fn download_artifact(
         .get(&url)
         .send()
         .await
-        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?
+        .map_err(|e| CoreError::Launch(format!("download launcher: {}", describe(&e))))?
         .error_for_status()
-        .map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
+        .map_err(|e| CoreError::Launch(format!("download launcher: {}", describe(&e))))?;
 
     let limit = object.size;
     let mut file = std::fs::File::create(&dest)
@@ -206,7 +206,7 @@ pub async fn download_artifact(
     let mut done = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| CoreError::Launch(format!("download launcher: {e}")))?;
+        let chunk = chunk.map_err(|e| CoreError::Launch(format!("download launcher: {}", describe(&e))))?;
         hasher.update(&chunk);
         done += chunk.len() as u64;
         if done > limit {

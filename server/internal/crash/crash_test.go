@@ -168,3 +168,87 @@ func TestUnknownDeliveryIsRefused(t *testing.T) {
 		t.Fatal("опечатка в способе доставки должна остановить запуск")
 	}
 }
+
+func launcherLog() crash.Report {
+	return crash.Report{
+		Kind:     crash.LauncherLog,
+		Log:      "WARN laminara_core::sync: файл не скачался",
+		Details:  map[string]string{"launcher": "1.15.0", "os": "Windows 11"},
+		Happened: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC),
+	}
+}
+
+func onDisk(t *testing.T, dir string, extra map[string]any) *crash.Service {
+	t.Helper()
+	settings := map[string]any{
+		"enabled": true,
+		"sinks":   map[string]any{"на диск": map[string]any{"type": "file", "config": map[string]string{"dir": dir}}},
+	}
+	for key, value := range extra {
+		settings[key] = value
+	}
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg crash.Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	service, err := crash.New(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func TestALauncherLogIsNamedAsSuch(t *testing.T) {
+	dir := t.TempDir()
+	report := launcherLog()
+	report.Player = "Dela1s"
+	if err := onDisk(t, dir, nil).Accept(context.Background(), report, quiet()); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), "-launcher.log") {
+		t.Fatalf("файл журнала лаунчера назван не так: %v", entries)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if !strings.Contains(string(body), "Dela1s — журнал лаунчера") {
+		t.Fatalf("заголовок не говорит, что это журнал лаунчера:\n%s", body)
+	}
+	if strings.Contains(string(body), "Код выхода") || strings.Contains(string(body), "падение") {
+		t.Fatalf("у журнала лаунчера нет кода выхода и это не падение:\n%s", body)
+	}
+	if report.FileName() != "launcher.log" || sample().FileName() != "crash.log" {
+		t.Fatal("вложение в Discord и Telegram должно называться по виду отчёта")
+	}
+}
+
+func TestAnAnonymousLogIsLimitedByAddress(t *testing.T) {
+	dir := t.TempDir()
+	service := onDisk(t, dir, map[string]any{"anonymousPerHour": 2})
+	for i := 0; i < 2; i++ {
+		if err := service.AcceptAnonymous(context.Background(), launcherLog(), "203.0.113.7", quiet()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.AcceptAnonymous(context.Background(), launcherLog(), "203.0.113.7", quiet()); err == nil {
+		t.Fatal("третий журнал без входа с того же адреса за час должен быть отклонён")
+	}
+	if err := service.AcceptAnonymous(context.Background(), launcherLog(), "198.51.100.4", quiet()); err != nil {
+		t.Fatalf("соседний адрес не должен страдать от чужого лимита: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	body, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if !strings.Contains(string(body), "без входа") || !strings.Contains(string(body), "Адрес: ") {
+		t.Fatalf("анонимный журнал должен говорить, что игрок не вошёл, и откуда он:\n%s", body)
+	}
+}
+
+func TestTheOperatorCanRefuseAnonymousLogs(t *testing.T) {
+	service := onDisk(t, t.TempDir(), map[string]any{"anonymous": false})
+	if err := service.AcceptAnonymous(context.Background(), launcherLog(), "203.0.113.7", quiet()); err == nil {
+		t.Fatal("выключенные анонимные журналы не должны приниматься")
+	}
+}

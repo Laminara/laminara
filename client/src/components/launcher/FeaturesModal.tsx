@@ -38,7 +38,23 @@ export function FeaturesModal({ profile }: { profile: string }) {
   };
 
   return (
-    <Modal title="Моды" subtitle={profile} onClose={close}>
+    <Modal
+      title="Моды"
+      subtitle={profile}
+      onClose={close}
+      footer={
+        model && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setSelected({})}>
+              Сбросить
+            </Button>
+            <Button onClick={() => void save()} className="px-6">
+              Сохранить
+            </Button>
+          </>
+        )
+      }
+    >
       {trouble && <div className="mb-4 rounded-lg bg-danger/15 px-3 py-2 text-sm text-danger">{trouble}</div>}
       {!model && !trouble && <div className="text-sm text-dim">Загружаю список модов…</div>}
       {model && (
@@ -54,15 +70,6 @@ export function FeaturesModal({ profile }: { profile: string }) {
               onChange={onChange}
             />
           ))}
-
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <Button variant="ghost" size="sm" onClick={() => setSelected({})}>
-              Сбросить
-            </Button>
-            <Button onClick={() => void save()} className="px-6">
-              Сохранить
-            </Button>
-          </div>
         </div>
       )}
     </Modal>

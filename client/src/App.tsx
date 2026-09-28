@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useLauncher } from "@/store";
+import { cn } from "@/lib/format";
 import { HeroMedia } from "@/components/launcher/HeroMedia";
 import { TitleBar } from "@/components/launcher/TitleBar";
 import { Header } from "@/components/launcher/Header";
@@ -18,14 +19,17 @@ import { CrashModal } from "@/components/launcher/CrashModal";
 import { UpdateBanner } from "@/components/launcher/UpdateBanner";
 import { UpdateOverlay } from "@/components/launcher/UpdateOverlay";
 import { ErrorToast } from "@/components/launcher/ErrorToast";
+import { ModalPresence } from "@/components/ui/Modal";
 
 export default function App() {
   const init = useLauncher((state) => state.init);
   const unbindListeners = useLauncher((state) => state.unbindListeners);
   const phase = useLauncher((state) => state.phase);
   const modal = useLauncher((state) => state.modal);
+  const crash = useLauncher((state) => state.crash);
   const refreshPlayers = useLauncher((state) => state.refreshPlayers);
   const refreshBuilds = useLauncher((state) => state.refreshBuilds);
+  const refreshFace = useLauncher((state) => state.refreshFace);
 
   useEffect(() => {
     void init();
@@ -39,13 +43,16 @@ export default function App() {
 
   useEffect(() => {
     const id = setInterval(() => void refreshBuilds(), 20000);
-    const onFocus = () => void refreshBuilds();
+    const onFocus = () => {
+      void refreshBuilds();
+      void refreshFace();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshBuilds]);
+  }, [refreshBuilds, refreshFace]);
 
   const isHome = phase !== "connecting" && phase !== "login" && phase !== "updating";
 
@@ -71,7 +78,7 @@ export default function App() {
       {isHome && <UpdateBanner />}
 
       {isHome && (
-        <div className="relative z-10 flex flex-1 flex-col">
+        <div inert={phase === "syncing"} className={cn("relative z-10 flex flex-1 flex-col", phase === "syncing" && "pointer-events-none")}>
           <Header />
           <main className="flex min-h-0 flex-1 justify-between gap-8 overflow-hidden">
             <div className="flex min-h-0 flex-1 flex-col justify-end overflow-hidden">
@@ -86,12 +93,18 @@ export default function App() {
 
       {phase === "syncing" && <SyncOverlay />}
 
-      {modal?.kind === "general" && <GeneralSettingsModal />}
-      {modal?.kind === "build" && <BuildSettingsModal profile={modal.profile} />}
-      {modal?.kind === "features" && <FeaturesModal profile={modal.profile} />}
-      {modal?.kind === "library" && <LibraryModal />}
-      {modal?.kind === "news" && <NewsModal />}
-      <CrashModal />
+      <ModalPresence value={modal}>
+        {(active) => (
+          <>
+            {active.kind === "general" && <GeneralSettingsModal />}
+            {active.kind === "build" && <BuildSettingsModal profile={active.profile} />}
+            {active.kind === "features" && <FeaturesModal profile={active.profile} />}
+            {active.kind === "library" && <LibraryModal />}
+            {active.kind === "news" && <NewsModal />}
+          </>
+        )}
+      </ModalPresence>
+      <ModalPresence value={crash}>{(shown) => <CrashModal crash={shown} />}</ModalPresence>
       <ErrorToast />
     </div>
   );

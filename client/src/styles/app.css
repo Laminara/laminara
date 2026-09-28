@@ -21,6 +21,7 @@
   --color-dim: var(--lm-dim);
   --color-mute: var(--lm-mute);
   --color-online: var(--lm-online);
+  --color-warn: var(--lm-warn);
   --color-danger: var(--lm-danger);
 
   --radius-sm: var(--lm-radius-sm);
@@ -28,9 +29,38 @@
   --radius-lg: var(--lm-radius-lg);
 
   --font-sans: var(--lm-font-sans);
+  --font-mono: var(--lm-font-mono);
 
   --shadow-panel: var(--lm-shadow);
   --shadow-online: 0 0 10px var(--lm-online);
+
+  --animate-modal-backdrop-in: lm-fade-in 200ms ease-out;
+  --animate-modal-backdrop-out: lm-fade-out 150ms ease-in forwards;
+  --animate-modal-in: lm-modal-in 200ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-modal-out: lm-modal-out 150ms ease-in forwards;
+
+  @keyframes lm-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes lm-fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes lm-modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+  }
+  @keyframes lm-modal-out {
+    to {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+  }
 }
 
 html,

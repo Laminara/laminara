@@ -1,3 +1,5 @@
+pub mod head;
+
 use std::path::Path;
 
 use base64::Engine;
@@ -108,14 +110,14 @@ pub async fn authenticate(
     let response = builder
         .send()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
+        .map_err(CoreError::from)?;
     if !response.status().is_success() {
         return Err(failure(response, "authenticate").await);
     }
     let auth: AuthenticateResponse = response
         .json()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
+        .map_err(CoreError::from)?;
     Ok(GameSession {
         uuid: auth.selected_profile.id,
         name: auth.selected_profile.name,
@@ -153,14 +155,14 @@ pub async fn refresh(
         .json(&request)
         .send()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
+        .map_err(CoreError::from)?;
     if !response.status().is_success() {
         return Err(failure(response, "refresh").await);
     }
     let auth: AuthenticateResponse = response
         .json()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
+        .map_err(CoreError::from)?;
     Ok(GameSession {
         uuid: auth.selected_profile.id,
         name: auth.selected_profile.name,
@@ -171,6 +173,27 @@ pub async fn refresh(
 
 const MAX_PREFETCH_BYTES: usize = 4 << 20;
 
+async fn read_limited(
+    mut response: reqwest::Response,
+    limit: usize,
+    request: &str,
+) -> Result<Vec<u8>, CoreError> {
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(CoreError::from)?
+    {
+        if bytes.len() + chunk.len() > limit {
+            return Err(CoreError::Transport(format!(
+                "сервер прислал больше {limit} байт в ответ на {request}"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 pub async fn prefetch(transport: &Transport, base_url: &str) -> Result<String, CoreError> {
     let url = format!("{}/yggdrasil/", base_url.trim_end_matches('/'));
     let response = transport
@@ -178,21 +201,8 @@ pub async fn prefetch(transport: &Transport, base_url: &str) -> Result<String, C
         .get(&url)
         .send()
         .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?;
-    let mut response = response;
-    let mut bytes: Vec<u8> = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| CoreError::Transport(e.to_string()))?
-    {
-        if bytes.len() + chunk.len() > MAX_PREFETCH_BYTES {
-            return Err(CoreError::Transport(format!(
-                "сервер прислал больше {MAX_PREFETCH_BYTES} байт в ответ на запрос yggdrasil"
-            )));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+        .map_err(CoreError::from)?;
+    let bytes = read_limited(response, MAX_PREFETCH_BYTES, "запрос yggdrasil").await?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 

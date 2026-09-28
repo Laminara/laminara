@@ -1,9 +1,9 @@
 mod auth;
 mod baked;
 mod commands;
+mod console;
 mod logging;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -16,11 +16,28 @@ use laminara_core::Core;
 
 use auth::AuthManager;
 
+pub const REPORT_LOG_BYTES: usize = 256 * 1024;
+
+pub struct RunningGame {
+    pub session: u64,
+    pub token: CancellationToken,
+}
+
+pub struct SyncJob {
+    pub id: u64,
+    pub build: String,
+    pub token: CancellationToken,
+}
+
 pub struct AppState {
     pub core: Core,
     pub auth: AuthManager,
-    pub jobs: Mutex<HashMap<String, CancellationToken>>,
-    pub game_token: Mutex<Option<CancellationToken>>,
+    pub sync_job: std::sync::Mutex<Option<SyncJob>>,
+    pub sync_jobs_started: std::sync::atomic::AtomicU64,
+    pub game: Mutex<Option<RunningGame>>,
+    pub game_log: console::SharedLog,
+    pub face: Mutex<Option<(String, String)>>,
+    pub log_dir: PathBuf,
     pub authlib_jar: PathBuf,
 }
 
@@ -151,6 +168,7 @@ fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientCon
         default_memory_mb: 4096,
         build_settings: std::collections::HashMap::new(),
         stale_update: None,
+        game_console: false,
     };
     config.save(&file).map_err(|e| e.to_string())?;
     Ok(config)
@@ -177,8 +195,12 @@ fn init_state() -> Result<AppState, String> {
     Ok(AppState {
         core,
         auth: AuthManager::default(),
-        jobs: Mutex::new(HashMap::new()),
-        game_token: Mutex::new(None),
+        sync_job: std::sync::Mutex::new(None),
+        sync_jobs_started: std::sync::atomic::AtomicU64::new(0),
+        game: Mutex::new(None),
+        game_log: console::SharedLog::default(),
+        face: Mutex::new(None),
+        log_dir: logging::log_dir(&data_dir),
         authlib_jar,
     })
 }
@@ -191,7 +213,7 @@ fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
-fn branding_icon() -> Option<tauri::image::Image<'static>> {
+pub(crate) fn branding_icon() -> Option<tauri::image::Image<'static>> {
     let branding = embedded_branding();
     let uri = branding.get("logoDataUri")?.as_str()?;
     let bytes = decode_data_uri(uri)?;
@@ -204,17 +226,27 @@ fn branding_icon() -> Option<tauri::image::Image<'static>> {
     }
 }
 
+fn branding_text(key: &str) -> Option<String> {
+    embedded_branding()
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub(crate) fn window_title(app: &tauri::AppHandle, section: &str) -> String {
+    let project = branding_text("windowTitle").unwrap_or_else(|| app.package_info().name.clone());
+    format!("{project} — {section}")
+}
+
 fn wear_branding(app: &tauri::App) {
     use tauri::Manager;
     let icon = branding_icon();
     if icon.is_none() {
         tracing::info!("в оформлении проекта нет логотипа — окно остаётся с иконкой по умолчанию");
     }
-    let title = embedded_branding()
-        .get("windowTitle")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-        .filter(|value| !value.trim().is_empty());
+    let title = branding_text("windowTitle");
 
     for (label, window) in app.webview_windows() {
         if let Some(icon) = icon.clone() {
@@ -238,7 +270,7 @@ pub fn run() {
     let name = storage_name();
     let data_dir = adopt_legacy(dirs::data_dir(), &name);
     adopt_legacy(dirs::config_dir(), &name);
-    let log_dir = data_dir.map(|dir| dir.join("logs"));
+    let log_dir = data_dir.map(|dir| logging::log_dir(&dir));
     let _log_guard = log_dir.as_ref().and_then(|dir| logging::init(dir));
     tracing::info!(
         version = env!("LAMINARA_VERSION"),
@@ -247,6 +279,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if window.label() != console::WINDOW_LABEL
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                console::close_window(window.app_handle());
+            }
+        })
         .setup(|app| {
             use tauri::Manager;
             wear_branding(app);
@@ -268,7 +308,7 @@ pub fn run() {
             commands::restore_session,
             commands::list_builds,
             commands::sync_profile,
-            commands::cancel_job,
+            commands::cancel_sync,
             commands::launch,
             commands::stop,
             commands::player_counts,
@@ -286,6 +326,14 @@ pub fn run() {
             commands::check_update,
             commands::apply_update,
             commands::report_crash,
+            commands::game_console_snapshot,
+            commands::game_log_tail,
+            commands::open_game_console,
+            commands::open_game_logs,
+            commands::set_game_console,
+            commands::player_face,
+            commands::send_launcher_log,
+            commands::open_launcher_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Laminara");

@@ -53,6 +53,7 @@ export interface GeneralSettings {
   defaultMemoryMb: number;
   endpoints: { id: string; baseUrl: string }[];
   version: string;
+  gameConsole: boolean;
 }
 
 export interface BuildSettings {
@@ -128,13 +129,66 @@ export interface SyncState {
 }
 
 export type SyncEvent =
-  | { event: "started"; data: { filesTotal: number; bytesTotal: number } }
+  | { event: "started" }
   | {
       event: "progress";
       data: { stage: string; filesDone: number; filesTotal: number; bytesDone: number; bytesTotal: number; currentPath?: string };
     }
   | { event: "finished"; data: { downloaded: number; skipped: number; pruned: number } }
   | { event: "failed"; data: { message: string } };
+
+export type GameStream = "out" | "err";
+
+export type GameLevel = "debug" | "info" | "warn" | "error";
+
+export interface GameLine {
+  seq: number;
+  stream: GameStream;
+  level: GameLevel;
+  text: string;
+}
+
+export type GameStatus = { state: "idle" } | { state: "running" } | { state: "exited"; code: number; stopped: boolean };
+
+export interface GameConsoleSnapshot {
+  session: number;
+  build: string;
+  status: GameStatus;
+  dropped: number;
+  limit: number;
+  textLimit: number;
+  lines: GameLine[];
+}
+
+export interface GameStarted {
+  session: number;
+  build: string;
+}
+
+export interface GameLogBatch {
+  session: number;
+  lines: GameLine[];
+}
+
+export interface GameExit {
+  session: number;
+  build: string;
+  code: number;
+  stopped: boolean;
+}
+
+export type AppView = "main" | "console";
+
+export type LogReport =
+  | { state: "idle" }
+  | { state: "sending" }
+  | { state: "sent"; message: string }
+  | { state: "failed"; message: string };
+
+export interface Problem {
+  message: string;
+  retry: boolean;
+}
 
 export type LoginFailure = { kind: "secondFactor" | "failed"; message: string };
 

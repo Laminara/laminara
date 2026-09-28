@@ -11,50 +11,71 @@ import (
 	"github.com/laminara/laminara/server/internal/crash"
 )
 
+var errReportsOff = errors.New("сервер не принимает отчёты")
+
 func (s *Service) ReportCrash(ctx context.Context, req *connect.Request[apiv1.ReportCrashRequest]) (*connect.Response[apiv1.ReportCrashResponse], error) {
 	subject, state := s.subjectOf(ctx, req.Header())
 	if state != tokenValid {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errStaleSession)
 	}
 	if s.crashes == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("сервер не принимает отчёты о падениях"))
+		return nil, connect.NewError(connect.CodeUnimplemented, errReportsOff)
 	}
 	incoming := req.Msg.Crash
 	if incoming == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("отчёт пуст"))
 	}
 
-	log := incoming.Log
+	report := describedReport(crash.GameCrash, incoming.Log, incoming.Details, incoming.HappenedAtUnixNanos)
+	report.Player = subject.Username
+	report.UUID = subject.UUID
+	report.Build = incoming.Build
+	report.Version = incoming.BuildVersion
+	report.Loader = incoming.Loader
+	report.ExitCode = incoming.ExitCode
+
+	if err := s.crashes.Accept(context.WithoutCancel(ctx), report, s.log); err != nil {
+		return connect.NewResponse(&apiv1.ReportCrashResponse{Accepted: false, Message: err.Error()}), nil
+	}
+	return connect.NewResponse(&apiv1.ReportCrashResponse{Accepted: true, Message: "Отчёт отправлен, спасибо"}), nil
+}
+
+func (s *Service) ReportLauncherLog(ctx context.Context, req *connect.Request[apiv1.ReportLauncherLogRequest]) (*connect.Response[apiv1.ReportLauncherLogResponse], error) {
+	if s.crashes == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errReportsOff)
+	}
+	incoming := req.Msg.Report
+	if incoming == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("журнал пуст"))
+	}
+
+	report := describedReport(crash.LauncherLog, incoming.Log, incoming.Details, incoming.HappenedAtUnixNanos)
+	var err error
+	if subject, state := s.subjectOf(ctx, req.Header()); state == tokenValid {
+		report.Player = subject.Username
+		report.UUID = subject.UUID
+		err = s.crashes.Accept(context.WithoutCancel(ctx), report, s.log)
+	} else {
+		address := s.proxies.Of(req.Header(), req.Peer().Addr)
+		err = s.crashes.AcceptAnonymous(context.WithoutCancel(ctx), report, address, s.log)
+	}
+	if err != nil {
+		return connect.NewResponse(&apiv1.ReportLauncherLogResponse{Accepted: false, Message: err.Error()}), nil
+	}
+	return connect.NewResponse(&apiv1.ReportLauncherLogResponse{Accepted: true, Message: "Журнал отправлен, спасибо"}), nil
+}
+
+func describedReport(kind crash.Kind, log string, details map[string]string, happenedNanos int64) crash.Report {
 	if len(log) > crash.MaxLogBytes {
 		log = log[len(log)-crash.MaxLogBytes:]
 	}
 	happened := time.Now()
-	if incoming.HappenedAtUnixNanos > 0 {
-		happened = time.Unix(0, incoming.HappenedAtUnixNanos)
+	if happenedNanos > 0 {
+		happened = time.Unix(0, happenedNanos)
 	}
-
-	details := incoming.Details
-	if len(details) > crash.MaxDetails {
-		trimmed := make(map[string]string, crash.MaxDetails)
-		for key, value := range details {
-			if len(trimmed) >= crash.MaxDetails {
-				break
-			}
-			if len(value) > crash.MaxDetailBytes {
-				value = value[:crash.MaxDetailBytes]
-			}
-			trimmed[key] = value
-		}
-		details = trimmed
-	}
-
-	report := crash.Report{
-		Player:    subject.Username,
-		UUID:      subject.UUID,
-		Build:     incoming.Build,
-		Version:   incoming.BuildVersion,
-		Loader:    incoming.Loader,
-		ExitCode:  incoming.ExitCode,
+	details = boundedDetails(details)
+	return crash.Report{
+		Kind:      kind,
 		Log:       log,
 		Details:   details,
 		Happened:  happened,
@@ -62,12 +83,21 @@ func (s *Service) ReportCrash(ctx context.Context, req *connect.Request[apiv1.Re
 		Platform:  details["platform"],
 		OSVersion: details["os"],
 	}
+}
 
-	if err := s.crashes.Accept(context.WithoutCancel(ctx), report, s.log); err != nil {
-		return connect.NewResponse(&apiv1.ReportCrashResponse{Accepted: false, Message: err.Error()}), nil
+func boundedDetails(details map[string]string) map[string]string {
+	if len(details) <= crash.MaxDetails {
+		return details
 	}
-	return connect.NewResponse(&apiv1.ReportCrashResponse{
-		Accepted: true,
-		Message:  "Отчёт отправлен, спасибо",
-	}), nil
+	trimmed := make(map[string]string, crash.MaxDetails)
+	for key, value := range details {
+		if len(trimmed) >= crash.MaxDetails {
+			break
+		}
+		if len(value) > crash.MaxDetailBytes {
+			value = value[:crash.MaxDetailBytes]
+		}
+		trimmed[key] = value
+	}
+	return trimmed
 }

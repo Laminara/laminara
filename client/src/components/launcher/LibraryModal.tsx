@@ -36,6 +36,7 @@ export function LibraryModal() {
           return (
             <button
               key={build.name}
+              data-no-scale
               onClick={() => {
                 select(build.name);
                 close();

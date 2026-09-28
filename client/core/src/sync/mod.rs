@@ -1,23 +1,24 @@
 pub mod statcache;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::CoreError;
+use crate::backoff;
+use crate::error::{describe, CoreError};
 use crate::features::{self, FeatureSelection};
 use crate::manifest::object_key;
 use crate::proto::core::v1::{FilePolicy, HashAlgo, Manifest, ManifestFile};
 use crate::transport::Transport;
 
 const DEFAULT_PARALLEL: usize = 8;
+const PARTIAL_SUFFIX: &str = "part";
 pub(crate) const LEDGER_FILE: &str = "installed.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,117 +203,423 @@ fn is_read_only(meta: &std::fs::Metadata) -> bool {
     }
 }
 
-const OBJECT_ATTEMPTS: usize = 4;
+const OBJECT_ATTEMPTS: u32 = 6;
+const CORRUPT_LIMIT: u32 = 2;
+const RETRY_FIRST: Duration = Duration::from_secs(1);
+const RETRY_LONGEST: Duration = Duration::from_secs(15);
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+const HASH_READ_BYTES: usize = 64 * 1024;
 
-async fn ensure_object(
-    transport: &Transport,
-    base_url: &str,
-    cas_dir: &Path,
+struct Wanted {
+    hex: String,
     algo: i32,
-    expected_hex: &str,
-    value: &[u8],
+    value: Vec<u8>,
     executable: bool,
-) -> Result<(PathBuf, u64, bool), CoreError> {
-    let mut last = None;
-    for attempt in 1..=OBJECT_ATTEMPTS {
-        match fetch_object(
-            transport,
-            base_url,
-            cas_dir,
-            algo,
-            expected_hex,
-            value,
-            executable,
-        )
-        .await
-        {
-            Ok(done) => return Ok(done),
-            Err(error) => {
-                if attempt == OBJECT_ATTEMPTS {
-                    last = Some(error);
-                    break;
-                }
-                tracing::warn!(
-                    %expected_hex,
-                    attempt,
-                    %error,
-                    "файл не скачался, пробую ещё раз"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(500 << (attempt - 1))).await;
-            }
-        }
-    }
-    Err(last.unwrap_or_else(|| CoreError::Sync(format!("объект {expected_hex} не скачался"))))
+    size: u64,
+    path: String,
 }
 
-async fn fetch_object(
+struct Meter<'a> {
+    report: &'a (dyn Fn(SyncProgress) + Send + Sync),
+    files_total: u64,
+    bytes_total: u64,
+    files_done: AtomicU64,
+    bytes_done: AtomicU64,
+    current: std::sync::Mutex<Option<String>>,
+    last: std::sync::Mutex<Option<Instant>>,
+}
+
+impl Meter<'_> {
+    fn started(&self, path: &str) {
+        if let Ok(mut current) = self.current.lock() {
+            *current = Some(path.to_string());
+        }
+    }
+
+    fn gained(&self, bytes: u64) {
+        self.bytes_done.fetch_add(bytes, Ordering::Relaxed);
+        self.publish(false);
+    }
+
+    fn lost(&self, bytes: u64) {
+        let _ = self
+            .bytes_done
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |done| {
+                Some(done.saturating_sub(bytes))
+            });
+    }
+
+    fn reconcile(&self, counted: &mut u64, actual: u64) {
+        if actual > *counted {
+            self.gained(actual - *counted);
+        } else {
+            self.lost(*counted - actual);
+        }
+        *counted = actual;
+    }
+
+    fn finished_file(&self) {
+        self.files_done.fetch_add(1, Ordering::Relaxed);
+        self.publish(false);
+    }
+
+    fn publish(&self, force: bool) {
+        {
+            let Ok(mut last) = self.last.lock() else {
+                return;
+            };
+            if !force && last.is_some_and(|at| at.elapsed() < PROGRESS_EVERY) {
+                return;
+            }
+            *last = Some(Instant::now());
+        }
+        let current_path = self.current.lock().ok().and_then(|current| current.clone());
+        (self.report)(SyncProgress {
+            stage: SyncStage::Downloading,
+            files_done: self.files_done.load(Ordering::Relaxed),
+            files_total: self.files_total,
+            bytes_done: self.bytes_done.load(Ordering::Relaxed),
+            bytes_total: self.bytes_total,
+            current_path,
+        });
+    }
+}
+
+enum Attempt {
+    Again(CoreError),
+    Corrupt(CoreError),
+    Final(CoreError),
+}
+
+fn object_mode(executable: bool) -> u32 {
+    if executable {
+        0o555
+    } else {
+        0o444
+    }
+}
+
+fn partial_path(cas_path: &Path) -> PathBuf {
+    cas_path.with_extension(PARTIAL_SUFFIX)
+}
+
+fn partial_len(partial: &Path) -> u64 {
+    std::fs::metadata(partial)
+        .map(|meta| meta.len())
+        .unwrap_or(0)
+}
+
+fn retryable_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || matches!(status.as_u16(), 401 | 408 | 425 | 429)
+}
+
+fn network_error(wanted: &Wanted, error: &reqwest::Error) -> CoreError {
+    CoreError::Transport(format!("{}: {}", wanted.path, describe(error)))
+}
+
+fn disk_error(wanted: &Wanted, error: std::io::Error) -> Attempt {
+    Attempt::Final(CoreError::Io(format!("{}: {error}", wanted.path)))
+}
+
+fn cancelled(token: &CancellationToken) -> Result<(), CoreError> {
+    if token.is_cancelled() {
+        Err(CoreError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+async fn download_or_abort(
     transport: &Transport,
     base_url: &str,
     cas_dir: &Path,
-    algo: i32,
-    expected_hex: &str,
-    value: &[u8],
-    executable: bool,
-) -> Result<(PathBuf, u64, bool), CoreError> {
-    let key = object_key(algo, value);
-    let cas_path = cas_dir.join(&key);
-    let object_mode = if executable { 0o555 } else { 0o444 };
-
-    if let Ok(meta) = std::fs::metadata(&cas_path) {
-        set_mode(&cas_path, object_mode);
-        return Ok((cas_path, meta.len(), false));
+    object: &Wanted,
+    meter: &Meter<'_>,
+    abort: &CancellationToken,
+) -> Result<u64, CoreError> {
+    if abort.is_cancelled() {
+        return Err(CoreError::Cancelled);
     }
+    let result = tokio::select! {
+        _ = abort.cancelled() => Err(CoreError::Cancelled),
+        result = download(transport, base_url, cas_dir, object, meter, abort) => result,
+    };
+    if result.is_err() {
+        abort.cancel();
+    }
+    result.map(|()| object.size)
+}
 
+async fn download(
+    transport: &Transport,
+    base_url: &str,
+    cas_dir: &Path,
+    wanted: &Wanted,
+    meter: &Meter<'_>,
+    cancel: &CancellationToken,
+) -> Result<(), CoreError> {
+    let cas_path = cas_dir.join(object_key(wanted.algo, &wanted.value));
+    let partial = partial_path(&cas_path);
     let parent = cas_path
         .parent()
         .ok_or_else(|| CoreError::Sync("cas path has no parent".into()))?;
     tokio::fs::create_dir_all(parent).await?;
-
-    let url = format!("{}/objects/{}", base_url.trim_end_matches('/'), key);
-    let response = transport
-        .authorize(transport.client().get(&url))
-        .send()
-        .await
-        .map_err(|e| CoreError::Sync(format!("get {expected_hex}: {e}")))?
-        .error_for_status()
-        .map_err(|e| CoreError::Sync(format!("get {expected_hex}: {e}")))?;
-
-    let mut temp = tempfile::Builder::new()
-        .prefix(".lam-")
-        .tempfile_in(parent)
-        .map_err(|e| CoreError::Sync(e.to_string()))?;
-    let mut hasher = Hasher::for_algo(algo);
-    let mut size = 0u64;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| CoreError::Sync(format!("stream {expected_hex}: {e}")))?;
-        hasher.update(&chunk);
-        size += chunk.len() as u64;
-        temp.as_file_mut()
-            .write_all(&chunk)
-            .map_err(|e| CoreError::Sync(e.to_string()))?;
+    meter.started(&wanted.path);
+    let mut counted = partial_len(&partial).min(wanted.size);
+    let mut attempt = 0;
+    let mut corrupt = 0;
+    loop {
+        attempt += 1;
+        let outcome = fetch(
+            transport,
+            base_url,
+            wanted,
+            &cas_path,
+            &partial,
+            &mut counted,
+            meter,
+        )
+        .await;
+        let error = match outcome {
+            Ok(()) => {
+                meter.finished_file();
+                return Ok(());
+            }
+            Err(Attempt::Final(error)) => {
+                tracing::error!(path = %wanted.path, hex = %wanted.hex, %error, "файл не скачался, и повтор тут не поможет");
+                return Err(error);
+            }
+            Err(Attempt::Corrupt(error)) => {
+                corrupt += 1;
+                if corrupt >= CORRUPT_LIMIT {
+                    tracing::error!(path = %wanted.path, hex = %wanted.hex, %error, "файл дважды пришёл целиком и оба раза не сошёлся с хешем: на сервере он испорчен");
+                    return Err(error);
+                }
+                error
+            }
+            Err(Attempt::Again(error)) => error,
+        };
+        if attempt == OBJECT_ATTEMPTS {
+            tracing::error!(path = %wanted.path, hex = %wanted.hex, %error, "файл так и не скачался за {OBJECT_ATTEMPTS} попыток");
+            return Err(error);
+        }
+        let pause = backoff::pause(attempt, RETRY_FIRST, RETRY_LONGEST);
+        tracing::warn!(path = %wanted.path, hex = %wanted.hex, attempt, ?pause, %error, "файл не скачался, пробую ещё раз");
+        tokio::select! {
+            _ = cancel.cancelled() => return Err(CoreError::Cancelled),
+            _ = tokio::time::sleep(pause) => {}
+        }
     }
-    if hasher.finalize_hex() != expected_hex {
-        return Err(CoreError::Sync(format!(
-            "hash mismatch for object {expected_hex}"
-        )));
-    }
-    settle_object(temp, &cas_path, object_mode)?;
-    Ok((cas_path, size, true))
 }
 
-fn settle_object(
-    temp: tempfile::NamedTempFile,
-    cas_path: &Path,
-    object_mode: u32,
-) -> Result<(), CoreError> {
-    match temp.persist(cas_path) {
-        Ok(_) => {}
-        Err(e) => {
-            if !cas_path.exists() {
-                return Err(CoreError::Sync(format!("persist object: {e}")));
-            }
+fn lock_partial(partial: &Path) -> std::io::Result<Option<tokio::fs::File>> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(partial)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(tokio::fs::File::from_std(file))),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+async fn hash_from_start(file: &mut tokio::fs::File, hasher: &mut Hasher) -> std::io::Result<u64> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    file.seek(std::io::SeekFrom::Start(0)).await?;
+    let mut buffer = vec![0u8; HASH_READ_BYTES];
+    let mut total = 0u64;
+    loop {
+        let read = file.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(total);
         }
+        hasher.update(&buffer[..read]);
+        total += read as u64;
+    }
+}
+
+async fn empty_partial(
+    file: &mut tokio::fs::File,
+    counted: &mut u64,
+    meter: &Meter<'_>,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncSeekExt;
+
+    file.set_len(0).await?;
+    file.seek(std::io::SeekFrom::Start(0)).await?;
+    meter.reconcile(counted, 0);
+    Ok(())
+}
+
+fn range_starts_at(response: &reqwest::Response, offset: u64) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with(&format!("bytes {offset}-")))
+}
+
+async fn fetch(
+    transport: &Transport,
+    base_url: &str,
+    wanted: &Wanted,
+    cas_path: &Path,
+    partial: &Path,
+    counted: &mut u64,
+    meter: &Meter<'_>,
+) -> Result<(), Attempt> {
+    use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+
+    let mode = object_mode(wanted.executable);
+    if cas_path.exists() {
+        set_mode(cas_path, mode);
+        meter.reconcile(counted, wanted.size);
+        return Ok(());
+    }
+    let Some(mut file) = lock_partial(partial).map_err(|e| disk_error(wanted, e))? else {
+        return Err(Attempt::Again(CoreError::Sync(format!(
+            "{}: этот файл сейчас качает другой лаунчер",
+            wanted.path
+        ))));
+    };
+
+    let mut offset = file
+        .metadata()
+        .await
+        .map_err(|e| disk_error(wanted, e))?
+        .len();
+    meter.reconcile(counted, offset.min(wanted.size));
+    if offset >= wanted.size {
+        let mut hasher = Hasher::for_algo(wanted.algo);
+        let length = hash_from_start(&mut file, &mut hasher)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        if length == wanted.size && hasher.finalize_hex() == wanted.hex {
+            drop(file);
+            return settle_object(partial, cas_path, mode).map_err(Attempt::Again);
+        }
+        empty_partial(&mut file, counted, meter)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        offset = 0;
+    }
+
+    let url = format!(
+        "{}/objects/{}",
+        base_url.trim_end_matches('/'),
+        object_key(wanted.algo, &wanted.value)
+    );
+    let mut request = transport.authorize(transport.client().get(&url));
+    if offset > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| Attempt::Again(network_error(wanted, &e)))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        empty_partial(&mut file, counted, meter)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        return Err(Attempt::Again(CoreError::Sync(format!(
+            "{}: сервер не отдал хвост файла, качаю заново",
+            wanted.path
+        ))));
+    }
+    if !status.is_success() {
+        let reason = format!("{}: сервер ответил {status}", wanted.path);
+        return Err(if retryable_status(status) {
+            Attempt::Again(CoreError::Transport(reason))
+        } else {
+            Attempt::Final(CoreError::Sync(reason))
+        });
+    }
+    let resumed = offset > 0
+        && status == reqwest::StatusCode::PARTIAL_CONTENT
+        && range_starts_at(&response, offset);
+    let whole = status == reqwest::StatusCode::OK
+        && (offset == 0 || response.content_length() == Some(wanted.size));
+    if !resumed && !whole {
+        return Err(Attempt::Again(CoreError::Sync(format!(
+            "{}: сервер ответил не тем куском ({status}), недокачанное сохранено",
+            wanted.path
+        ))));
+    }
+
+    let mut hasher = Hasher::for_algo(wanted.algo);
+    if resumed {
+        hash_from_start(&mut file, &mut hasher)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        file.seek(std::io::SeekFrom::End(0))
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+    } else if offset > 0 {
+        empty_partial(&mut file, counted, meter)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut broken = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                broken = Some(network_error(wanted, &error));
+                break;
+            }
+        };
+        if *counted + chunk.len() as u64 > wanted.size {
+            empty_partial(&mut file, counted, meter)
+                .await
+                .map_err(|e| disk_error(wanted, e))?;
+            return Err(Attempt::Corrupt(CoreError::Sync(format!(
+                "{}: сервер прислал больше, чем весит файл",
+                wanted.path
+            ))));
+        }
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        *counted += chunk.len() as u64;
+        meter.gained(chunk.len() as u64);
+    }
+    file.flush().await.map_err(|e| disk_error(wanted, e))?;
+    if let Some(error) = broken {
+        return Err(Attempt::Again(error));
+    }
+    if *counted < wanted.size {
+        return Err(Attempt::Again(CoreError::Transport(format!(
+            "{}: ответ оборвался на {} из {} байт",
+            wanted.path, *counted, wanted.size
+        ))));
+    }
+    if hasher.finalize_hex() != wanted.hex {
+        empty_partial(&mut file, counted, meter)
+            .await
+            .map_err(|e| disk_error(wanted, e))?;
+        return Err(Attempt::Corrupt(CoreError::Sync(format!(
+            "{}: содержимое не совпало с хешем",
+            wanted.path
+        ))));
+    }
+    drop(file);
+    settle_object(partial, cas_path, mode).map_err(Attempt::Again)
+}
+
+fn settle_object(from: &Path, cas_path: &Path, object_mode: u32) -> Result<(), CoreError> {
+    if let Err(e) = std::fs::rename(from, cas_path) {
+        if !cas_path.exists() {
+            return Err(CoreError::Sync(format!("persist object: {e}")));
+        }
+        let _ = std::fs::remove_file(from);
     }
     set_mode(cas_path, object_mode);
     Ok(())
@@ -335,7 +642,7 @@ fn materialize_immutable(
         Ok(_) => Placement::Hardlink,
         Err(_) => {
             clone_or_copy(cas_path, &tmp)?;
-            set_mode(&tmp, if executable { 0o555 } else { 0o444 });
+            set_mode(&tmp, object_mode(executable));
             Placement::Copy
         }
     };
@@ -429,14 +736,6 @@ pub(crate) fn validate_manifest_path(path: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn cancelled(token: &CancellationToken) -> Result<(), CoreError> {
-    if token.is_cancelled() {
-        Err(CoreError::Sync("cancelled".into()))
-    } else {
-        Ok(())
-    }
-}
-
 pub struct SyncPlan<'a> {
     pub transport: &'a Transport,
     pub base_url: &'a str,
@@ -487,18 +786,12 @@ pub async fn sync(
         .filter(|file| !optional.contains(&file.path) || active_files.contains(&file.path))
         .collect();
 
-    let files_total = included.len() as u64;
-    let bytes_total: u64 = included
-        .iter()
-        .filter_map(|f| f.object.as_ref())
-        .map(|o| o.size)
-        .sum();
     on_progress(SyncProgress {
         stage: SyncStage::Planning,
         files_done: 0,
-        files_total,
+        files_total: 0,
         bytes_done: 0,
-        bytes_total,
+        bytes_total: 0,
         current_path: None,
     });
 
@@ -553,63 +846,82 @@ pub async fn sync(
         });
     }
 
-    let mut needed: HashMap<String, (i32, Vec<u8>, bool)> = HashMap::new();
+    let mut needed: HashMap<String, Wanted> = HashMap::new();
     for item in &plan {
         if matches!(item.action, Action::Link | Action::Seed) {
-            let entry =
-                needed
-                    .entry(item.hex.clone())
-                    .or_insert((item.algo, item.value.clone(), false));
-            entry.2 |= item.executable;
+            needed
+                .entry(item.hex.clone())
+                .and_modify(|object| object.executable |= item.executable)
+                .or_insert_with(|| Wanted {
+                    hex: item.hex.clone(),
+                    algo: item.algo,
+                    value: item.value.clone(),
+                    executable: item.executable,
+                    size: item.size,
+                    path: item.path.clone(),
+                });
         }
     }
 
-    let bytes_done = Arc::new(AtomicU64::new(0));
-    let downloaded_count = Arc::new(AtomicU64::new(0));
-    on_progress(SyncProgress {
-        stage: SyncStage::Downloading,
-        files_done: skipped,
-        files_total,
-        bytes_done: 0,
-        bytes_total,
-        current_path: None,
-    });
-
-    let ingests: Vec<Result<(u64, bool), CoreError>> = stream::iter(needed.into_iter().map(|(hex, (algo, value, executable))| {
-        let transport = transport.clone();
-        let base = base_url.to_string();
-        let cas_dir = cas_dir.to_path_buf();
-        let cancel = cancel.clone();
-        let bytes_done = bytes_done.clone();
-        let downloaded_count = downloaded_count.clone();
-        let progress = &on_progress;
-        async move {
-            tokio::select! {
-                _ = cancel.cancelled() => Err(CoreError::Sync("cancelled".into())),
-                result = ensure_object(&transport, &base, &cas_dir, algo, &hex, &value, executable) => {
-                    let (_, size, downloaded) = result?;
-                    if downloaded {
-                        let total = bytes_done.fetch_add(size, Ordering::Relaxed) + size;
-                        let done = downloaded_count.fetch_add(1, Ordering::Relaxed) + 1;
-                        progress(SyncProgress { stage: SyncStage::Downloading, files_done: skipped + done, files_total, bytes_done: total, bytes_total, current_path: None });
-                    }
-                    Ok((size, downloaded))
-                }
-            }
+    let mut wanted: Vec<Wanted> = Vec::with_capacity(needed.len());
+    let mut resumable = 0u64;
+    for object in needed.into_values() {
+        let cas_path = cas_dir.join(object_key(object.algo, &object.value));
+        if cas_path.exists() {
+            set_mode(&cas_path, object_mode(object.executable));
+            continue;
         }
-    }))
-    .buffer_unordered(parallel)
-    .collect()
-    .await;
+        resumable += partial_len(&partial_path(&cas_path)).min(object.size);
+        wanted.push(object);
+    }
+    wanted.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let meter = Meter {
+        report: &on_progress,
+        files_total: wanted.len() as u64,
+        bytes_total: wanted.iter().map(|object| object.size).sum(),
+        files_done: AtomicU64::new(0),
+        bytes_done: AtomicU64::new(resumable),
+        current: std::sync::Mutex::new(None),
+        last: std::sync::Mutex::new(None),
+    };
+    meter.publish(true);
+
+    let abort = cancel.child_token();
+    let results: Vec<Result<u64, CoreError>> = stream::iter(0..wanted.len())
+        .map(|index| {
+            download_or_abort(transport, base_url, cas_dir, &wanted[index], &meter, &abort)
+        })
+        .buffer_unordered(parallel)
+        .collect()
+        .await;
+    meter.publish(true);
 
     let mut downloaded = 0u64;
     let mut bytes_downloaded = 0u64;
-    for ingest in ingests {
-        let (size, was_downloaded) = ingest?;
-        if was_downloaded {
-            downloaded += 1;
-            bytes_downloaded += size;
+    let mut failure: Option<CoreError> = None;
+    for result in results {
+        match result {
+            Ok(size) => {
+                downloaded += 1;
+                bytes_downloaded += size;
+            }
+            Err(error) => {
+                let replaces = match &failure {
+                    None => true,
+                    Some(existing) => {
+                        matches!(existing, CoreError::Cancelled)
+                            && !matches!(error, CoreError::Cancelled)
+                    }
+                };
+                if replaces {
+                    failure = Some(error);
+                }
+            }
         }
+    }
+    if let Some(error) = failure {
+        return Err(error);
     }
 
     let mut ledger: Ledger = Ledger::new();
@@ -660,10 +972,10 @@ pub async fn sync(
     mark_finished(state_dir);
     on_progress(SyncProgress {
         stage: SyncStage::Done,
-        files_done: files_total,
-        files_total,
-        bytes_done: bytes_total,
-        bytes_total,
+        files_done: meter.files_total,
+        files_total: meter.files_total,
+        bytes_done: meter.bytes_total,
+        bytes_total: meter.bytes_total,
         current_path: None,
     });
 
@@ -909,6 +1221,7 @@ fn prune(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn user_writable_is_private_per_build() {
@@ -983,13 +1296,11 @@ mod tests {
     #[test]
     fn an_object_that_lands_in_the_cas_is_read_only() {
         let tmp = tempfile::tempdir().unwrap();
-        let temp = tempfile::Builder::new()
-            .prefix(".lam-")
-            .tempfile_in(tmp.path())
-            .unwrap();
         let cas_path = tmp.path().join("object");
+        let partial = partial_path(&cas_path);
+        std::fs::write(&partial, b"object").unwrap();
 
-        settle_object(temp, &cas_path, 0o444).unwrap();
+        settle_object(&partial, &cas_path, 0o444).unwrap();
 
         let meta = std::fs::metadata(&cas_path).unwrap();
         assert!(
@@ -1280,6 +1591,303 @@ mod tests {
         assert_eq!(outcome.downloaded, 0);
         assert!(profile.is_dir(), "the profile directory must be created");
         assert!(state.is_dir(), "the state directory must be created");
+    }
+
+    struct ObjectServer {
+        base_url: String,
+        requests: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[derive(Clone)]
+    enum Reply {
+        Serve,
+        Cut(usize),
+        Whole,
+        Wrong(Vec<u8>),
+        NotFound,
+    }
+
+    async fn object_server(content: Vec<u8>, script: Vec<Reply>) -> ObjectServer {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        tokio::spawn(async move {
+            let mut served = 0usize;
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if socket.read_exact(&mut byte).await.is_err() {
+                        break;
+                    }
+                    head.push(byte[0]);
+                }
+                let text = String::from_utf8_lossy(&head).to_ascii_lowercase();
+                seen.lock().unwrap().push(text.clone());
+                let reply = script[served.min(script.len() - 1)].clone();
+                served += 1;
+                let requested = text.lines().find_map(|line| {
+                    line.strip_prefix("range: bytes=")
+                        .and_then(|range| range.trim_end_matches('-').parse::<usize>().ok())
+                });
+                let (status, extra, body, cut) = match reply {
+                    Reply::NotFound => ("404 Not Found", String::new(), Vec::new(), None),
+                    Reply::Wrong(body) => ("200 OK", String::new(), body, None),
+                    Reply::Whole => ("200 OK", String::new(), content.clone(), None),
+                    Reply::Serve | Reply::Cut(_) => {
+                        let cut = match reply {
+                            Reply::Cut(at) => Some(at),
+                            _ => None,
+                        };
+                        match requested {
+                            Some(from) => (
+                                "206 Partial Content",
+                                format!(
+                                    "Content-Range: bytes {from}-{}/{}\r\n",
+                                    content.len() - 1,
+                                    content.len()
+                                ),
+                                content[from..].to_vec(),
+                                cut,
+                            ),
+                            None => ("200 OK", String::new(), content.clone(), cut),
+                        }
+                    }
+                };
+                let header = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = socket.write_all(header.as_bytes()).await;
+                let _ = socket.write_all(&body[..cut.unwrap_or(body.len())]).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        ObjectServer { base_url, requests }
+    }
+
+    fn one_file_manifest(path: &str, content: &[u8]) -> Manifest {
+        Manifest {
+            files: vec![ManifestFile {
+                path: path.into(),
+                object: Some(crate::proto::core::v1::ObjectRef {
+                    hash: Some(crate::proto::core::v1::Hash {
+                        algo: HashAlgo::Blake3 as i32,
+                        value: blake3::hash(content).as_bytes().to_vec(),
+                    }),
+                    size: content.len() as u64,
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn partial_of(root: &Path, content: &[u8]) -> PathBuf {
+        let key = object_key(HashAlgo::Blake3 as i32, blake3::hash(content).as_bytes());
+        partial_path(&root.join("objects").join(key))
+    }
+
+    fn leave_partial(root: &Path, content: &[u8], len: usize) {
+        let partial = partial_of(root, content);
+        std::fs::create_dir_all(partial.parent().unwrap()).unwrap();
+        std::fs::write(&partial, &content[..len]).unwrap();
+    }
+
+    async fn sync_one(
+        base_url: &str,
+        root: &Path,
+        manifest: &Manifest,
+    ) -> (Result<SyncOutcome, CoreError>, Vec<SyncProgress>) {
+        let events = std::sync::Mutex::new(Vec::new());
+        let outcome = sync(
+            SyncPlan {
+                transport: &Transport::default(),
+                base_url,
+                profile_dir: &root.join("build"),
+                state_dir: &root.join("build").join(".laminara"),
+                cas_dir: &root.join("objects"),
+                manifest,
+                selection: &FeatureSelection::default(),
+                max_parallel: 1,
+                cancel: CancellationToken::new(),
+            },
+            |progress| events.lock().unwrap().push(progress),
+        )
+        .await;
+        (outcome, events.into_inner().unwrap())
+    }
+
+    fn patterned(len: u32) -> Vec<u8> {
+        (0..len).map(|index| (index % 251) as u8).collect()
+    }
+
+    fn downloading(events: &[SyncProgress]) -> Vec<&SyncProgress> {
+        events
+            .iter()
+            .filter(|event| event.stage == SyncStage::Downloading)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_download_cut_halfway_resumes_from_where_it_stopped() {
+        let content = patterned(200_000);
+        let server = object_server(content.clone(), vec![Reply::Cut(90_000), Reply::Serve]).await;
+        let temp = tempfile::tempdir().unwrap();
+        let (outcome, events) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/big.jar", &content),
+        )
+        .await;
+
+        outcome.expect("the cut download must finish on the next attempt");
+        let requests = server.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2, "one cut request and one resumed request");
+        assert!(
+            requests[1].contains("range: bytes=90000-"),
+            "the second request must ask only for the missing tail: {}",
+            requests[1]
+        );
+        assert_eq!(
+            std::fs::read(temp.path().join("build/mods/big.jar")).unwrap(),
+            content
+        );
+        let progress = downloading(&events);
+        assert!(progress
+            .iter()
+            .all(|event| event.bytes_done <= event.bytes_total));
+        assert_eq!(progress.last().unwrap().bytes_done, content.len() as u64);
+        assert_eq!(
+            progress.last().unwrap().current_path.as_deref(),
+            Some("mods/big.jar")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_without_ranges_gets_a_clean_restart() {
+        let content = patterned(120_000);
+        let server = object_server(content.clone(), vec![Reply::Cut(50_000), Reply::Whole]).await;
+        let temp = tempfile::tempdir().unwrap();
+        let (outcome, events) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/a.jar", &content),
+        )
+        .await;
+
+        outcome.expect("a full answer to a range request must restart the file, not corrupt it");
+        assert_eq!(
+            std::fs::read(temp.path().join("build/mods/a.jar")).unwrap(),
+            content
+        );
+        assert!(downloading(&events)
+            .iter()
+            .all(|event| event.bytes_done <= event.bytes_total));
+        assert!(
+            !partial_of(temp.path(), &content).exists(),
+            "a finished object leaves no partial behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_object_fails_at_once_without_retries() {
+        let content = patterned(1_000);
+        let server = object_server(content.clone(), vec![Reply::NotFound]).await;
+        let temp = tempfile::tempdir().unwrap();
+        let (outcome, _) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/gone.jar", &content),
+        )
+        .await;
+
+        let error = outcome.expect_err("a 404 cannot be fixed by asking again");
+        assert!(
+            error.to_string().contains("404"),
+            "the reason must name the answer: {error}"
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_complete_partial_is_installed_without_asking_the_server() {
+        let content = patterned(30_000);
+        let temp = tempfile::tempdir().unwrap();
+        leave_partial(temp.path(), &content, content.len());
+        let server = object_server(content.clone(), vec![Reply::Serve]).await;
+        let (outcome, events) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/done.jar", &content),
+        )
+        .await;
+
+        outcome.expect("a partial that already holds the whole file must simply be kept");
+        assert!(server.requests.lock().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read(temp.path().join("build/mods/done.jar")).unwrap(),
+            content
+        );
+        assert_eq!(
+            downloading(&events).last().unwrap().bytes_done,
+            content.len() as u64
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stranger_answering_the_range_request_does_not_erase_the_partial() {
+        let content = patterned(150_000);
+        let temp = tempfile::tempdir().unwrap();
+        leave_partial(temp.path(), &content, 60_000);
+        let portal = b"<html>please sign in to the wifi</html>".to_vec();
+        let server = object_server(content.clone(), vec![Reply::Wrong(portal), Reply::Serve]).await;
+        let (outcome, events) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/c.jar", &content),
+        )
+        .await;
+
+        outcome.expect("after the portal lets go the download must continue");
+        let requests = server.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1].contains("range: bytes=60000-"),
+            "the kept partial must be resumed, not refetched: {}",
+            requests[1]
+        );
+        assert_eq!(
+            std::fs::read(temp.path().join("build/mods/c.jar")).unwrap(),
+            content
+        );
+        assert!(downloading(&events)
+            .iter()
+            .all(|event| event.bytes_done <= event.bytes_total));
+    }
+
+    #[tokio::test]
+    async fn an_object_broken_on_the_server_is_given_up_after_two_whole_downloads() {
+        let content = patterned(40_000);
+        let mut rotten = content.clone();
+        rotten[123] ^= 0xff;
+        let server = object_server(content.clone(), vec![Reply::Wrong(rotten)]).await;
+        let temp = tempfile::tempdir().unwrap();
+        let (outcome, events) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/rot.jar", &content),
+        )
+        .await;
+
+        let error = outcome.expect_err("an object that never matches its hash cannot be installed");
+        assert!(error.to_string().contains("хеш"), "{error}");
+        assert_eq!(server.requests.lock().unwrap().len(), 2);
+        assert!(downloading(&events)
+            .iter()
+            .all(|event| event.bytes_done <= event.bytes_total));
     }
 
     #[test]

@@ -40,7 +40,19 @@ export function BuildSettingsModal({ profile }: { profile: string }) {
   };
 
   return (
-    <Modal title="Настройки сборки" subtitle={profile} compact onClose={close}>
+    <Modal
+      title="Настройки сборки"
+      subtitle={profile}
+      compact
+      onClose={close}
+      footer={
+        data && (
+          <Button onClick={() => void save()} className="px-6">
+            Сохранить
+          </Button>
+        )
+      }
+    >
       {trouble && <div className="mb-4 rounded-lg bg-danger/15 px-3 py-2 text-sm text-danger">{trouble}</div>}
       {!data && !trouble && <div className="text-sm text-dim">Загружаю настройки сборки…</div>}
       {data && (
@@ -63,11 +75,6 @@ export function BuildSettingsModal({ profile }: { profile: string }) {
             </div>
           </div>
 
-          <div className="flex justify-end border-t border-border pt-4">
-            <Button onClick={() => void save()} className="px-6">
-              Сохранить
-            </Button>
-          </div>
         </div>
       )}
     </Modal>

@@ -66,7 +66,7 @@ export function Login() {
           )}
         </div>
 
-        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+        {error && <p className="mt-3 text-sm text-danger">{error.message}</p>}
 
         <Button
           type="submit"

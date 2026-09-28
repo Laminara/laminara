@@ -9,8 +9,8 @@ use crate::config::EndpointConfig;
 use crate::error::{CoreError, RpcError};
 use crate::machine::MachineFacts;
 use crate::proto::api::v1::{
-    CrashReport, GetManifestResponse, LoginResponse, MachineVerdict, NewsItem, ProfileSummary,
-    ReportCrashResponse, Tokens,
+    CrashReport, GetManifestResponse, LauncherLogReport, LoginResponse, MachineVerdict, NewsItem,
+    ProfileSummary, ReportCrashResponse, ReportLauncherLogResponse, Tokens,
 };
 use crate::rpc::LauncherClient;
 use crate::transport::Transport;
@@ -205,6 +205,21 @@ impl EndpointPool {
             async move {
                 LauncherClient::new(&transport, &base_url)
                     .report_crash(crash)
+                    .await
+            }
+        })
+        .await
+    }
+
+    pub async fn report_launcher_log(
+        &self,
+        report: LauncherLogReport,
+    ) -> Result<ReportLauncherLogResponse, CoreError> {
+        self.call(|transport, base_url| {
+            let report = report.clone();
+            async move {
+                LauncherClient::new(&transport, &base_url)
+                    .report_launcher_log(report)
                     .await
             }
         })

@@ -64,7 +64,7 @@ func (d *discordSink) Send(ctx context.Context, report Report) error {
 	}
 	if log := strings.TrimSpace(report.Log); log != "" {
 		part, err := writer.CreatePart(textproto.MIMEHeader{
-			"Content-Disposition": []string{`form-data; name="files[0]"; filename="crash.log"`},
+			"Content-Disposition": []string{fmt.Sprintf(`form-data; name="files[0]"; filename=%q`, report.FileName())},
 			"Content-Type":        []string{"text/plain; charset=utf-8"},
 		})
 		if err != nil {
@@ -125,7 +125,7 @@ func (t *telegramSink) Send(ctx context.Context, report Report) error {
 	if log == "" {
 		log = "журнал пуст"
 	}
-	part, err := writer.CreateFormFile("document", "crash.log")
+	part, err := writer.CreateFormFile("document", report.FileName())
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,9 @@ func (w *webhookSink) Name() string { return "http" }
 
 func (w *webhookSink) Send(ctx context.Context, report Report) error {
 	body, err := json.Marshal(map[string]any{
+		"kind":     report.Kind.String(),
 		"player":   report.Player,
+		"address":  report.Address,
 		"uuid":     report.UUID,
 		"build":    report.Build,
 		"version":  report.Version,
@@ -223,6 +225,9 @@ func (f *fileSink) Send(_ context.Context, report Report) error {
 		moment = time.Now()
 	}
 	name := fmt.Sprintf("%s-%s.log", moment.Format("20060102-150405"), safe(report.Player))
+	if report.Kind == LauncherLog {
+		name = fmt.Sprintf("%s-%s-launcher.log", moment.Format("20060102-150405"), safe(report.who()))
+	}
 	body := report.Title() + "\n\n" + report.Text() + "\n\n" + strings.TrimSpace(report.Log) + "\n"
 	return os.WriteFile(filepath.Join(f.dir, name), []byte(body), 0o640)
 }
