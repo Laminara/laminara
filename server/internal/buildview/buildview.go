@@ -10,6 +10,7 @@ import (
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/humanize"
+	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/platform"
 )
 
@@ -51,6 +52,19 @@ func LoaderWord(loader string) string {
 	return loader
 }
 
+const RecipeOff = "нет"
+
+func InstallCommand(name string, settings manifest.Settings) string {
+	if settings.Install == "" {
+		return ""
+	}
+	command := "install " + name + " " + settings.Install
+	if settings.Compat != "" && !strings.Contains(" "+settings.Install, " compat=") {
+		command += " compat=" + RecipeOff
+	}
+	return command
+}
+
 func RecipeWord(compat string) string {
 	name, version, found := strings.Cut(compat, ":")
 	if !found {
@@ -73,8 +87,8 @@ func PlayersWord(players *adminv1.BuildPlayers) (string, string) {
 }
 
 const (
-	AddressHint = "serverAddress в настройках сборки"
-	AddressNote = "Адрес сервера берётся из serverAddress в настройках сборки."
+	AddressHint = "serverAddress в настройках сборки, затем publish"
+	AddressNote = "Адрес сервера берётся из опубликованной сборки: впишите serverAddress в её настройки и выполните publish."
 )
 
 func Title(build *adminv1.BuildInfo) string {

@@ -22,8 +22,8 @@ func (f fakeRecipe) Name() string         { return f.name }
 func (f fakeRecipe) Summary() string      { return f.summary }
 func (f fakeRecipe) Loader() string       { return f.loader }
 func (f fakeRecipe) Supports(string) bool { return true }
-func (fakeRecipe) Versions(context.Context) ([]string, error) {
-	return nil, nil
+func (fakeRecipe) Latest(context.Context) (string, error) {
+	return "", nil
 }
 func (fakeRecipe) Resolve(context.Context, string, string) (*compat.Plan, error) {
 	return nil, nil

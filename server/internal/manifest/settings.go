@@ -36,6 +36,7 @@ type Settings struct {
 	Enforced         []string     `json:"enforced"`
 	ServerAddress    string       `json:"serverAddress"`
 	Loader           string       `json:"loader"`
+	Install          string       `json:"install,omitempty"`
 	Compat           string       `json:"compat,omitempty"`
 	CompatFiles      []string     `json:"compatFiles,omitempty"`
 	JvmArgs          []string     `json:"jvmArgs,omitempty"`

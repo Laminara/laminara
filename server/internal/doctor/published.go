@@ -10,6 +10,7 @@ import (
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/authlib"
+	"github.com/laminara/laminara/server/internal/buildview"
 	"github.com/laminara/laminara/server/internal/catalog"
 	"github.com/laminara/laminara/server/internal/diag"
 	"github.com/laminara/laminara/server/internal/humanize"
@@ -143,6 +144,14 @@ func checkAuthlib(opts Options, probe *diag.Probe, name string) {
 	}
 	probe.Fail("вход в игре: "+name, fmt.Sprintf("в сборке нет %s", authlib.FileName), diag.Remedy{
 		Hint:    "без него игра не сможет войти на сервер; сервер добавляет этот файл сам при подготовке — пересоберите сборку и опубликуйте заново",
-		Command: fmt.Sprintf("laminara-server exec \"install %s\"", name),
+		Command: fmt.Sprintf("laminara-server exec \"%s\"", rebuildCommand(dir, name)),
 	})
+}
+
+func rebuildCommand(dir, name string) string {
+	settings, err := manifest.LoadSettings(dir)
+	if err != nil || settings.Install == "" {
+		return "install " + name + " <версия>"
+	}
+	return buildview.InstallCommand(name, settings)
 }

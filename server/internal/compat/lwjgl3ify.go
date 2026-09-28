@@ -55,18 +55,15 @@ func (l *lwjgl3ify) Loader() string { return "forge" }
 
 func (l *lwjgl3ify) Supports(mcVersion string) bool { return mcVersion == lwjgl3ifyTarget }
 
-func (l *lwjgl3ify) Versions(ctx context.Context) ([]string, error) {
-	releases, err := l.releases.List(ctx, 30)
+func (l *lwjgl3ify) Latest(ctx context.Context) (string, error) {
+	release, err := l.release(ctx, "")
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	versions := make([]string, 0, len(releases))
-	for _, release := range releases {
-		if release.Has(manifestAsset) {
-			versions = append(versions, release.Version)
-		}
+	if !release.Has(manifestAsset) {
+		return "", fmt.Errorf("в последнем релизе lwjgl3ify %s нет %s", release.Tag, manifestAsset)
 	}
-	return versions, nil
+	return release.Version, nil
 }
 
 func (l *lwjgl3ify) Resolve(ctx context.Context, mcVersion, version string) (*Plan, error) {

@@ -70,6 +70,7 @@ type Options struct {
 	LoaderInManifest bool
 	JavaComponent    string
 	Files            []compat.File
+	Install          string
 }
 
 func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile, error) {
@@ -150,9 +151,6 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	if err := p.downloadExtraFiles(ctx, opts); err != nil {
 		return nil, err
 	}
-	if err := p.writeLaunchProfile(opts, profile, javaComponent, javaMajor, javaBin, detail.ID, installResult); err != nil {
-		return nil, err
-	}
 	if err := manifest.EnsureDefaultSettings(opts.ProfileDir); err != nil {
 		return nil, err
 	}
@@ -164,6 +162,9 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 		return nil, err
 	}
 	if err := p.ensureAuthlib(ctx, opts.ProfileDir); err != nil {
+		return nil, err
+	}
+	if err := p.writeLaunchProfile(opts, profile, javaComponent, javaMajor, javaBin, detail.ID, installResult); err != nil {
 		return nil, err
 	}
 	return profile, nil
@@ -392,6 +393,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 		JvmArgs:          jvmArgs,
 		GameArgs:         gameArgs,
 		Runtime:          "runtime/" + opts.PlatformKey,
+		Install:          opts.Install,
 	}
 	data, err := json.MarshalIndent(launch, "", "  ")
 	if err != nil {

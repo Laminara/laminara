@@ -31,7 +31,7 @@ type Recipe interface {
 	Summary() string
 	Loader() string
 	Supports(mcVersion string) bool
-	Versions(ctx context.Context) ([]string, error)
+	Latest(ctx context.Context) (string, error)
 	Resolve(ctx context.Context, mcVersion, version string) (*Plan, error)
 }
 

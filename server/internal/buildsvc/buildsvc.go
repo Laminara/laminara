@@ -369,6 +369,11 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 	}
 	if plan != nil {
 		announceRecipe(out, plan, loaderName, loaderVersion)
+		settings, err := manifest.LoadSettings(filepath.Join(s.profilesDir, name))
+		if err != nil {
+			return err
+		}
+		warnHandMadeLaunch(out, settings)
 		if java := opts["java"]; java != "" {
 			fmt.Fprintf(out, "Java взята ваша (%s), а не та, что просит рецепт — на ней он может не запуститься.\n", java)
 		}
@@ -406,6 +411,13 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 		layout = s.layout(name)
 	}
 
+	install := installLine(id, loaderName, loaderVersion, plan, opts["java"])
+	if !layout.flat {
+		if err := recordInstall(filepath.Join(s.profilesDir, name), install); err != nil {
+			return err
+		}
+	}
+
 	var failures []string
 	built := 0
 	for _, target := range targets {
@@ -435,6 +447,7 @@ func (s *Service) prepare(ctx context.Context, args []string, out io.Writer) err
 			LoaderInManifest: plan != nil,
 			JavaComponent:    opts["java"],
 			Files:            planFiles(plan),
+			Install:          install,
 		}); err != nil {
 			fmt.Fprintf(out, "Платформа %s не собралась: %v\n", key, err)
 			failures = append(failures, key)
@@ -537,6 +550,9 @@ func (s *Service) publish(ctx context.Context, args []string, out io.Writer) err
 	layout := s.layout(name)
 	if !layout.exists() {
 		return fmt.Errorf("собранной сборки «%s» нет — сначала install", name)
+	}
+	if err := refuseStalePlatforms(name, layout); err != nil {
+		return err
 	}
 
 	variants := layout.platforms

@@ -51,15 +51,11 @@ func (m *Model) fillPlayers(msg playersMsg) {
 	m.players.updated = time.Now()
 
 	var items []menuItem
-	missingAddress := false
 	for _, build := range msg.list {
 		value, hint := buildview.PlayersWord(build)
 		tone := toneGood
 		if build.Address == "" || !build.Reachable || build.Online == 0 {
 			tone = toneMuted
-		}
-		if build.Address == "" {
-			missingAddress = true
 		}
 		row := menuItem{
 			id:     "build:" + build.Build,
@@ -82,7 +78,6 @@ func (m *Model) fillPlayers(msg playersMsg) {
 			})
 		}
 	}
-	_ = missingAddress
 	m.players.menu.subtitle = "обновлено " + m.players.updated.Format("15:04:05") + " · обновляется само каждые 10 с"
 	m.players.menu.setItems(items)
 }

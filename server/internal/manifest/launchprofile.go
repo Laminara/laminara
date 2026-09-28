@@ -28,6 +28,7 @@ type LaunchProfile struct {
 	JvmArgs          []string `json:"jvmArgs,omitempty"`
 	GameArgs         []string `json:"gameArgs,omitempty"`
 	Runtime          string   `json:"runtime"`
+	Install          string   `json:"install,omitempty"`
 }
 
 func minecraftVersionOf(launch LaunchProfile) string {

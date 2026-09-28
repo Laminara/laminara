@@ -7,7 +7,15 @@ import { Aside, Steps } from "@astrojs/starlight/components";
 
 Обычно версию Java выбирает сам Minecraft: 1.7.10 просит восьмую, 1.20 — семнадцатую. Но
 сборки со сторонними патчами эти правила ломают — например `lwjgl3ify` от GTNH запускает
-1.7.10 на Java 21. Для таких случаев сборке можно задать и рантайм, и аргументы, и точку входа.
+1.7.10 на современной Java. Для таких случаев сборке можно задать и рантайм, и аргументы, и точку
+входа.
+
+<Aside type="tip">
+Для `lwjgl3ify` всё, что описано ниже, делает одна команда: `install <имя> 1.7.10 compat=lwjgl3ify`
+— см. [Старые версии на новой Java](/builds/compat). Ручная настройка нужна для патчей, под
+которые рецепта нет. С рецептом её не совмещайте: поля `classpath`, `classpathExclude` и
+`mainClass` перекрывают то, что задал рецепт.
+</Aside>
 
 ## Другая версия Java
 
@@ -44,7 +52,7 @@ laminara-server exec "install gtnh 1.7.10 loader=forge java=java-runtime-delta"
   "jvmArgs": ["-Dfile.encoding=UTF-8", "--add-opens", "java.base/java.lang=ALL-UNNAMED"],
   "gameArgs": [],
   "classpath": ["libraries/lwjgl3ify/lwjgl3ify-3.0.32-forgePatches.jar"],
-  "classpathExclude": ["libraries/org/lwjgl/lwjgl/*"],
+  "classpathExclude": ["libraries/org/lwjgl/lwjgl/lwjgl/*", "libraries/org/lwjgl/lwjgl/lwjgl_util/*"],
   "mainClass": "com.gtnewhorizons.retrofuturabootstrap.MainStartOnFirstThread"
 }
 ```
@@ -55,7 +63,10 @@ laminara-server exec "install gtnh 1.7.10 loader=forge java=java-runtime-delta"
 - **`classpath`** — пути внутри сборки, которые встанут **перед** обычным classpath. Именно так
   подключаются ранние патчи, которые обязаны загрузиться первыми.
 - **`classpathExclude`** — что выбросить из classpath. `*` можно поставить один раз, в любом месте
-  шаблона. Нужно, когда патч заменяет библиотеку и старая версия начинает мешать.
+  шаблона, и он захватывает всё, включая вложенные папки. Нужно, когда патч заменяет библиотеку
+  и старая версия начинает мешать. Пишите шаблон как можно уже: LWJGL 2 лежит в
+  `org/lwjgl/lwjgl/lwjgl/`, а ядро LWJGL 3 — в `org/lwjgl/lwjgl/<версия>/`, так что
+  `libraries/org/lwjgl/lwjgl/*` выбросило бы обе.
 - **`mainClass`** — другая точка входа вместо той, что прописал загрузчик.
 
 Всё это попадает в подписанный манифест, поэтому лаунчер применяет ровно то, что вы задали на
@@ -89,8 +100,8 @@ laminara-server exec "install gtnh 1.7.10 loader=forge java=java-runtime-delta"
 3. **Прописать запуск в `laminara.settings.json`**
 
    `jvmArgs` — содержимое `java9args.txt` из релиза патчера, `classpath` — патчер и библиотеки
-   LWJGL 3, `classpathExclude` — `libraries/org/lwjgl/lwjgl/*`, `mainClass` — точка входа
-   RetroFuturaBootstrap.
+   LWJGL 3, `classpathExclude` — `libraries/org/lwjgl/lwjgl/lwjgl/*` и
+   `libraries/org/lwjgl/lwjgl/lwjgl_util/*`, `mainClass` — точка входа RetroFuturaBootstrap.
 
 4. **Опубликовать**
 

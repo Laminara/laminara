@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	recipeOff     = "нет"
 	recipeNewest  = "последняя"
 	recipeFiles   = "mods/"
 	recipesHeader = "Рецепты совместимости — install <имя> <версия> compat=<рецепт>:"
@@ -48,10 +47,12 @@ func (s *Service) compatPlan(ctx context.Context, name string, opts map[string]s
 		spec = remembered
 	}
 
+	reused := !asked
 	spec, newest := wantsNewest(spec)
 	if wanted, pinned := compat.Split(spec); pinned == "" && !newest {
 		if was, version := compat.Split(remembered); was == wanted && version != "" {
 			spec = remembered
+			reused = true
 		}
 	}
 
@@ -68,7 +69,43 @@ func (s *Service) compatPlan(ctx context.Context, name string, opts map[string]s
 		_, was := compat.Split(remembered)
 		fmt.Fprintf(out, "Версия рецепта меняется с %s на %s — сборка получится другой, чем прошлая.\n", was, plan.Version)
 	}
+	if reused {
+		mentionNewerRecipe(ctx, plan, out)
+	}
 	return plan, nil
+}
+
+func mentionNewerRecipe(ctx context.Context, plan *compat.Plan, out io.Writer) {
+	recipe, ok := compat.Get(plan.Recipe)
+	if !ok || plan.Prerelease {
+		return
+	}
+	latest, err := recipe.Latest(ctx)
+	if err != nil || latest == "" || latest == plan.Version {
+		return
+	}
+	fmt.Fprintf(out, "Рецепт %s закреплён на %s, а вышла %s — чтобы перейти на неё: compat=%s:%s\n", plan.Recipe, plan.Version, latest, plan.Recipe, recipeNewest)
+}
+
+func warnHandMadeLaunch(out io.Writer, settings manifest.Settings) {
+	var fields []string
+	if len(settings.Classpath) > 0 {
+		fields = append(fields, "classpath")
+	}
+	if len(settings.ClasspathExclude) > 0 {
+		fields = append(fields, "classpathExclude")
+	}
+	if settings.MainClass != "" {
+		fields = append(fields, "mainClass")
+	}
+	named := "задано поле " + strings.Join(fields, ", ") + " — это ручная настройка запуска, и оно перекрывает рецепт. Если вы ставили патч вручную до рецепта, уберите его"
+	switch {
+	case len(fields) == 0:
+		return
+	case len(fields) > 1:
+		named = "заданы поля " + strings.Join(fields, ", ") + " — это ручная настройка запуска, и они перекрывают рецепт. Если вы ставили патч вручную до рецепта, уберите их"
+	}
+	fmt.Fprintf(out, "В %s %s.\n", manifest.SettingsFileName, named)
 }
 
 func wantsNewest(spec string) (string, bool) {
@@ -89,7 +126,7 @@ func recipeHint(err error, spec string, asked bool) error {
 		return err
 	}
 	if !asked {
-		return fmt.Errorf("%w; рецепт запомнен от прошлой сборки — соберите без него: compat=%s", err, recipeOff)
+		return fmt.Errorf("%w; рецепт запомнен от прошлой сборки — соберите без него: compat=%s", err, buildview.RecipeOff)
 	}
 	return err
 }
@@ -185,7 +222,7 @@ func planFiles(plan *compat.Plan) []compat.File {
 
 func isRecipeOff(spec string) bool {
 	switch strings.ToLower(strings.TrimSpace(spec)) {
-	case "", recipeOff, "no", "none", "off":
+	case "", buildview.RecipeOff, "no", "none", "off":
 		return true
 	}
 	return false
