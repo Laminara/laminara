@@ -36,6 +36,7 @@ body {
   font-size: 1rem;
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 body::before {
@@ -467,7 +468,7 @@ main {
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
 
-table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; min-width: 42rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; min-width: 58rem; }
 
 thead th {
   text-align: left;
