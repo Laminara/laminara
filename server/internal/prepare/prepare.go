@@ -368,7 +368,7 @@ func (p *Preparer) writeLaunchProfile(opts Options, profile *resolve.Profile, ja
 		gameArgs = append(gameArgs, install.GameArgs...)
 		classpath = mergeUnique(classpath, install.Libraries)
 	}
-	classpath = append(classpath, clientJar)
+	classpath = append(classpath, profile.ClientJar.Path)
 
 	natives := make([]string, 0, len(profile.Natives))
 	for _, native := range profile.Natives {
