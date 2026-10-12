@@ -10,7 +10,7 @@ use crate::config::{ClientConfig, EndpointConfig};
 use crate::endpoint::{EndpointPool, EndpointStatus};
 use crate::error::CoreError;
 use crate::launch::profile::LaunchProfile;
-use crate::launch::{build_argv, extract_natives, LaunchInputs};
+use crate::launch::{extract_natives, game_command, LaunchInputs};
 use crate::manifest::{verify_and_decode, VerifiedManifest};
 use crate::paths::LaminaraPaths;
 use crate::proto::api::v1::{ProfileSummary, Tokens};
@@ -515,7 +515,7 @@ impl Core {
 
         let authlib_jar = authlib_from(&profile_dir, authlib_jar)?;
 
-        let argv = build_argv(&LaunchInputs {
+        let mut command = game_command(&LaunchInputs {
             profile: &launch_profile,
             profile_dir: &profile_dir,
             game_dir: &game_dir,
@@ -528,12 +528,9 @@ impl Core {
             jvm_tuning: &jvm,
             extras: &extras,
             client_version,
-        });
+        })?;
 
-        let mut command = crate::process::async_command(&argv[0]);
         command
-            .args(&argv[1..])
-            .current_dir(&game_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         command

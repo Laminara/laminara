@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 )
 
@@ -65,6 +66,10 @@ type Installer struct {
 }
 
 func Open(jarPath string) (*Installer, error) {
+	jarPath, err := filepath.Abs(jarPath)
+	if err != nil {
+		return nil, err
+	}
 	reader, err := zip.OpenReader(jarPath)
 	if err != nil {
 		return nil, err

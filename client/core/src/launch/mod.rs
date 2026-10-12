@@ -73,6 +73,25 @@ struct LaunchDirs {
     natives: String,
 }
 
+pub(crate) fn game_command(input: &LaunchInputs) -> Result<tokio::process::Command, CoreError> {
+    let profile_dir = std::path::absolute(input.profile_dir)?;
+    let game_dir = std::path::absolute(input.game_dir)?;
+    let java_bin = std::path::absolute(input.java_bin)?;
+    let natives_dir = std::path::absolute(input.natives_dir)?;
+    let authlib_jar = std::path::absolute(input.authlib_jar)?;
+    let argv = build_argv(&LaunchInputs {
+        profile_dir: &profile_dir,
+        game_dir: &game_dir,
+        java_bin: &java_bin,
+        natives_dir: &natives_dir,
+        authlib_jar: &authlib_jar,
+        ..*input
+    });
+    let mut command = crate::process::async_command(&argv[0]);
+    command.args(&argv[1..]).current_dir(game_dir);
+    Ok(command)
+}
+
 pub fn build_argv(input: &LaunchInputs) -> Vec<String> {
     let profile = input.profile;
     let sep = separator(&profile.os);
@@ -276,6 +295,90 @@ mod tests {
 
     fn no_extras() -> LaunchExtras {
         LaunchExtras::default()
+    }
+
+    #[test]
+    fn relative_launch_paths_survive_changed_working_dir() {
+        const CHILD_ARGV: &str = "LAMINARA_TEST_RELATIVE_LAUNCH_ARGV";
+        if let Ok(encoded) = std::env::var(CHILD_ARGV) {
+            let argv: Vec<String> = serde_json::from_str(&encoded).unwrap();
+            let value = |name: &str| &argv[argv.iter().position(|arg| arg == name).unwrap() + 1];
+            for entry in value("-cp").split(if cfg!(windows) { ';' } else { ':' }) {
+                assert_eq!(std::fs::read(entry).unwrap(), b"library");
+            }
+            assert_eq!(
+                std::fs::canonicalize(value("--gameDir")).unwrap(),
+                std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap()
+            );
+            assert!(Path::new(value("--assetsDir")).is_dir());
+            let natives = argv
+                .iter()
+                .find_map(|arg| arg.strip_prefix("-Djava.library.path="))
+                .unwrap();
+            assert!(Path::new(natives).is_dir());
+            let injector = argv
+                .iter()
+                .find_map(|arg| arg.strip_prefix("-javaagent:"))
+                .unwrap()
+                .split('=')
+                .next()
+                .unwrap();
+            assert_eq!(std::fs::read(injector).unwrap(), b"injector");
+            return;
+        }
+        let temporary = tempfile::Builder::new()
+            .prefix("launch paths ")
+            .tempdir_in(".")
+            .unwrap();
+        let relative = temporary
+            .path()
+            .strip_prefix(std::env::current_dir().unwrap())
+            .unwrap_or(temporary.path());
+        let paths = Paths {
+            dir: relative.join("profile"),
+            game: relative.join("game files"),
+            java: relative.join(if cfg!(windows) { "java.exe" } else { "java" }),
+            natives: relative.join("native files"),
+            jar: relative.join("injector.jar"),
+        };
+        for dir in [
+            &paths.dir,
+            &paths.game,
+            &paths.natives,
+            &paths.dir.join("assets"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(paths.dir.join("library.jar"), b"library").unwrap();
+        std::fs::write(&paths.jar, b"injector").unwrap();
+        std::fs::copy(std::env::current_exe().unwrap(), &paths.java).unwrap();
+        let mut profile = base_profile();
+        profile.os = if cfg!(windows) { "windows" } else { "linux" }.into();
+        profile.classpath = vec!["library.jar".into()];
+        let session = session();
+        let extras = no_extras();
+        let command = game_command(&inputs(&profile, &session, &paths, &[], &extras)).unwrap();
+        let args: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().unwrap().to_owned())
+            .collect();
+        let output = crate::process::command(command.as_std().get_program())
+            .args([
+                "--exact",
+                "launch::tests::relative_launch_paths_survive_changed_working_dir",
+                "--nocapture",
+            ])
+            .current_dir(command.as_std().get_current_dir().unwrap())
+            .env(CHILD_ARGV, serde_json::to_string(&args).unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn inputs<'a>(

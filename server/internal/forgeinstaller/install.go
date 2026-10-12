@@ -44,6 +44,20 @@ func (i *Installer) Install(ctx context.Context, req Request) (*LaunchInfo, erro
 	if i.legacy != nil {
 		return i.legacyInstall(ctx, req)
 	}
+	for _, path := range []*string{&req.ProfileDir, &req.LibrariesDir, &req.MinecraftJar, &req.DataDir} {
+		absolute, err := filepath.Abs(*path)
+		if err != nil {
+			return nil, err
+		}
+		*path = absolute
+	}
+	if strings.ContainsAny(req.JavaBin, `/\`) {
+		absolute, err := filepath.Abs(req.JavaBin)
+		if err != nil {
+			return nil, err
+		}
+		req.JavaBin = absolute
+	}
 	if err := i.extractEmbeddedMaven(req.LibrariesDir); err != nil {
 		return nil, err
 	}

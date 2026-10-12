@@ -61,6 +61,44 @@ func TestInstallerCanReadTheRecipeSectionOfLoaders(t *testing.T) {
 	}
 }
 
+func TestLauncherBuildResolvesPathsFromCaller(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("нет bash — сборку лаунчера запускает build-launcher.sh")
+	}
+	script := filepath.Join(repoRoot(t), "client", "build-launcher.sh")
+	shell := `
+		set -eu
+		work="$(cd "$1" && pwd)"
+		mkdir -p "$work/repo/client" "$work/configuration space"
+		cp "$2" "$work/repo/client/build-launcher.sh"
+		printf '1.0.0\n' > "$work/repo/VERSION"
+		printf '{"branding":{"name":"Fixture"}}\n' > "$work/configuration space/config.json"
+		pnpm() { test "$PWD" = "$work/repo/client"; }
+		cargo() {
+			test "$LAMINARA_CLIENT_CONFIG" = "$work/configuration space/config.json"
+			mkdir -p target/release
+			printf 'fixture binary\n' > target/release/laminara
+		}
+		node() { printf 'Fixture'; }
+		export -f pnpm cargo node
+		export work
+		cd "$work"
+		bash repo/client/build-launcher.sh 'configuration space/config.json' --out 'output space'
+		test "$(cat 'output space/Fixture')" = 'fixture binary'
+		bash repo/client/build-launcher.sh "$work/configuration space/config.json" --out 'output absolute-config'
+		test "$(cat 'output absolute-config/Fixture')" = 'fixture binary'
+		bash repo/client/build-launcher.sh 'configuration space/config.json' --out "$work/output absolute"
+		test "$(cat "$work/output absolute/Fixture")" = 'fixture binary'
+		bash repo/client/build-launcher.sh 'configuration space/config.json'
+		test "$(cat repo/client/dist-launcher/Fixture)" = 'fixture binary'
+	`
+	command := exec.Command("bash", "-c", shell, "bash", t.TempDir(), script)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build-launcher.sh неверно разрешил пути: %v\n%s", err, output)
+	}
+}
+
 func TestRecipeIsSkippedWhenTheOperatorSaysNo(t *testing.T) {
 	for _, spec := range []string{"", "нет", "НЕТ", "none", "off", "no"} {
 		if !isRecipeOff(spec) {

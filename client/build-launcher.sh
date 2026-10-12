@@ -5,7 +5,7 @@
 # exactly one server.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
 	cat >&2 <<'EOF'
@@ -21,7 +21,7 @@ EOF
 config=""
 target="linux"
 name=""
-out="dist-launcher"
+out=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -56,6 +56,17 @@ done
 	exit 1
 }
 config="$(cd "$(dirname "$config")" && pwd)/$(basename "$config")"
+
+if [ -z "$out" ]; then
+	out="$script_dir/dist-launcher"
+else
+	case "$out" in
+	/*|[A-Za-z]:/*) ;;
+	*) out="$PWD/$out" ;;
+	esac
+fi
+
+cd "$script_dir"
 
 case "$target" in
 linux)
