@@ -3,6 +3,7 @@ mod baked;
 mod commands;
 mod console;
 mod logging;
+mod webview;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -276,6 +277,8 @@ pub fn run() {
         version = env!("LAMINARA_VERSION"),
         "Laminara launcher starting"
     );
+    let context = tauri::generate_context!();
+    webview::prune_profile(&context.config().identifier);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -335,7 +338,7 @@ pub fn run() {
             commands::send_launcher_log,
             commands::open_launcher_logs,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Laminara");
 }
 

@@ -158,6 +158,7 @@ pub fn open_window(app: &AppHandle) -> tauri::Result<()> {
             .resizable(true)
             .center()
             .visible(false);
+    builder = crate::webview::with_shared_browser_args(app, builder);
     if let Some(icon) = crate::branding_icon() {
         builder = builder.icon(icon)?;
     }

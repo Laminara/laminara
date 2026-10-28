@@ -20,7 +20,8 @@
         "fullscreen": false,
         "decorations": false,
         "center": true,
-        "visible": false
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-component-update --disable-gpu-shader-disk-cache --disk-cache-size=8388608"
       }
     ],
     "security": {
