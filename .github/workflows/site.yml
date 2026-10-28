@@ -1,0 +1,55 @@
+name: Сайт
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "site/**"
+      - "web/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Собрать и выложить
+    runs-on: ubuntu-24.04
+    env:
+      SITE_HOST: laminara-site@88.218.171.203
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - name: Собрать документацию
+        working-directory: site
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Ключ доступа
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SITE_SSH_KEY }}" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "${{ secrets.SITE_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Выложить документацию
+        run: tar -czf - -C site/dist . | ssh -i ~/.ssh/deploy "$SITE_HOST" docs
+      - name: Выложить лендинг
+        run: tar -czf - -C web . | ssh -i ~/.ssh/deploy "$SITE_HOST" web
+      - name: Проверить, что сайт отвечает
+        run: |
+          for url in https://laminara.dev/ https://docs.laminara.dev/ \
+            https://docs.laminara.dev/quickstart/ https://docs.laminara.dev/reference/config/; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url")
+            echo "$url -> $code"
+            [ "$code" = "200" ] || exit 1
+          done
