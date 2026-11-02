@@ -30,6 +30,23 @@ func press(m menu, key tea.KeyMsg) (menu, menuEvent) {
 	return m.Update(key)
 }
 
+func TestLiteralEditorOpensAndPreservesWhitespace(t *testing.T) {
+	for _, action := range []bool{false, true} {
+		m := newMenu("Список")
+		m.setItems([]menuItem{{id: "item", label: "Элемент", editor: editLiteral, action: action}})
+		m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.mode != menuTyping {
+			t.Fatalf("literal editor did not open (action=%v)", action)
+		}
+		value := "  a,b=c  "
+		m, _ = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)})
+		_, event := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if event.kind != menuSubmitted || event.value != value {
+			t.Fatalf("literal value changed: %#v", event)
+		}
+	}
+}
+
 func TestMenuKeepsItsPlaceWhileEditing(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.Ascii)
 	m := sampleMenu(30)
@@ -115,5 +132,42 @@ func TestMenuBubblesUnknownKeys(t *testing.T) {
 	_, event := press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	if event.kind != menuPressed || event.key != "r" {
 		t.Fatalf("unhandled keys must reach the screen: %+v", event)
+	}
+}
+
+func TestMenuSecretInputDoesNotRevealOrClearExistingValue(t *testing.T) {
+	m := sampleMenu(2)
+	m.items[0].editor = editSecret
+	m.items[0].value = "***"
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, event := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if event.kind != menuNothing {
+		t.Fatal("empty secret edit must not submit a change")
+	}
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.input.SetValue("fixture-secret")
+	if strings.Contains(m.View(newStyles(), unicodeIcons()), "fixture-secret") {
+		t.Fatal("typed secret visible")
+	}
+	m, event = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if event.value != "fixture-secret" || m.input.Value() != "" {
+		t.Fatal("secret must be submitted then removed from input buffer")
+	}
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.input.SetValue("public-value")
+	if !strings.Contains(m.View(newStyles(), unicodeIcons()), "public-value") {
+		t.Fatal("ordinary field remained masked after editing a secret")
+	}
+}
+
+func TestMenuKeepsLongValues(t *testing.T) {
+	m := sampleMenu(1)
+	value := strings.Repeat("длинное значение, ", 300)
+	m.items[0].value = value
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	_, event := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if event.value != strings.TrimSpace(value) {
+		t.Fatalf("long value truncated: got %d bytes, want %d", len(event.value), len(value))
 	}
 }

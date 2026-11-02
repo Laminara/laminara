@@ -49,7 +49,7 @@ func TestCommandInput(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.Ascii)
 	input := textinput.New()
 	input.Prompt = "› "
-	base := Model{icons: unicodeIcons(), styles: newStyles(), logCh: make(chan string, 1), input: input}
+	base := Model{icons: unicodeIcons(), styles: newStyles(), logCh: make(chan string, 1), input: input, commandSecrets: map[string]bool{"versions": false, "publish": false}}
 	updated, _ := base.Update(tea.WindowSizeMsg{Width: 96, Height: 22})
 	m := updated.(Model)
 

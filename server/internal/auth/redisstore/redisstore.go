@@ -23,6 +23,10 @@ func NewSessionStore(client *redis.Client, ttl time.Duration) *SessionStore {
 	return &SessionStore{client: client, ttl: ttl}
 }
 
+func (s *SessionStore) Readiness(ctx context.Context) error {
+	return s.client.Ping(ctx).Err()
+}
+
 func sessionKey(id uuid.UUID) string {
 	return "laminara:session:" + id.String()
 }

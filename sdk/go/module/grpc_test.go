@@ -16,6 +16,30 @@ import (
 
 type testModule struct{}
 
+type schemaModule struct{ testModule }
+
+func (schemaModule) SettingsSchemaJSON() []byte {
+	return []byte(`{"module":[{"key":"token","kind":"secret"}]}`)
+}
+
+func (schemaModule) Commands() []Command {
+	return []Command{{Name: "credential", SafeArguments: true, SecretOutput: true}}
+}
+
+func TestServerAdapterSettingsAndCommandPrivacy(t *testing.T) {
+	srv := &grpcServer{impl: schemaModule{}}
+	info, err := srv.Info(t.Context(), &modulev1.InfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(info.SettingsSchemaJson, (schemaModule{}).SettingsSchemaJSON()) {
+		t.Fatalf("schema lost: %s", info.SettingsSchemaJson)
+	}
+	if len(info.Commands) != 1 || !info.Commands[0].SafeArguments || !info.Commands[0].SecretOutput {
+		t.Fatalf("command privacy lost: %v", info.Commands)
+	}
+}
+
 func (testModule) Info() Info {
 	return Info{Name: "test", Version: "9.9", Description: "тест"}
 }

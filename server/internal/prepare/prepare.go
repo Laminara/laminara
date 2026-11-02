@@ -58,19 +58,20 @@ func NewPreparerWith(httpClient *http.Client, assetsBaseURL, jreAllURL string, w
 }
 
 type Options struct {
-	ProfileDir       string
-	PlatformDir      string
-	VersionURL       string
-	OS               string
-	Arch             string
-	PlatformKey      string
-	MinecraftVersion string
-	LoaderName       string
-	LoaderVersion    string
-	LoaderInManifest bool
-	JavaComponent    string
-	Files            []compat.File
-	Install          string
+	ExpectedRuntimeVersion string
+	ProfileDir             string
+	PlatformDir            string
+	VersionURL             string
+	OS                     string
+	Arch                   string
+	PlatformKey            string
+	MinecraftVersion       string
+	LoaderName             string
+	LoaderVersion          string
+	LoaderInManifest       bool
+	JavaComponent          string
+	Files                  []compat.File
+	Install                string
 }
 
 func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile, error) {
@@ -134,7 +135,7 @@ func (p *Preparer) Prepare(ctx context.Context, opts Options) (*resolve.Profile,
 	if err := p.downloadAssets(ctx, opts.ProfileDir, profile.AssetIndexID, profile.AssetIndexURL); err != nil {
 		return nil, err
 	}
-	javaBin, err := p.downloadRuntime(ctx, opts.PlatformDir, opts.PlatformKey, javaComponent)
+	javaBin, err := p.downloadRuntime(ctx, opts.PlatformDir, opts.PlatformKey, javaComponent, opts.ExpectedRuntimeVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -276,10 +277,13 @@ func movedToAnotherJava(platformDir, component string) bool {
 	return err == nil && previous.JavaComponent != "" && previous.JavaComponent != component
 }
 
-func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, component string) (string, error) {
+func (p *Preparer) downloadRuntime(ctx context.Context, root, platformKey, component string, expected ...string) (string, error) {
 	runtimeInfo, err := p.jre.Select(ctx, platformKey, component)
 	if err != nil {
 		return "", noRuntimeHint(err, platformKey, "положите свой JDK в папку сборки и укажите его в javaBin файла "+manifest.LaunchProfileName)
+	}
+	if len(expected) > 0 && expected[0] != "" && runtimeInfo.Version.Name != expected[0] {
+		return "", fmt.Errorf("Java для %s: источник предлагает %s, закреплена %s; публикация отменена", platformKey, runtimeInfo.Version.Name, expected[0])
 	}
 	files, err := p.jre.FetchFiles(ctx, runtimeInfo.Manifest.URL)
 	if err != nil {

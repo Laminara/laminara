@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +16,13 @@ import (
 )
 
 type Doc struct {
-	path string
-	mode os.FileMode
-	tree map[string]any
+	path      string
+	mode      os.FileMode
+	tree      map[string]any
+	revision  string
+	namespace string
+	schema    []Section
+	validate  func([]byte) error
 
 	once   sync.Once
 	filled map[string]string
@@ -39,10 +44,44 @@ func Open(path string) (*Doc, error) {
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	return &Doc{path: path, mode: mode, tree: tree}, nil
+	return &Doc{path: path, mode: mode, tree: tree, revision: revisionOf(data)}, nil
 }
 
+var ErrChanged = errors.New("файл настроек изменился; загрузите новую версию перед сохранением")
+
+func revisionOf(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
+
+func (d *Doc) Revision() string { return d.revision }
+
 func (d *Doc) Path() string { return d.path }
+
+func OpenSchema(path, namespace string, schema []Section, validate func([]byte) error) (*Doc, error) {
+	doc, err := Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		doc = &Doc{path: path, mode: 0o600, tree: map[string]any{}, revision: revisionOf(nil)}
+	} else if err != nil {
+		return nil, err
+	}
+	doc.tree = map[string]any{namespace: doc.tree}
+	doc.namespace, doc.schema, doc.validate = namespace, schema, validate
+	return doc, nil
+}
+
+func (d *Doc) Sections() []Section {
+	if d.schema != nil {
+		return d.schema
+	}
+	return Sections()
+}
+
+func (d *Doc) sectionOf(key string) (Section, bool) {
+	for _, section := range d.Sections() {
+		if section.Key == key {
+			return section, true
+		}
+	}
+	return Section{}, false
+}
 
 func (d *Doc) raw(path string) (any, bool) {
 	var current any = d.tree
@@ -166,28 +205,77 @@ func (d *Doc) Keys(path string) []string {
 }
 
 func (d *Doc) Bytes() ([]byte, error) {
-	data, err := json.MarshalIndent(d.tree, "", "  ")
+	var tree any = d.tree
+	if d.namespace != "" {
+		tree = d.tree[d.namespace]
+	}
+	data, err := json.MarshalIndent(tree, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
 }
 
-func (d *Doc) Save() error {
+func (d *Doc) Validate() error {
+	if err := d.validateExtensions(); err != nil {
+		return err
+	}
 	data, err := d.Bytes()
 	if err != nil {
 		return err
 	}
-	var parsed config.Config
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if d.validate != nil {
+		return d.validate(data)
+	}
+	parsed, err := config.Parse(data, d.path)
+	if err != nil {
 		return fmt.Errorf("так настройки не читаются: %w", err)
 	}
-	if err := config.Validate(&parsed); err != nil {
+	if err := config.Validate(parsed); err != nil {
 		return fmt.Errorf("с такой настройкой сервер не поднимется — %w", err)
 	}
-	temp := d.path + ".tmp"
-	if err := os.WriteFile(temp, data, d.mode); err != nil {
+	return nil
+}
+
+func (d *Doc) Save() error {
+	if err := d.Validate(); err != nil {
 		return err
 	}
-	return os.Rename(temp, d.path)
+	data, err := d.Bytes()
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(d.path), ".laminara-settings-*")
+	if err != nil {
+		return fmt.Errorf("каталог настроек недоступен для записи: %w", err)
+	}
+	temp := file.Name()
+	defer os.Remove(temp)
+	if err := file.Chmod(d.mode); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	current, err := os.ReadFile(d.path)
+	if err != nil && !(errors.Is(err, os.ErrNotExist) && d.revision == revisionOf(nil)) {
+		return err
+	}
+	if revisionOf(current) != d.revision {
+		return ErrChanged
+	}
+	if err := os.Rename(temp, d.path); err != nil {
+		return err
+	}
+	d.revision = revisionOf(data)
+	return nil
 }

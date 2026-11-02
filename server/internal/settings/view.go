@@ -26,7 +26,7 @@ type Entry struct {
 }
 
 func (d *Doc) Section(key string) ([]Entry, error) {
-	section, ok := sectionOf(key)
+	section, ok := d.sectionOf(key)
 	if !ok {
 		return nil, fmt.Errorf("раздела «%s» нет", key)
 	}
@@ -37,6 +37,10 @@ func (d *Doc) Section(key string) ([]Entry, error) {
 			continue
 		}
 		chosen := d.stringAt(section.Key+"."+field.VariantOf, defaultOf(section, field.VariantOf))
+		if _, known := field.Variants[chosen]; !known {
+			entries = append(entries, d.entryOf(section.Key, field, field.Key))
+			continue
+		}
 		for _, nested := range field.Variants[chosen] {
 			entries = append(entries, d.entryOf(section.Key, nested, field.Key+"."+nested.Key))
 		}
@@ -58,9 +62,10 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 	if relative != "" {
 		path = base + "." + relative
 	}
+	field = d.protectedField(base, field)
 	raw, present := d.raw(path)
 	shownDefault := displayDefault(field)
-	if !present {
+	if !present && d.namespace == "" {
 		if derived := d.derived(path); derived != "" {
 			shownDefault = derived
 		}
@@ -84,34 +89,42 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 }
 
 func renderEntry(field Field, path string, raw any) string {
-	if len(field.Variants) == 0 {
-		return render(field.Kind, raw)
+	safe := redactTree(path, raw, sensitivePaths(path, field))
+	if field.Kind == KindSecretJSON {
+		return renderTree("", safe, nil)
 	}
-	return renderTree(path, raw, secretPaths(path, field))
+	if field.Kind == KindPairs || field.Kind == KindList || field.Variants != nil {
+		return render(KindJSON, safe)
+	}
+	return render(field.Kind, safe)
 }
 
-func secretPaths(base string, field Field) map[string]bool {
-	paths := map[string]bool{}
-	collectSecrets(base+".", field.Variants, paths)
-	return paths
-}
-
-func collectSecrets(prefix string, variants map[string][]Field, into map[string]bool) {
-	for _, fields := range variants {
-		for _, field := range fields {
-			key := prefix + field.Key
-			if field.Variants != nil {
-				collectSecrets(key+".", field.Variants, into)
-				continue
-			}
-			if field.Kind == KindSecret {
-				into[key] = true
-			}
-		}
+func (d *Doc) protectedField(base string, field Field) Field {
+	if field.Variants == nil || field.VariantOf == "" {
+		return field
 	}
+	fields, _ := d.fieldsAt(base)
+	chosen := d.stringAt(base+"."+field.VariantOf, fieldDefault(fields, field.VariantOf))
+	if nested := field.Variants[chosen]; len(nested) > 0 && nested[0].Extension {
+		field.Kind, field.Variants = KindSecretJSON, nil
+		field.Hint = "Поля адаптера доступны отдельно. Полный JSON скрыт, чтобы не раскрывать неизвестные поля."
+		return field
+	}
+	if _, known := field.Variants[chosen]; !known {
+		field.Kind = KindSecretJSON
+		field.Variants = nil
+		field.Hint = "У адаптера нет схемы настроек. JSON скрыт; введите весь блок для замены."
+	}
+	return field
 }
 
 func display(kind Kind, value string) string {
+	if kind == KindList && strings.HasPrefix(value, "[") {
+		var entries []string
+		if json.Unmarshal([]byte(value), &entries) == nil {
+			return strings.Join(entries, ", ")
+		}
+	}
 	if kind != KindDuration || value == "" {
 		return value
 	}
@@ -159,31 +172,47 @@ func (d *Doc) Entry(path string) (Entry, error) {
 func (d *Doc) resolve(path string) (string, Field, string, error) {
 	sectionKey, rest, ok := strings.Cut(path, ".")
 	if !ok {
-		return "", Field{}, "", fmt.Errorf("укажите полный путь, например api.addr")
+		return "", Field{}, "", fmt.Errorf("укажите полный путь настройки")
 	}
-	section, ok := sectionOf(sectionKey)
+	section, ok := d.sectionOf(sectionKey)
 	if !ok {
 		return "", Field{}, "", fmt.Errorf("раздела «%s» нет", sectionKey)
 	}
-	if head, tail, ok := strings.Cut(rest, "."); ok {
-		if collection, found := collectionOf(section, head); found {
-			id, fieldKey, hasField := strings.Cut(tail, ".")
-			base := sectionKey + "." + head + "." + id
-			if !hasField {
-				return base, Field{Key: "", Label: collection.Title, Kind: KindJSON}, "", nil
-			}
-			field, ok := d.fieldAt(base, collection.Fields, fieldKey)
-			if !ok {
-				return "", Field{}, "", fmt.Errorf("в списке «%s» нет настройки «%s»", collection.Title, fieldKey)
-			}
-			return base, field, fieldKey, nil
+	return d.resolveIn(sectionKey, section.Fields, section.Collections, rest)
+}
+
+func (d *Doc) resolveIn(base string, fields []Field, collections []Collection, rest string) (string, Field, string, error) {
+	for _, collection := range collections {
+		tail, found := strings.CutPrefix(rest, collection.Key+".")
+		if !found {
+			continue
 		}
+		id, fieldKey, hasField := strings.Cut(tail, ".")
+		if id == "" {
+			return "", Field{}, "", fmt.Errorf("не указана запись списка")
+		}
+		entryPath := base + "." + collection.Key + "." + id
+		collection = collection.forEntry(id)
+		if hasField {
+			return d.resolveIn(entryPath, collection.Fields, collection.children(), fieldKey)
+		}
+		if base == "modules" && collection.Key == "config" {
+			return entryPath, Field{Label: collection.Title, Kind: KindSecretJSON}, "", nil
+		}
+		if len(collection.Fields) == 1 && collection.Fields[0].Key == "" {
+			return entryPath, collection.Fields[0], "", nil
+		}
+		protected := make([]Field, 0, len(collection.Fields))
+		for _, field := range collection.Fields {
+			protected = append(protected, d.protectedField(entryPath, field))
+		}
+		return entryPath, Field{Label: collection.Title, Kind: KindJSON, Variants: map[string][]Field{"": protected}}, "", nil
 	}
-	field, ok := d.fieldAt(sectionKey, section.Fields, rest)
+	field, ok := d.fieldAt(base, fields, rest)
 	if !ok {
-		return "", Field{}, "", fmt.Errorf("в разделе «%s» нет настройки «%s»", section.Title, rest)
+		return "", Field{}, "", fmt.Errorf("нет настройки %s.%s", base, rest)
 	}
-	return sectionKey, field, rest, nil
+	return base, field, rest, nil
 }
 
 func (d *Doc) fieldAt(base string, fields []Field, key string) (Field, bool) {
@@ -225,8 +254,6 @@ func render(kind Kind, raw any) string {
 	return renderTree("", raw, nil)
 }
 
-var secretishNames = []string{"authorization", "token", "secret", "password", "cookie", "api-key", "apikey"}
-
 func renderPairs(raw any) string {
 	pairs, ok := raw.(map[string]any)
 	if !ok {
@@ -249,13 +276,16 @@ func renderPairs(raw any) string {
 }
 
 func carriesSecret(name string) bool {
-	lowered := strings.ToLower(name)
-	for _, marker := range secretishNames {
-		if strings.Contains(lowered, marker) {
-			return true
-		}
+	return HeaderSecret(name)
+}
+
+func HeaderSecret(name string) bool {
+	switch strings.ToLower(name) {
+	case "accept", "accept-encoding", "accept-language", "content-type", "user-agent", "cache-control":
+		return false
+	default:
+		return true
 	}
-	return false
 }
 
 func renderTree(path string, raw any, secrets map[string]bool) string {
@@ -304,17 +334,44 @@ func renderBranch(path string, raw any, secrets map[string]bool) string {
 }
 
 func (d *Doc) Set(path, value string) error {
+	return d.set(path, value, false)
+}
+
+func (d *Doc) Edit(path, value string) error {
+	return d.set(path, value, true)
+}
+
+func (d *Doc) set(path, value string, preserveSecrets bool) error {
 	base, field, relative, err := d.resolve(path)
 	if err != nil {
 		return err
 	}
-	value = strings.TrimSpace(value)
+	if field.Kind != KindSecret {
+		value = strings.TrimSpace(value)
+	}
 	if value == "" {
 		return d.drop(path)
+	}
+	field = d.protectedField(base, field)
+	if preserveSecrets && (field.Kind == KindSecret || field.Kind == KindSecretJSON) && value == SecretMask {
+		if _, exists := d.raw(path); !exists {
+			return fmt.Errorf("у %s нет сохранённого значения; введите новое", path)
+		}
+		return nil
 	}
 	parsed, err := parse(field, value)
 	if err != nil {
 		return err
+	}
+	if preserveSecrets {
+		previous, _ := d.raw(path)
+		if err := validateVariantEdit(field, parsed, previous); err != nil {
+			return err
+		}
+		parsed, err = restoreSecrets(path, parsed, previous, sensitivePaths(path, field))
+		if err != nil {
+			return err
+		}
 	}
 	if block, dropped := d.blockOf(base, relative, value); dropped {
 		if err := d.drop(base + "." + block); err != nil {
@@ -328,7 +385,7 @@ func (d *Doc) Set(path, value string) error {
 }
 
 func (d *Doc) fieldsAt(base string) ([]Field, string) {
-	if section, ok := sectionOf(base); ok {
+	if section, ok := d.sectionOf(base); ok {
 		return section.Fields, base
 	}
 	if collection, _, ok := d.collectionAt(base); ok {
@@ -352,6 +409,9 @@ func (d *Doc) blockOf(base, key, value string) (string, bool) {
 }
 
 func parse(field Field, value string) (any, error) {
+	if field.Variants != nil {
+		field.Kind = KindJSON
+	}
 	switch field.Kind {
 	case KindBool:
 		switch strings.ToLower(value) {
@@ -368,6 +428,16 @@ func parse(field Field, value string) (any, error) {
 		}
 		return number, nil
 	case KindDuration:
+		if field.AllowZero {
+			parsed, err := duration.Parse(value)
+			if err != nil {
+				return nil, err
+			}
+			if parsed < 0 {
+				return nil, fmt.Errorf("время не должно быть отрицательным")
+			}
+			return parsed.Compact(), nil
+		}
 		normalized, err := ParseDuration(value)
 		if err != nil {
 			return nil, err
@@ -385,6 +455,17 @@ func parse(field Field, value string) (any, error) {
 		}
 		return nil, fmt.Errorf("тут выбирают из: %s", strings.Join(options, ", "))
 	case KindList:
+		if strings.HasPrefix(value, "[") {
+			var entries []string
+			if err := json.Unmarshal([]byte(value), &entries); err != nil {
+				return nil, fmt.Errorf("нужен JSON-массив строк")
+			}
+			result := make([]any, len(entries))
+			for i, entry := range entries {
+				result[i] = entry
+			}
+			return result, nil
+		}
 		parts := []any{}
 		for _, part := range strings.Split(value, ",") {
 			if trimmed := strings.TrimSpace(part); trimmed != "" {
@@ -392,18 +473,35 @@ func parse(field Field, value string) (any, error) {
 			}
 		}
 		return parts, nil
-	case KindJSON:
+	case KindJSON, KindSecretJSON:
 		var parsed any
 		if err := json.Unmarshal([]byte(value), &parsed); err != nil {
-			return nil, fmt.Errorf("это должен быть JSON: %w", err)
+			return nil, fmt.Errorf("это должен быть корректный JSON")
 		}
 		return parsed, nil
 	case KindPairs:
+		if strings.HasPrefix(value, "{") {
+			var pairs map[string]string
+			if err := json.Unmarshal([]byte(value), &pairs); err != nil {
+				return nil, fmt.Errorf("нужен JSON-объект со строковыми значениями")
+			}
+			result := make(map[string]any, len(pairs))
+			for key, item := range pairs {
+				if strings.TrimSpace(key) == "" {
+					return nil, fmt.Errorf("имя заголовка не должно быть пустым")
+				}
+				result[key] = item
+			}
+			return result, nil
+		}
 		pairs := map[string]any{}
 		for _, part := range strings.Split(value, ",") {
 			key, item, ok := strings.Cut(strings.TrimSpace(part), "=")
 			if !ok {
 				return nil, fmt.Errorf("пишите пары через знак равенства: Ключ=значение")
+			}
+			if strings.TrimSpace(key) == "" {
+				return nil, fmt.Errorf("имя заголовка не должно быть пустым")
 			}
 			pairs[strings.TrimSpace(key)] = strings.TrimSpace(item)
 		}

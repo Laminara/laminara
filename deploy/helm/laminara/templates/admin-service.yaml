@@ -1,0 +1,15 @@
+{{- if .Values.adminService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "laminara.name" . }}-admin
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: laminara
+  ports:
+    - name: admin
+      port: {{ .Values.adminService.port }}
+      targetPort: admin
+{{- end }}

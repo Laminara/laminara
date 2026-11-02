@@ -19,6 +19,12 @@ func NewLogging(cfg *config.LogConfig) *Logging {
 	bus := logbus.NewBus(4096)
 	level := new(slog.LevelVar)
 	level.Set(slog.LevelInfo)
+	if cfg != nil && cfg.Level != "" {
+		var parsed slog.Level
+		if parsed.UnmarshalText([]byte(cfg.Level)) == nil {
+			level.Set(parsed)
+		}
+	}
 	targets, file := logTargets(cfg)
 	log := slog.New(logbus.NewHandlerTo(targets, level, bus))
 	slog.SetDefault(log)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,9 +14,18 @@ import (
 	"github.com/laminara/laminara/server/internal/logbus"
 )
 
-func adminClient() adminv1connect.AdminServiceClient {
+type adminClientKey struct{}
+
+func adminClient(contexts ...context.Context) adminv1connect.AdminServiceClient {
+	if len(contexts) > 0 {
+		if client, ok := contexts[0].Value(adminClientKey{}).(adminv1connect.AdminServiceClient); ok {
+			return client
+		}
+	}
 	return adminv1connect.NewAdminServiceClient(control.HTTPClient(), control.BaseURL())
 }
+
+func remoteClient(ctx context.Context) bool { return ctx.Value(adminClientKey{}) != nil }
 
 func parseLevel(name string) adminv1.LogLevel {
 	switch strings.ToLower(name) {

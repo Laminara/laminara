@@ -11,6 +11,7 @@ import (
 
 func logsCmd() *cobra.Command {
 	var follow bool
+	var asJSON bool
 	var level string
 	var source string
 	var backscroll uint32
@@ -19,7 +20,7 @@ func logsCmd() *cobra.Command {
 		Short: "смотреть логи сервера",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			stream, err := adminClient().StreamLogs(cmd.Context(), connect.NewRequest(&adminv1.StreamLogsRequest{
+			stream, err := adminClient(cmd.Context()).StreamLogs(cmd.Context(), connect.NewRequest(&adminv1.StreamLogsRequest{
 				MinLevel:   parseLevel(level),
 				Source:     source,
 				Backscroll: backscroll,
@@ -30,12 +31,19 @@ func logsCmd() *cobra.Command {
 			}
 			defer stream.Close()
 			for stream.Receive() {
+				if asJSON {
+					if err := writeProto(cmd.OutOrStdout(), stream.Msg().Line); err != nil {
+						return err
+					}
+					continue
+				}
 				writeLine(os.Stdout, stream.Msg().Line)
 			}
 			return stream.Err()
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "не выходить, показывать новые строки")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "строки журнала в NDJSON")
 	cmd.Flags().StringVar(&level, "level", "", "с какого уровня показывать (debug|info|warn|error)")
 	cmd.Flags().StringVar(&source, "source", "", "только строки этого источника")
 	cmd.Flags().Uint32Var(&backscroll, "backscroll", 200, "сколько прошлых строк показать")

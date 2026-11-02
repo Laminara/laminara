@@ -11,6 +11,7 @@ import (
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
 	"github.com/laminara/laminara/server/internal/buildview"
+	"github.com/laminara/laminara/server/internal/command"
 )
 
 type playersState struct {
@@ -193,12 +194,14 @@ func (m Model) updateCard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		name = m.card.build.Name
 	}
 	switch event.key {
+	case "s":
+		return m.enterBuildSettings(name)
 	case "esc", "q", "b":
 		m.state = stateMain
 		return m, nil
 	case "p":
 		m.state = stateMain
-		return m.startCommand("publish " + name)
+		return m.startCommand(command.Format("publish", name))
 	case "u":
 		wiz, cmd := newWizard(m.ctx, m.client, m.icons, m.styles, name)
 		m.wizard = wiz

@@ -1,6 +1,7 @@
 package logbus
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,7 @@ type Target struct {
 	Writer io.Writer
 	Color  bool
 	Dated  bool
+	JSON   bool
 }
 
 func Stdout() Target {
@@ -50,6 +52,10 @@ func (p *printer) write(line Line) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, target := range p.targets {
+		if target.JSON {
+			_ = json.NewEncoder(target.Writer).Encode(map[string]any{"time": line.Time, "level": line.Level.String(), "source": line.Source, "message": line.Message, "fields": line.Fields})
+			continue
+		}
 		key := [2]bool{target.Color, target.Dated}
 		text, ready := rendered[key]
 		if !ready {

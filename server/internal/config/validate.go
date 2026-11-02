@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -47,8 +48,42 @@ func Validate(cfg *Config) error {
 	if err := validateAPI(cfg.API); err != nil {
 		return err
 	}
+	if err := validateAdmin(cfg.Admin); err != nil {
+		return err
+	}
+	if cfg.Log != nil {
+		if cfg.Log.Format != "" && cfg.Log.Format != "text" && cfg.Log.Format != "json" {
+			return badConfig("log.format", "выберите text или json")
+		}
+		var level slog.Level
+		if cfg.Log.Level != "" {
+			if err := level.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
+				return badConfig("log.level", "выберите debug, info, warn или error")
+			}
+		}
+	}
 	if cfg.Auth != nil && strings.TrimSpace(cfg.Auth.Provider) == "" {
 		return badConfig("auth.provider", "не указан источник аккаунтов")
+	}
+	return validateBackends(cfg)
+}
+
+func validateAdmin(admin *AdminConfig) error {
+	if admin == nil || admin.Addr == "" {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(admin.Addr)
+	if err != nil {
+		return badConfig("admin.addr", "нужен адрес вида хост:порт")
+	}
+	if (admin.TLSCert == "") != (admin.TLSKey == "") {
+		return badConfig("admin", "tlsCert и tlsKey задаются вместе")
+	}
+	if admin.TLSCert == "" {
+		ip := net.ParseIP(host)
+		if !admin.AllowInsecureLoopback || ip == nil || !ip.IsLoopback() {
+			return badConfig("admin", "для сетевого доступа нужны tlsCert и tlsKey; HTTP допускается только на loopback с allowInsecureLoopback")
+		}
 	}
 	return nil
 }

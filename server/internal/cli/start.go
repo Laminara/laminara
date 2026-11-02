@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
@@ -14,13 +15,18 @@ import (
 
 func startCmd() *cobra.Command {
 	var configPath string
+	var configMode string
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "запустить сервер в переднем плане (в фон его уводят systemd или docker)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if configMode != "managed" && configMode != "external" {
+				return fmt.Errorf("config-mode: выберите managed или external")
+			}
 			var opts daemon.Options
 			opts.ConfigPath = configPath
+			opts.ExternalConfig = configMode == "external"
 			if configPath != "" {
 				cfg, err := config.LoadChecked(configPath)
 				if err != nil {
@@ -59,6 +65,7 @@ func startCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера")
+	cmd.Flags().StringVar(&configMode, "config-mode", "managed", "кто меняет конфиг: managed — сервер, external — внешний источник")
 	return cmd
 }
 

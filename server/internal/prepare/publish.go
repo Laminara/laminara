@@ -42,5 +42,8 @@ func PublishPlatform(
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return &Published{Manifest: built, Canonical: canonical, Signature: signature}, nil
 }

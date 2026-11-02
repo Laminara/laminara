@@ -51,6 +51,22 @@ func (b *fsBackend) resolve(key string) string {
 	return filepath.Join(b.root, filepath.FromSlash(key))
 }
 
+func (b *fsBackend) Readiness(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := os.Open(b.root)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Readdirnames(1)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
+
 const objectMode = 0o644
 
 func (b *fsBackend) Put(_ context.Context, key string, r io.Reader, _ int64) error {

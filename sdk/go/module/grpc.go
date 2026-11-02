@@ -70,10 +70,13 @@ func (s *grpcServer) Info(context.Context, *modulev1.InfoRequest) (*modulev1.Inf
 	info := s.impl.Info()
 	out := &modulev1.InfoResponse{Name: info.Name, Version: info.Version, Description: info.Description}
 	for _, cmd := range s.impl.Commands() {
-		out.Commands = append(out.Commands, &modulev1.CommandSpec{Name: cmd.Name, Aliases: cmd.Aliases, Synopsis: cmd.Synopsis})
+		out.Commands = append(out.Commands, &modulev1.CommandSpec{Name: cmd.Name, Aliases: cmd.Aliases, Synopsis: cmd.Synopsis, SafeArguments: cmd.SafeArguments, SecretOutput: cmd.SecretOutput})
 	}
 	if handler, ok := s.impl.(EventHandler); ok {
 		out.Events = handler.Events()
+	}
+	if schema, ok := s.impl.(SettingsSchema); ok {
+		out.SettingsSchemaJson = schema.SettingsSchemaJSON()
 	}
 	for _, spec := range providerSpecs(s.impl) {
 		out.Providers = append(out.Providers, &modulev1.ProviderSpec{Kind: wireKind(spec.Kind), Name: spec.Name})
@@ -278,12 +281,13 @@ func (c *grpcClient) Info(ctx context.Context) (Manifest, error) {
 		return Manifest{}, err
 	}
 	manifest := Manifest{
-		Info:     Info{Name: resp.Name, Version: resp.Version, Description: resp.Description},
-		Commands: make([]CommandSpec, 0, len(resp.Commands)),
-		Events:   resp.Events,
+		SettingsSchemaJSON: resp.SettingsSchemaJson,
+		Info:               Info{Name: resp.Name, Version: resp.Version, Description: resp.Description},
+		Commands:           make([]CommandSpec, 0, len(resp.Commands)),
+		Events:             resp.Events,
 	}
 	for _, spec := range resp.Commands {
-		manifest.Commands = append(manifest.Commands, CommandSpec{Name: spec.Name, Aliases: spec.Aliases, Synopsis: spec.Synopsis})
+		manifest.Commands = append(manifest.Commands, CommandSpec{Name: spec.Name, Aliases: spec.Aliases, Synopsis: spec.Synopsis, SafeArguments: spec.SafeArguments, SecretOutput: spec.SecretOutput})
 	}
 	for _, spec := range resp.Providers {
 		kind := localKind(spec.Kind)

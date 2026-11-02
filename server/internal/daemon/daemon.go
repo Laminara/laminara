@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"connectrpc.com/connect"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
@@ -31,14 +33,17 @@ import (
 	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/config"
 	"github.com/laminara/laminara/server/internal/control"
+	"github.com/laminara/laminara/server/internal/controlauth"
 	"github.com/laminara/laminara/server/internal/events"
 	"github.com/laminara/laminara/server/internal/hwid"
+	"github.com/laminara/laminara/server/internal/jobs"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/logbus"
 	"github.com/laminara/laminara/server/internal/module"
 	"github.com/laminara/laminara/server/internal/module/remote"
 	"github.com/laminara/laminara/server/internal/modulesetup"
 	"github.com/laminara/laminara/server/internal/serversetup"
+	"github.com/laminara/laminara/server/internal/settings"
 	"github.com/laminara/laminara/server/internal/signing"
 	"github.com/laminara/laminara/server/internal/version"
 	"github.com/laminara/laminara/server/internal/webconsole"
@@ -51,6 +56,9 @@ const (
 )
 
 type Daemon struct {
+	jobsDir       string
+	adminConfig   *config.AdminConfig
+	tokens        *controlauth.Store
 	startedAt     time.Time
 	settings      *settingsStore
 	quit          chan struct{}
@@ -67,29 +75,31 @@ type Daemon struct {
 	publicAddr    string
 	catalog       admin.Catalog
 	launcher      *launchersvc.Service
+	build         *buildsvc.Service
 	update        *config.UpdateConfig
 	logFile       io.Closer
 }
 
 type Options struct {
-	Auth          *auth.Service
-	Access        *access.Controller
-	Catalog       *catalog.Catalog
-	Machines      *hwid.Gate
-	Signing       *signing.Keyring
-	Console       *webconsole.Service
-	Build         *buildsvc.Service
-	Launcher      *launchersvc.Service
-	PublicHandler http.Handler
-	PublicAddr    string
-	Logging       *Logging
-	Modules       *modulesetup.Runtime
-	Events        *events.Bus
-	ConfigPath    string
-	Update        *config.UpdateConfig
-	Log           *config.LogConfig
-	Config        *config.Config
-	Wired         *serversetup.Wired
+	Auth           *auth.Service
+	Access         *access.Controller
+	Catalog        *catalog.Catalog
+	Machines       *hwid.Gate
+	Signing        *signing.Keyring
+	Console        *webconsole.Service
+	Build          *buildsvc.Service
+	Launcher       *launchersvc.Service
+	PublicHandler  http.Handler
+	PublicAddr     string
+	Logging        *Logging
+	Modules        *modulesetup.Runtime
+	Events         *events.Bus
+	ConfigPath     string
+	ExternalConfig bool
+	Update         *config.UpdateConfig
+	Log            *config.LogConfig
+	Config         *config.Config
+	Wired          *serversetup.Wired
 }
 
 func New(opts Options) *Daemon {
@@ -100,6 +110,9 @@ func New(opts Options) *Daemon {
 	bus, level, log, file := logging.Bus, logging.Level, logging.Log, logging.File
 
 	registry := command.NewRegistry()
+	if opts.Wired != nil && opts.Wired.Metrics != nil {
+		registry.SetObserver(opts.Wired.Metrics.ObserveCommand)
+	}
 	registry.Register(command.HelpCommand(registry))
 
 	d := &Daemon{
@@ -111,11 +124,21 @@ func New(opts Options) *Daemon {
 		log:           log,
 		console:       os.Stdout,
 		publicHandler: opts.PublicHandler,
+		build:         opts.Build,
 		publicAddr:    opts.PublicAddr,
 		update:        opts.Update,
 		logFile:       file,
 	}
 	registry.Register(d.statusCommand())
+	if opts.ConfigPath != "" {
+		d.jobsDir = filepath.Join(config.DataDir(opts.Config, opts.ConfigPath), "jobs")
+	}
+	if opts.Config != nil && opts.Config.Admin != nil {
+		d.jobsDir = opts.Config.Admin.JobsDir
+		d.adminConfig = opts.Config.Admin
+		d.tokens = controlauth.NewStore(opts.Config.Admin.TokensPath)
+		registry.Register(tokenCommand(d.tokens))
+	}
 	registry.Register(d.versionCommand())
 	registry.Register(d.updateCommand())
 	if opts.Config != nil {
@@ -123,12 +146,16 @@ func New(opts Options) *Daemon {
 	}
 	if opts.ConfigPath != "" {
 		d.settings = &settingsStore{
-			path:    opts.ConfigPath,
-			restart: d.RequestRestart,
-			verify:  buildable,
+			path:     opts.ConfigPath,
+			external: opts.ExternalConfig,
+			restart:  d.RequestRestart,
+			verify:   buildable,
 			changed: func(path string) {
 				log.Info("настройка изменена", "source", "settings", "что", path)
 			},
+		}
+		if doc, err := settings.Open(opts.ConfigPath); err == nil {
+			d.settings.activeRevision = doc.Revision()
 		}
 		registry.Register(settingsCommand(d.settings))
 		registry.Register(restartCommand(d.settings))
@@ -241,14 +268,44 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	service := admin.NewService(d.status, d.bus, d.registry, d.catalog)
+	if d.jobsDir != "" {
+		var active func(controlauth.Token) bool
+		if d.tokens != nil {
+			active = d.tokens.Active
+		}
+		manager, err := jobs.New(ctx, d.jobsDir, d.registry, active)
+		if err != nil {
+			return err
+		}
+		service.SetJobs(manager)
+		defer func() {
+			closing, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			if err := manager.Close(closing); err != nil {
+				d.log.Error("задания не успели остановиться", "error", err)
+			}
+		}()
+	}
+	service.SetStop(d.RequestStop)
+	if d.build != nil {
+		service.SetBuildSettings(d.build)
+	}
 	if d.settings != nil {
 		service.SetSettings(d.settings)
 	}
 	mux := http.NewServeMux()
-	mux.Handle(adminv1connect.NewAdminServiceHandler(service))
+	mux.Handle(adminv1connect.NewAdminServiceHandler(service, connect.WithReadMaxBytes(2<<20)))
 	server := &http.Server{Handler: mux}
 
-	serveErr := make(chan error, 2)
+	remoteServer, remoteListener, err := d.remoteAdmin(mux)
+	if err != nil {
+		return err
+	}
+	serveErr := make(chan error, 3)
+	if remoteListener != nil {
+		defer remoteListener.Close()
+		go func() { serveErr <- remoteServer.Serve(remoteListener) }()
+	}
 	go func() { serveErr <- server.Serve(listener) }()
 
 	var publicServer *http.Server
@@ -280,6 +337,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
+		if remoteServer != nil {
+			_ = remoteServer.Shutdown(shutdownCtx)
+			_ = remoteServer.Close()
+		}
 		if publicServer != nil {
 			_ = publicServer.Shutdown(shutdownCtx)
 			_ = publicServer.Close()
@@ -295,6 +356,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return stop("останавливаюсь", shutdownTimeout, true)
 	case <-d.quit:
+		if !d.restarting.Load() {
+			return stop("останавливаюсь", shutdownTimeout, true)
+		}
 		if err := stop("перезапускаюсь с новыми настройками", restartTimeout, false); err != nil {
 			d.log.Info("закрыл открытые подключения", "source", "daemon")
 		}
@@ -309,6 +373,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 func (d *Daemon) RequestRestart() error {
 	d.restarting.Store(true)
+	d.quitOnce.Do(func() { close(d.quit) })
+	return nil
+}
+
+func (d *Daemon) RequestStop() error {
 	d.quitOnce.Do(func() { close(d.quit) })
 	return nil
 }
@@ -332,18 +401,25 @@ func (d *Daemon) dispatchLines(ctx context.Context, input io.Reader) {
 		if ctx.Err() != nil {
 			return
 		}
-		name := line
-		if fields := strings.Fields(line); len(fields) > 0 {
-			name = fields[0]
+		fields, parseErr := command.Split(line)
+		if parseErr != nil {
+			d.log.Error(parseErr.Error(), "source", "console")
+			continue
 		}
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
 		registered, known := d.registry.Lookup(name)
 		quiet := known && (registered.Secret || registered.SecretArgs)
 		var out bytes.Buffer
-		err := d.registry.Dispatch(ctx, line, &out)
+		err := d.registry.DispatchArgs(ctx, fields, &out)
 		reply := strings.TrimRight(out.String(), "\n")
 		if reply != "" {
 			fmt.Fprintln(d.console, reply)
-			d.bus.Echo(reply)
+			if !known || !registered.Secret {
+				d.bus.Echo(reply)
+			}
 		}
 		if err != nil {
 			shown := line

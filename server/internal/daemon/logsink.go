@@ -11,8 +11,13 @@ import (
 )
 
 func logTargets(cfg *config.LogConfig) ([]logbus.Target, io.Closer) {
+	stdout := logbus.Stdout()
+	if cfg != nil && cfg.Format == "json" {
+		stdout.JSON = true
+		stdout.Color = false
+	}
 	if cfg == nil || cfg.File == "" {
-		return []logbus.Target{logbus.Stdout()}, nil
+		return []logbus.Target{stdout}, nil
 	}
 
 	writer, err := logfile.Open(logfile.Options{
@@ -23,7 +28,9 @@ func logTargets(cfg *config.LogConfig) ([]logbus.Target, io.Closer) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "журнал пишется только в консоль: файл %s открыть не удалось (%v)\n", cfg.File, err)
-		return []logbus.Target{logbus.Stdout()}, nil
+		return []logbus.Target{stdout}, nil
 	}
-	return []logbus.Target{logbus.Stdout(), logbus.Plain(writer)}, writer
+	file := logbus.Plain(writer)
+	file.JSON = cfg.Format == "json"
+	return []logbus.Target{stdout, file}, writer
 }

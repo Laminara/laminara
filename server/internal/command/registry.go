@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
+	"time"
 )
 
 type Command struct {
@@ -20,7 +20,10 @@ type Command struct {
 type Registry struct {
 	commands map[string]Command
 	asleep   map[string]string
+	observe  func(time.Duration, error)
 }
+
+func (r *Registry) SetObserver(observe func(time.Duration, error)) { r.observe = observe }
 
 func NewRegistry() *Registry {
 	return &Registry{commands: make(map[string]Command), asleep: make(map[string]string)}
@@ -61,9 +64,20 @@ func (r *Registry) Lookup(name string) (Command, bool) {
 }
 
 func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) error {
-	fields := strings.Fields(line)
+	fields, err := Split(line)
+	if err != nil {
+		return err
+	}
+	return r.DispatchArgs(ctx, fields, out)
+}
+
+func (r *Registry) DispatchArgs(ctx context.Context, fields []string, out io.Writer) (result error) {
 	if len(fields) == 0 {
 		return nil
+	}
+	if r.observe != nil {
+		start := time.Now()
+		defer func() { r.observe(time.Since(start), result) }()
 	}
 	c, ok := r.commands[fields[0]]
 	if !ok {
@@ -72,7 +86,14 @@ func (r *Registry) Dispatch(ctx context.Context, line string, out io.Writer) err
 		}
 		return fmt.Errorf("команды «%s» нет — весь список даёт help", fields[0])
 	}
-	return c.Run(ctx, fields[1:], out)
+	if err := r.Authorize(ctx, c.Name); err != nil {
+		return err
+	}
+	err := c.Run(ctx, fields[1:], out)
+	if policy, ok := ctx.Value(policyKey{}).(Policy); ok {
+		policy.Completed(ctx, c, err)
+	}
+	return err
 }
 
 func HelpCommand(r *Registry) Command {

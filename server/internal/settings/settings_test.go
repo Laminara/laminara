@@ -81,7 +81,7 @@ func TestSetValidatesAndSaves(t *testing.T) {
 		"api.xAccel":               "да",
 		"hwid.minScore":            "50",
 		"hwid.hardwareBanTTL":      "720h",
-		"build.trustedSigningKeys": "/a.key, /b.key",
+		"build.trustedSigningKeys": `["/a.key","/b.key"]`,
 	} {
 		entry, err := reopened.Entry(path)
 		if err != nil {
@@ -160,7 +160,7 @@ func TestSecretsAreMaskedInsideAProviderBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(block.Value, "dsn="+SecretMask) {
+	if !strings.Contains(block.Value, `"dsn":"`+SecretMask+`"`) {
 		t.Fatalf("the block must show the masked value: %q", block.Value)
 	}
 	section, err := doc.Section("auth")

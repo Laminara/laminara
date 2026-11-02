@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestPlaceholderInTrustedProxiesIsRefused(t *testing.T) {
 func TestGoodConfigPasses(t *testing.T) {
 	cfg := &Config{
 		API:  &APIConfig{Addr: "127.0.0.1:8099", TrustedProxies: []string{"127.0.0.1", "10.0.0.0/8", " "}},
-		Auth: &AuthConfig{Provider: "sql"},
+		Auth: &AuthConfig{Provider: "sql", Config: json.RawMessage(`{"driver":"postgres","dsn":"postgres://user@db/game"}`)},
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("рабочие настройки отвергнуты: %v", err)

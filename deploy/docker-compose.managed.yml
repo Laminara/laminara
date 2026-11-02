@@ -1,0 +1,14 @@
+services:
+  laminara:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["start", "--config", "/etc/laminara/config.json", "--config-mode", "managed"]
+    ports:
+      - "127.0.0.1:8099:8099"
+    volumes:
+      - ./managed-config:/etc/laminara
+      - laminara-data:/var/lib/laminara
+    restart: unless-stopped
+volumes:
+  laminara-data:

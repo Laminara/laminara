@@ -20,16 +20,20 @@ type Info struct {
 }
 
 type Command struct {
-	Name     string
-	Aliases  []string
-	Synopsis string
-	Run      func(ctx context.Context, args []string, out io.Writer) error
+	SafeArguments bool
+	SecretOutput  bool
+	Name          string
+	Aliases       []string
+	Synopsis      string
+	Run           func(ctx context.Context, args []string, out io.Writer) error
 }
 
 type CommandSpec struct {
-	Name     string
-	Aliases  []string
-	Synopsis string
+	SafeArguments bool
+	SecretOutput  bool
+	Name          string
+	Aliases       []string
+	Synopsis      string
 }
 
 type ProviderKind int
@@ -47,10 +51,11 @@ type ProviderSpec struct {
 }
 
 type Manifest struct {
-	Info      Info
-	Commands  []CommandSpec
-	Events    []string
-	Providers []ProviderSpec
+	SettingsSchemaJSON []byte
+	Info               Info
+	Commands           []CommandSpec
+	Events             []string
+	Providers          []ProviderSpec
 }
 
 type Module interface {
@@ -60,6 +65,10 @@ type Module interface {
 
 type Configurable interface {
 	Configure(config []byte) error
+}
+
+type SettingsSchema interface {
+	SettingsSchemaJSON() []byte
 }
 
 type EventHandler interface {

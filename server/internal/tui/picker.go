@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -42,6 +43,20 @@ func (p *picker) apply() {
 			p.filtered = append(p.filtered, item)
 		}
 	}
+	if query != "" {
+		slices.SortStableFunc(p.filtered, func(a, b pickItem) int {
+			exact := func(item pickItem) bool {
+				return strings.EqualFold(item.label, query) || strings.EqualFold(item.value, query)
+			}
+			if exact(a) == exact(b) {
+				return 0
+			}
+			if exact(a) {
+				return -1
+			}
+			return 1
+		})
+	}
 	if p.cursor >= len(p.filtered) {
 		p.cursor = max(0, len(p.filtered)-1)
 	}
@@ -69,8 +84,12 @@ func (p picker) Update(msg tea.Msg) (picker, *pickItem) {
 		}
 	}
 	var cmd tea.Cmd
+	previous := p.filter.Value()
 	p.filter, cmd = p.filter.Update(msg)
 	_ = cmd
+	if p.filter.Value() != previous {
+		p.cursor = 0
+	}
 	p.apply()
 	return p, nil
 }

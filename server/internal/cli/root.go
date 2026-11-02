@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 
+	"github.com/laminara/laminara/server/internal/control"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -35,19 +39,54 @@ const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
 {{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
 
 func Root() *cobra.Command {
+	options := control.ClientOptions{URL: os.Getenv("LAMINARA_ADMIN_URL"), Token: os.Getenv("LAMINARA_ADMIN_TOKEN"), TokenFile: os.Getenv("LAMINARA_ADMIN_TOKEN_FILE"), CAFile: os.Getenv("LAMINARA_ADMIN_CA_FILE")}
 	root := &cobra.Command{
 		Use:           "laminara-server",
 		Short:         "Сервер Laminara: демон и управление им",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			name := cmd.Name()
+			if cmd.Parent() != nil && cmd.Parent().Name() == "settings" {
+				name = "settings"
+			}
+			if cmd.Parent() != nil && cmd.Parent().Name() == "jobs" {
+				name = "jobs"
+			}
+			if cmd.Parent() != nil && cmd.Parent().Name() == "build" && cmd.Name() != "validate" {
+				name = "build"
+			}
+			if options.URL == "" || !slices.Contains([]string{"console", "exec", "status", "logs", "settings", "stop", "jobs", "builds", "build"}, name) {
+				return nil
+			}
+			if name == "settings" {
+				if path, _ := cmd.Flags().GetString("config"); path != "" {
+					return nil
+				}
+			}
+			client, err := control.NewClient(options)
+			if err != nil {
+				return err
+			}
+			cmd.SetContext(context.WithValue(cmd.Context(), adminClientKey{}, client))
+			return nil
+		},
 	}
+	root.PersistentFlags().StringVar(&options.URL, "admin-url", options.URL, "URL удалённого административного слушателя")
+	root.PersistentFlags().StringVar(&options.TokenFile, "admin-token-file", options.TokenFile, "файл токена администратора")
+	root.PersistentFlags().StringVar(&options.CAFile, "admin-ca-file", options.CAFile, "доверенный CA административного слушателя")
 	root.AddCommand(
 		startCmd(),
+		adminBootstrapCmd(),
 		stopCmd(),
 		statusCmd(),
+		healthCmd(),
 		consoleCmd(),
 		logsCmd(),
 		execCmd(),
+		jobsCmd(),
+		buildsCmd(),
+		buildCmd(),
 		hashCmd(),
 		clientConfigCmd(),
 		nginxConfigCmd(),

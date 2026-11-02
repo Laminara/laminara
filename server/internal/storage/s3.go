@@ -25,6 +25,7 @@ type s3Config struct {
 	Bucket          string `json:"bucket"`
 	AccessKeyID     string `json:"accessKeyId"`
 	SecretAccessKey string `json:"secretAccessKey"`
+	SessionToken    string `json:"sessionToken"`
 	PathStyle       bool   `json:"pathStyle"`
 	Secure          *bool  `json:"secure"`
 }
@@ -61,8 +62,15 @@ func newS3(raw json.RawMessage) (Backend, error) {
 	if cfg.PathStyle {
 		lookup = minio.BucketLookupPath
 	}
+	creds := credentials.NewChainCredentials([]credentials.Provider{&credentials.EnvAWS{}, &credentials.EnvMinio{}, &credentials.FileAWSCredentials{}, &credentials.IAM{}})
+	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+		if cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
+			return nil, errors.New("S3: accessKeyId и secretAccessKey задаются вместе")
+		}
+		creds = credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, cfg.SessionToken)
+	}
 	client, err := minio.New(host, &minio.Options{
-		Creds:        credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		Creds:        creds,
 		Secure:       secure,
 		Region:       cfg.Region,
 		BucketLookup: lookup,
@@ -76,6 +84,17 @@ func newS3(raw json.RawMessage) (Backend, error) {
 func (b *s3Backend) Put(ctx context.Context, key string, r io.Reader, size int64) error {
 	_, err := b.client.PutObject(ctx, b.bucket, key, r, size, minio.PutObjectOptions{})
 	return err
+}
+
+func (b *s3Backend) Readiness(ctx context.Context) error {
+	exists, err := b.client.BucketExists(ctx, b.bucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("бакет S3 недоступен")
+	}
+	return nil
 }
 
 func (b *s3Backend) Get(ctx context.Context, key string) (io.ReadCloser, error) {

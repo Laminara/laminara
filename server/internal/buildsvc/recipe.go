@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -132,7 +131,7 @@ func recipeHint(err error, spec string, asked bool) error {
 }
 
 func (s *Service) rememberedRecipe(name string) (string, error) {
-	settings, err := manifest.LoadSettings(filepath.Join(s.profilesDir, name))
+	settings, err := manifest.LoadSettings(s.profileRoot(name))
 	if err != nil {
 		return "", fmt.Errorf("настройки сборки «%s» не читаются, а в них записан рецепт: %w", name, err)
 	}

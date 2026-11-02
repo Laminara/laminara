@@ -16,6 +16,8 @@ import (
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/gen/go/laminara/admin/v1/adminv1connect"
 	"github.com/laminara/laminara/server/internal/buildview"
+	"github.com/laminara/laminara/server/internal/command"
+	"github.com/laminara/laminara/server/internal/control"
 	"github.com/laminara/laminara/server/internal/humanize"
 )
 
@@ -44,7 +46,7 @@ func deleteConfirm(name string, set iconSet) confirmPrompt {
 	return confirmPrompt{
 		question: "удалить сборку «" + name + "»?",
 		verb:     "удалять",
-		command:  "delete " + name,
+		command:  command.Format("delete", name),
 		icon:     set.remove,
 	}
 }
@@ -60,16 +62,25 @@ type progressMsg struct {
 	message string
 }
 type versionsMsg struct {
+	current        *adminv1.BuildInfo
+	request        *wizardRequest
+	err            error
 	versions       []*adminv1.VersionInfo
 	latestRelease  string
 	latestSnapshot string
 }
 type loadersMsg struct {
-	loaders []*adminv1.LoaderInfo
-	recipes []*adminv1.RecipeInfo
+	request          *wizardRequest
+	err              error
+	minecraftVersion string
+	loaders          []*adminv1.LoaderInfo
+	recipes          []*adminv1.RecipeInfo
 }
 type statusTickMsg struct{}
-type commandsMsg struct{ names []string }
+type commandsMsg struct {
+	names   []string
+	secrets map[string]bool
+}
 type statusMsg struct {
 	version   string
 	startedAt time.Time
@@ -118,12 +129,13 @@ type Model struct {
 	picker       picker
 	pickerAction string
 
-	input       textinput.Model
-	commandMode bool
-	confirm     confirmPrompt
-	commands    []string
-	history     []string
-	historyAt   int
+	input          textinput.Model
+	commandMode    bool
+	confirm        confirmPrompt
+	commands       []string
+	commandSecrets map[string]bool
+	history        []string
+	historyAt      int
 
 	help     menu
 	builds   []*adminv1.BuildInfo
@@ -216,6 +228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetchStatus(m.ctx, m.client), statusTick())
 	case commandsMsg:
 		m.commands = msg.names
+		m.commandSecrets = msg.secrets
 		return m, nil
 	case buildsMsg:
 		return m.onBuilds(msg)
@@ -240,6 +253,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case settingsSavedMsg:
 		return m.onSettingsSaved(msg)
+	case settingsPreviewMsg:
+		return m.onSettingsPreview(msg)
+	case settingsAppliedMsg:
+		return m.onSettingsApplied(msg)
 	}
 
 	switch m.state {
@@ -267,7 +284,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startCommand(line string) (tea.Model, tea.Cmd) {
-	if len(m.history) == 0 || m.history[len(m.history)-1] != line {
+	label, secret := m.commandLabel(line)
+	if !secret && (len(m.history) == 0 || m.history[len(m.history)-1] != line) {
 		m.history = append(m.history, line)
 		if len(m.history) > 50 {
 			m.history = m.history[1:]
@@ -275,11 +293,11 @@ func (m Model) startCommand(line string) (tea.Model, tea.Cmd) {
 	}
 	m.historyAt = len(m.history)
 	m.running = true
-	m.runLabel = line
+	m.runLabel = label
 	m.started = time.Now()
 	m.prog = progressMsg{}
-	m.appendLog(m.styles.echo.Render(m.icons.cursor+" ") + m.styles.keyLabel.Render(line))
-	return m, tea.Batch(runCommand(m.ctx, m.client, line, m.logCh, m.progCh, m.styles, m.started), tickCmd())
+	m.appendLog(m.styles.echo.Render(m.icons.cursor+" ") + m.styles.keyLabel.Render(label))
+	return m, tea.Batch(runCommand(m.ctx, m.client, line, m.logCh, m.progCh, m.styles, m.started, label), tickCmd())
 }
 
 func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -314,6 +332,7 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.SetValue(completed)
 				m.input.CursorEnd()
 			}
+			m.maskCommandInput()
 			return m, nil
 		case "up":
 			if len(m.history) > 0 && m.historyAt > 0 {
@@ -321,6 +340,7 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.SetValue(m.history[m.historyAt])
 				m.input.CursorEnd()
 			}
+			m.maskCommandInput()
 			return m, nil
 		case "down":
 			if m.historyAt < len(m.history)-1 {
@@ -331,6 +351,7 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyAt = len(m.history)
 				m.input.SetValue("")
 			}
+			m.maskCommandInput()
 			return m, nil
 		case "enter":
 			line := strings.TrimSpace(m.input.Value())
@@ -344,6 +365,7 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		m.maskCommandInput()
 		return m, cmd
 	}
 	switch key.String() {
@@ -358,6 +380,7 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/", ":":
 		m.commandMode = true
+		m.input.EchoMode = textinput.EchoNormal
 		return m, m.input.Focus()
 	case "i":
 		wiz, cmd := newWizard(m.ctx, m.client, m.icons, m.styles, "")
@@ -420,7 +443,7 @@ func (m Model) updateBuildPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateCard
 		return m, fetchPlayers(m.ctx, m.client)
 	case "publish":
-		return m.startCommand("publish " + name)
+		return m.startCommand(command.Format("publish", name))
 	case "delete":
 		m.confirm = deleteConfirm(name, m.icons)
 		return m, nil
@@ -435,6 +458,18 @@ func (m Model) updateBuildPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) onBuilds(msg buildsMsg) (tea.Model, tea.Cmd) {
 	m.builds = msg.builds
+	if m.state == stateSettings {
+		if m.card.build != nil {
+			for _, build := range msg.builds {
+				if build.Name == m.card.build.Name {
+					m.card.build = build
+					m.fillCard()
+					break
+				}
+			}
+		}
+		return m, nil
+	}
 	if len(msg.builds) == 0 {
 		m.appendLog(m.styles.dim.Render("Сборок пока нет — соберите первую клавишей ") + m.styles.key.Render("i"))
 		m.state = stateMain
@@ -486,7 +521,7 @@ func (m Model) View() string {
 	sections := []string{m.headerView()}
 	switch m.state {
 	case stateWizard:
-		sections = append(sections, lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, m.wizard.View()))
+		sections = append(sections, lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, m.wizard.View(m.width, m.contentHeight())))
 	case stateBuildPick:
 		box := m.styles.wizardBox.Render(m.picker.View())
 		sections = append(sections, lipgloss.Place(m.width, m.contentHeight(), lipgloss.Center, lipgloss.Center, box))
@@ -635,12 +670,12 @@ func (m Model) barView() string {
 	case statePlayers:
 		return m.playersBar()
 	case stateCard:
-		return m.styles.bar.Render(strings.Join([]string{
+		return m.styles.bar.Render(fitBar([]string{
+			item("s", "настройки"),
 			item("p", "опубликовать"),
 			item("u", "пересобрать"),
 			item("d", "удалить"),
-			item("Esc", "назад"),
-		}, "   "))
+		}, []string{item("Esc", "назад")}, m.width-4))
 	case stateHelp:
 		return m.styles.bar.Render(item("Esc", "закрыть справку"))
 	}
@@ -784,23 +819,36 @@ func formatLog(line *adminv1.LogLine, st styles) string {
 	return fmt.Sprintf("%s %s %s %s", when, st.source.Render(fmt.Sprintf("%-8s", source)), mark, message)
 }
 
-func fetchVersions(ctx context.Context, client adminv1connect.AdminServiceClient) tea.Cmd {
+func fetchVersions(ctx context.Context, client adminv1connect.AdminServiceClient, request *wizardRequest, prefill string) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := client.ListVersions(ctx, connect.NewRequest(&adminv1.ListVersionsRequest{}))
 		if err != nil {
-			return errMsg{err}
+			return versionsMsg{request: request, err: err}
 		}
-		return versionsMsg{versions: resp.Msg.Versions, latestRelease: resp.Msg.LatestRelease, latestSnapshot: resp.Msg.LatestSnapshot}
+		message := versionsMsg{request: request, versions: resp.Msg.Versions, latestRelease: resp.Msg.LatestRelease, latestSnapshot: resp.Msg.LatestSnapshot}
+		if prefill != "" {
+			builds, err := client.ListBuilds(ctx, connect.NewRequest(&adminv1.ListBuildsRequest{}))
+			if err != nil {
+				return versionsMsg{request: request, err: err}
+			}
+			for _, build := range builds.Msg.Builds {
+				if build.Name == prefill {
+					message.current = build
+					break
+				}
+			}
+		}
+		return message
 	}
 }
 
-func fetchLoaders(ctx context.Context, client adminv1connect.AdminServiceClient, mc string) tea.Cmd {
+func fetchLoaders(ctx context.Context, client adminv1connect.AdminServiceClient, mc string, request *wizardRequest) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := client.ListLoaders(ctx, connect.NewRequest(&adminv1.ListLoadersRequest{McVersion: mc}))
 		if err != nil {
-			return errMsg{err}
+			return loadersMsg{request: request, minecraftVersion: mc, err: err}
 		}
-		return loadersMsg{loaders: resp.Msg.Loaders, recipes: resp.Msg.Recipes}
+		return loadersMsg{request: request, minecraftVersion: mc, loaders: resp.Msg.Loaders, recipes: resp.Msg.Recipes}
 	}
 }
 
@@ -814,34 +862,49 @@ func fetchBuilds(ctx context.Context, client adminv1connect.AdminServiceClient) 
 	}
 }
 
-func runCommand(ctx context.Context, client adminv1connect.AdminServiceClient, line string, logCh chan string, progCh chan progressMsg, st styles, started time.Time) tea.Cmd {
+func runCommand(ctx context.Context, client adminv1connect.AdminServiceClient, line string, logCh chan string, progCh chan progressMsg, st styles, started time.Time, labels ...string) tea.Cmd {
 	return func() tea.Msg {
-		stream, err := client.Exec(ctx, connect.NewRequest(&adminv1.ExecRequest{Line: line}))
-		if err != nil {
-			logCh <- st.bad.Render("✕ ") + st.keyLabel.Render(err.Error())
-			return execDoneMsg{line: line, err: err}
+		label := "команда"
+		if len(labels) > 0 {
+			label = labels[0]
 		}
+		arguments, err := command.Split(line)
 		var code int32
-		for stream.Receive() {
-			event := stream.Msg()
-			if output := event.GetOutput(); output != nil {
-				for _, part := range strings.Split(strings.TrimRight(output.Text, "\n"), "\n") {
-					if part != "" {
-						logCh <- part
+		if err == nil {
+			code, err = control.Execute(ctx, client, arguments, func(id string) {
+				select {
+				case logCh <- "Задание: " + id + " · продолжить: jobs watch " + id:
+				case <-ctx.Done():
+				}
+			}, func(event *adminv1.ExecResponse) error {
+				if output := event.GetOutput(); output != nil {
+					for _, part := range strings.Split(strings.TrimRight(output.Text, "\n"), "\n") {
+						if part != "" {
+							select {
+							case logCh <- part:
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+						}
 					}
 				}
-			}
-			if p := event.GetProgress(); p != nil {
-				select {
-				case progCh <- progressMsg{phase: p.Phase, current: p.Current, total: p.Total, message: p.Message}:
-				default:
+				if p := event.GetProgress(); p != nil {
+					select {
+					case progCh <- progressMsg{phase: p.Phase, current: p.Current, total: p.Total, message: p.Message}:
+					default:
+					}
 				}
-			}
-			if result := event.GetResult(); result != nil {
-				code = result.ExitCode
-			}
+				return nil
+			})
 		}
-		logCh <- commandResultLine(line, code, time.Since(started), st)
+		if err != nil {
+			select {
+			case logCh <- st.bad.Render("✕ ") + st.keyLabel.Render(err.Error()):
+			case <-ctx.Done():
+			}
+			return execDoneMsg{line: line, err: err}
+		}
+		logCh <- commandResultLine(label, code, time.Since(started), st)
 		return execDoneMsg{line: line, exitCode: code}
 	}
 }
@@ -868,24 +931,43 @@ func statusLabel(status string, st styles) string {
 
 func fetchCommands(ctx context.Context, client adminv1connect.AdminServiceClient) tea.Cmd {
 	return func() tea.Msg {
-		stream, err := client.Exec(ctx, connect.NewRequest(&adminv1.ExecRequest{Line: "help"}))
+		response, err := client.ListCommands(ctx, connect.NewRequest(&adminv1.ListCommandsRequest{}))
 		if err != nil {
 			return commandsMsg{}
 		}
 		var names []string
-		for stream.Receive() {
-			output := stream.Msg().GetOutput()
-			if output == nil {
-				continue
-			}
-			for _, line := range strings.Split(output.Text, "\n") {
-				name, _, found := strings.Cut(strings.TrimSpace(line), " ")
-				if found && name != "" {
-					names = append(names, name)
-				}
+		secrets := map[string]bool{}
+		for _, entry := range response.Msg.Commands {
+			names = append(names, entry.Name)
+			secrets[entry.Name] = entry.SecretArguments
+			for _, alias := range entry.Aliases {
+				names = append(names, alias)
+				secrets[alias] = entry.SecretArguments
 			}
 		}
-		return commandsMsg{names: names}
+		return commandsMsg{names: names, secrets: secrets}
+	}
+}
+
+func (m Model) commandLabel(line string) (string, bool) {
+	words := strings.Fields(line)
+	if len(words) == 0 {
+		return "команда", true
+	}
+	secret, known := m.commandSecrets[words[0]]
+	if !known {
+		return "команда [аргументы скрыты]", true
+	}
+	if secret {
+		return words[0] + " [аргументы скрыты]", true
+	}
+	return line, false
+}
+
+func (m *Model) maskCommandInput() {
+	m.input.EchoMode = textinput.EchoNormal
+	if _, secret := m.commandLabel(m.input.Value()); secret && strings.ContainsAny(m.input.Value(), " \t") {
+		m.input.EchoMode, m.input.EchoCharacter = textinput.EchoPassword, '•'
 	}
 }
 

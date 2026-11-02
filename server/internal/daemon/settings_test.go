@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,18 @@ func settingsStoreFor(t *testing.T) *settingsStore {
 		t.Fatal(err)
 	}
 	return &settingsStore{path: path}
+}
+
+func configureAuth(t *testing.T, store *settingsStore, provider string, changes ...*adminv1.SettingChange) {
+	t.Helper()
+	page, err := store.List("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Apply(&adminv1.SettingsPatch{Revision: page.Revision, Changes: append([]*adminv1.SettingChange{settingChange("auth.provider", provider)}, changes...)})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSettingsEntryPrintsOneBlockForALeafSetting(t *testing.T) {
@@ -97,7 +110,7 @@ func TestSettingsNeverEchoASecret(t *testing.T) {
 	store := settingsStoreFor(t)
 	const secret = "postgres://operator:p@ssw0rd@db:5432/game"
 
-	settingsRun(t, store, "auth.provider", "sql")
+	configureAuth(t, store, "sql", settingChange("auth.config.driver", "postgres"), settingChange("auth.config.dsn", "postgres://operator@db/game"))
 	echo := settingsRun(t, store, "auth.config.dsn", secret)
 	if strings.Contains(echo, secret) {
 		t.Fatalf("the echo of a written secret must be masked, got %q", echo)
@@ -142,7 +155,7 @@ func TestSettingsEchoForACollectionSecretIsMasked(t *testing.T) {
 
 func TestSettingsScreenKeepsEditingASecret(t *testing.T) {
 	store := settingsStoreFor(t)
-	settingsRun(t, store, "auth.provider", "sql")
+	configureAuth(t, store, "sql", settingChange("auth.config.driver", "postgres"), settingChange("auth.config.dsn", "postgres://operator@db/game"))
 	settingsRun(t, store, "auth.config.dsn", "postgres://operator:secret@db:5432/game")
 
 	entry, err := store.Entry("auth.config.dsn")
@@ -172,4 +185,39 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestWholeSettingWritesNeverEchoSecrets(t *testing.T) {
+	store := settingsStoreFor(t)
+	settingsRun(t, store, "add", "crashReports.sinks", "hook")
+	for _, test := range []struct{ path, value, secret string }{
+		{"crashReports.sinks.hook", `{"type":"discord","config":{"url":"https://discord/SECRET","username":"bot"}}`, "https://discord/SECRET"},
+		{"modules.config.custom", `{"arbitrary":["OPAQUE-SECRET"]}`, "OPAQUE-SECRET"},
+	} {
+		output := settingsRun(t, store, test.path, test.value)
+		if strings.Contains(output, test.secret) || !strings.Contains(output, settings.SecretMask) {
+			t.Fatalf("whole setting write echoed a secret: %s", test.path)
+		}
+		if !strings.Contains(readFile(t, store.path), test.secret) {
+			t.Fatalf("whole setting write lost its secret: %s", test.path)
+		}
+	}
+}
+
+func TestRedactedEditPreservesTheLatestStoredHeader(t *testing.T) {
+	store := settingsStoreFor(t)
+	configureAuth(t, store, "http", settingChange("auth.config.url", "https://example.test/auth"))
+	settingsRun(t, store, "auth.config.headers", `{"Authorization":"old","X-Label":"one"}`)
+	page, err := store.List("auth", "")
+	if err != nil || len(page.Entries) == 0 {
+		t.Fatalf("settings page: %v", err)
+	}
+	settingsRun(t, store, "auth.config.headers", `{"Authorization":"latest-secret","X-Label":"one"}`)
+	entry, err := store.Edit("auth.config.headers", `{"Authorization":"***","X-Label":"два, три=4"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(entry.Value, "latest-secret") || !strings.Contains(readFile(t, store.path), "latest-secret") || !strings.Contains(readFile(t, store.path), "два, три=4") {
+		t.Fatal("edit did not preserve the latest secret with the new public value")
+	}
 }

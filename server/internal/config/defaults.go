@@ -66,6 +66,14 @@ func withDefaults(cfg *Config, configPath string) map[string]string {
 		*target = value
 		filled[path] = value
 	}
+	if cfg.Admin != nil {
+		if cfg.Admin.TokensPath == "" {
+			fill("admin.tokensPath", at("admin-tokens.json"), &cfg.Admin.TokensPath)
+		}
+		if cfg.Admin.JobsDir == "" {
+			fill("admin.jobsDir", at("jobs"), &cfg.Admin.JobsDir)
+		}
+	}
 
 	if cfg.Build != nil && cfg.Build.ProfilesDir != "" && cfg.Build.SigningKeyPath == "" {
 		fill("build.signingKeyPath", at("signing.key"), &cfg.Build.SigningKeyPath)

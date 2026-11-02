@@ -9,6 +9,7 @@ import (
 
 	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
+	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/humanize"
 	"github.com/laminara/laminara/server/internal/manifest"
 	"github.com/laminara/laminara/server/internal/platform"
@@ -38,6 +39,8 @@ func StatusWord(status string) string {
 	switch status {
 	case "published":
 		return "опубликована"
+	case "changed":
+		return "настройки изменены, нужна публикация"
 	case "prepared":
 		return "собрана, ждёт публикации"
 	default:
@@ -58,11 +61,11 @@ func InstallCommand(name string, settings manifest.Settings) string {
 	if settings.Install == "" {
 		return ""
 	}
-	command := "install " + name + " " + settings.Install
+	line := command.Format("install", name) + " " + settings.Install
 	if settings.Compat != "" && !strings.Contains(" "+settings.Install, " compat=") {
-		command += " compat=" + RecipeOff
+		line += " compat=" + RecipeOff
 	}
-	return command
+	return line
 }
 
 func RecipeWord(compat string) string {
@@ -97,6 +100,9 @@ func Title(build *adminv1.BuildInfo) string {
 
 func Fields(build *adminv1.BuildInfo, players *adminv1.BuildPlayers) []Field {
 	fields := []Field{}
+	if build.Status == "changed" {
+		fields = append(fields, Field{Label: "Настройки", Value: "сохранены, не опубликованы", Hint: "Игроки пока получают предыдущую публикацию."})
+	}
 	if build.MinecraftVersion != "" {
 		fields = append(fields, Field{Label: "Minecraft", Value: build.MinecraftVersion})
 		fields = append(fields, Field{Label: "Загрузчик", Value: LoaderWord(build.Loader)})

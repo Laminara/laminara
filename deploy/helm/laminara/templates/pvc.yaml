@@ -1,0 +1,16 @@
+{{- if not .Values.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "laminara.name" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: {{ .Values.persistence.accessModes | toJson }}
+  {{- if ne .Values.persistence.storageClass nil }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

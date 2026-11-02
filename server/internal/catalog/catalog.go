@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +36,11 @@ func ManifestName(build string, p corev1.Platform) string {
 }
 
 func ManifestPath(dir, build string, p corev1.Platform) string {
+	if pointer, err := ReadRelease(dir, build); err == nil {
+		return filepath.Join(releaseRoot(dir, build), "releases", pointer.Current, ManifestName(build, p))
+	} else if !os.IsNotExist(err) {
+		return filepath.Join(releaseRoot(dir, build), "invalid", ManifestName(build, p))
+	}
 	return filepath.Join(dir, ManifestName(build, p))
 }
 
@@ -47,9 +51,10 @@ func SignaturePath(manifest string) string {
 type Catalog struct {
 	dir string
 
-	mu      sync.Mutex
-	current *snapshot
-	checked time.Time
+	mu        sync.Mutex
+	current   *snapshot
+	checked   time.Time
+	scanError error
 
 	rescan sync.Mutex
 }
@@ -59,16 +64,19 @@ func New(dir string) *Catalog {
 }
 
 type variant struct {
-	file     string
-	platform corev1.Platform
-	manifest *corev1.Manifest
+	canonical      []byte
+	signature      []byte
+	signatureError error
+	platform       corev1.Platform
+	manifest       *corev1.Manifest
 }
 
 type snapshot struct {
-	stamp  string
-	builds map[string][]variant
-	names  []string
-	owners map[string][]string
+	stamp    string
+	builds   map[string][]variant
+	names    []string
+	owners   map[string][]string
+	retained map[string][]variant
 }
 
 func (c *Catalog) snapshot() *snapshot {
@@ -86,6 +94,9 @@ func (c *Catalog) snapshot() *snapshot {
 	started := time.Now()
 	stamp, entries, err := c.index()
 	current := c.state()
+	c.mu.Lock()
+	c.scanError = err
+	c.mu.Unlock()
 	if err != nil {
 		slog.Warn("каталог: не удалось перечитать папку сборок", "source", "catalog", "проект", c.dir, "ошибка", err)
 		if current != nil {
@@ -129,59 +140,30 @@ func (c *Catalog) scanned(started time.Time) {
 	c.mu.Unlock()
 }
 
-func (c *Catalog) index() (string, []string, error) {
-	listed, err := os.ReadDir(c.dir)
-	if err != nil {
-		slog.Warn("каталог: папку с манифестами открыть не вышло", "source", "catalog", "проект", c.dir, "ошибка", err)
-		return "", nil, err
-	}
-
-	matches := make([]string, 0, len(listed))
-	for _, entry := range listed {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), manifestExt) {
-			continue
-		}
-		matches = append(matches, filepath.Join(c.dir, entry.Name()))
-	}
-	sort.Strings(matches)
-
-	entries := make([]string, 0, len(matches))
-	var stamp strings.Builder
-	for _, entry := range matches {
-		info, err := os.Stat(entry)
-		if err != nil {
-			slog.Warn("каталог: манифест недоступен", "source", "catalog", "файл", filepath.Base(entry), "ошибка", err)
-			continue
-		}
-		entries = append(entries, entry)
-		stamp.WriteString(entry)
-		stamp.WriteByte(0)
-		stamp.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
-		stamp.WriteByte(0)
-		stamp.WriteString(strconv.FormatInt(info.Size(), 10))
-		stamp.WriteByte('\n')
-	}
-	return stamp.String(), entries, nil
-}
-
-func (c *Catalog) collect(stamp string, entries []string) *snapshot {
-	next := &snapshot{stamp: stamp, builds: map[string][]variant{}, owners: map[string][]string{}}
+func (c *Catalog) collect(stamp string, entries []indexedManifest) *snapshot {
+	next := &snapshot{stamp: stamp, builds: map[string][]variant{}, owners: map[string][]string{}, retained: map[string][]variant{}}
 	for _, entry := range entries {
-		canonical, err := os.ReadFile(entry)
+		canonical, err := os.ReadFile(entry.path)
 		if err != nil {
-			slog.Warn("каталог: манифест не прочитан", "source", "catalog", "файл", filepath.Base(entry), "ошибка", err)
+			slog.Warn("каталог: манифест не прочитан", "source", "catalog", "файл", filepath.Base(entry.path), "ошибка", err)
 			continue
 		}
 		var m corev1.Manifest
 		if err := proto.Unmarshal(canonical, &m); err != nil {
-			slog.Warn("каталог: манифест повреждён, сборка пропущена", "source", "catalog", "файл", filepath.Base(entry), "ошибка", err)
+			slog.Warn("каталог: манифест повреждён, сборка пропущена", "source", "catalog", "файл", filepath.Base(entry.path), "ошибка", err)
 			continue
 		}
 		name := m.Modpack
 		if name == "" {
-			name = strings.TrimSuffix(filepath.Base(entry), manifestExt)
+			name = strings.TrimSuffix(filepath.Base(entry.path), manifestExt)
 		}
-		next.builds[name] = append(next.builds[name], variant{file: entry, platform: m.Platform, manifest: &m})
+		signature, signatureError := os.ReadFile(SignaturePath(entry.path))
+		v := variant{canonical: canonical, signature: signature, signatureError: signatureError, platform: m.Platform, manifest: &m}
+		if entry.active {
+			next.builds[name] = append(next.builds[name], v)
+		} else {
+			next.retained[name] = append(next.retained[name], v)
+		}
 	}
 	for name, list := range next.builds {
 		sort.Slice(list, func(i, j int) bool { return list[i].platform < list[j].platform })
@@ -194,7 +176,7 @@ func (c *Catalog) collect(stamp string, entries []string) *snapshot {
 
 func (s *snapshot) indexOwners() {
 	for _, name := range s.names {
-		for _, v := range s.builds[name] {
+		for _, v := range append(append([]variant(nil), s.builds[name]...), s.retained[name]...) {
 			for _, file := range v.manifest.Files {
 				if file.Object == nil || file.Object.Hash == nil {
 					continue
@@ -221,7 +203,7 @@ func (c *Catalog) List() ([]string, error) {
 }
 
 func (c *Catalog) Owners(key string) ([]string, error) {
-	return c.snapshot().owners[key], nil
+	return append([]string(nil), c.snapshot().owners[key]...), nil
 }
 
 func (c *Catalog) Get(name string, want corev1.Platform) (canonical, signature []byte, err error) {
@@ -234,15 +216,10 @@ func (c *Catalog) Get(name string, want corev1.Platform) (canonical, signature [
 	if chosen == nil {
 		return nil, nil, ErrPlatformUnavailable
 	}
-	canonical, err = os.ReadFile(chosen.file)
-	if err != nil {
-		return nil, nil, err
+	if chosen.signatureError != nil {
+		return nil, nil, chosen.signatureError
 	}
-	signature, err = os.ReadFile(SignaturePath(chosen.file))
-	if err != nil {
-		return nil, nil, err
-	}
-	return canonical, signature, nil
+	return append([]byte(nil), chosen.canonical...), append([]byte(nil), chosen.signature...), nil
 }
 
 func pick(list []variant, want corev1.Platform) *variant {
@@ -341,4 +318,11 @@ func (c *Catalog) Details() ([]Detail, error) {
 		details = append(details, detail)
 	}
 	return details, nil
+}
+
+func (c *Catalog) Check() error {
+	c.snapshot()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scanError
 }

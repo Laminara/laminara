@@ -21,26 +21,31 @@ import (
 type Kind string
 
 const (
-	KindText     Kind = "text"
-	KindSecret   Kind = "secret"
-	KindBool     Kind = "bool"
-	KindInt      Kind = "int"
-	KindDuration Kind = "duration"
-	KindChoice   Kind = "choice"
-	KindList     Kind = "list"
-	KindPairs    Kind = "pairs"
-	KindJSON     Kind = "json"
+	KindText       Kind = "text"
+	KindSecret     Kind = "secret"
+	KindBool       Kind = "bool"
+	KindInt        Kind = "int"
+	KindDuration   Kind = "duration"
+	KindChoice     Kind = "choice"
+	KindList       Kind = "list"
+	KindPairs      Kind = "pairs"
+	KindJSON       Kind = "json"
+	KindSecretJSON Kind = "secret-json"
 )
 
 type Field struct {
+	Required  bool
+	Extension bool
 	Key       string
 	Label     string
 	Hint      string
 	Kind      Kind
 	Default   string
+	Initial   string
 	Options   func() []string
 	Variants  map[string][]Field
 	VariantOf string
+	AllowZero bool
 }
 
 type Section struct {
@@ -52,13 +57,15 @@ type Section struct {
 }
 
 type Collection struct {
-	Key       string
-	Title     string
-	Hint      string
-	Keyed     bool
-	NameLabel string
-	NameHint  string
-	Fields    []Field
+	EntryFields func(string) []Field
+	Key         string
+	Title       string
+	Hint        string
+	Keyed       bool
+	NameLabel   string
+	NameHint    string
+	Fields      []Field
+	Children    func() []Collection
 }
 
 func countOf(bucket ratelimit.Bucket) string { return strconv.Itoa(bucket.Limit) }
@@ -69,11 +76,23 @@ func overOf(bucket ratelimit.Bucket) string {
 
 var schema = []Section{
 	{
+		Key: "admin", Title: "Удалённое администрирование", Hint: "Отдельный слушатель. Пустой адрес выключает сетевой доступ.",
+		Fields: []Field{
+			{Key: "addr", Label: "Адрес и порт", Kind: KindText},
+			{Key: "tlsCert", Label: "TLS сертификат", Kind: KindText},
+			{Key: "tlsKey", Label: "Файл TLS ключа", Kind: KindText},
+			{Key: "allowInsecureLoopback", Label: "HTTP на loopback", Kind: KindBool, Default: "false", Hint: "Только для 127.0.0.1 или ::1 за защищённым прокси."},
+			{Key: "tokensPath", Label: "Хранилище токенов", Kind: KindText},
+			{Key: "jobsDir", Label: "История заданий", Kind: KindText},
+		},
+	},
+	{
 		Key:   "api",
 		Title: "Публичный слушатель",
 		Hint:  "Порт, на который приходит лаунчер: манифесты, файлы сборок и вход в игре.",
 		Fields: []Field{
 			{Key: "addr", Label: "Адрес и порт", Kind: KindText, Default: "0.0.0.0:8099", Hint: "За nginx держите 127.0.0.1:8099 — наружу смотрит только nginx."},
+			{Key: "metrics", Label: "Метрики Prometheus", Kind: KindBool, Default: "false", Hint: "Открывает /metrics. Ограничьте доступ к этому пути на ingress или reverse proxy."},
 			{Key: "xAccel", Label: "Файлы отдаёт nginx", Kind: KindBool, Default: "false", Hint: "Включайте только вместе с nginx: сервер отвечает заголовком, а байты шлёт nginx."},
 			{Key: "trustedProxies", Label: "Доверенные прокси", Kind: KindList, Hint: "Чьему заголовку X-Forwarded-For верить: адреса и подсети через запятую, например 127.0.0.1 или 10.0.0.0/8. Пусто — верим локальным и частным сетям."},
 		},
@@ -142,6 +161,7 @@ var schema = []Section{
 					{Key: "bucket", Label: "Бакет", Kind: KindText},
 					{Key: "accessKeyId", Label: "Ключ доступа", Kind: KindText},
 					{Key: "secretAccessKey", Label: "Секрет", Kind: KindSecret},
+					{Key: "sessionToken", Label: "Токен сессии S3", Kind: KindSecret, Hint: "Для временных ключей. Без явных ключей используются окружение, AWS profile или IAM роль."},
 					{Key: "pathStyle", Label: "Путь вместо поддомена", Kind: KindBool, Default: "false", Hint: "Нужен своим хранилищам вроде Garage и MinIO."},
 					{Key: "secure", Label: "Только HTTPS", Kind: KindBool, Default: "true"},
 				},
@@ -371,6 +391,8 @@ var schema = []Section{
 		Title: "Журнал сервера",
 		Hint:  "Логи всегда идут в консоль. Файл нужен там, где их некому подхватить — journald и docker ведут свой журнал сами.",
 		Fields: []Field{
+			{Key: "level", Label: "Уровень журнала", Kind: KindChoice, Default: "info", Options: func() []string { return []string{"debug", "info", "warn", "error"} }},
+			{Key: "format", Label: "Формат журнала", Kind: KindChoice, Default: "text", Options: func() []string { return []string{"text", "json"} }},
 			{Key: "file", Label: "Файл журнала", Kind: KindText, Hint: "Пусто — журнал только в консоли."},
 			{Key: "maxSizeMB", Label: "Резать после, МБ", Kind: KindInt, Default: "20"},
 			{Key: "keep", Label: "Хранить файлов", Kind: KindInt, Default: "5"},
@@ -397,7 +419,7 @@ var schema = []Section{
 			{Key: "auth", Label: "Как входить", Kind: KindChoice, Default: "link", Options: func() []string { return []string{"link", "password", "both"} }, Hint: "link — только по одноразовой ссылке из команды «web», password — по паролю, both — и так, и так."},
 			{Key: "password", Label: "Пароль", Kind: KindSecret, Hint: "Хеш argon2id, посчитайте командой «laminara-server hash». Нужен при входе по паролю."},
 			{Key: "publicUrl", Label: "Адрес сервера", Kind: KindText, Hint: "Например https://launcher.example.com — подставляется в ссылку на консоль."},
-			{Key: "sessionTTL", Label: "Сколько помнить вход", Kind: KindDuration, Default: "168h", Hint: "0 — не забывать никогда."},
+			{Key: "sessionTTL", Label: "Сколько помнить вход", Kind: KindDuration, Default: "168h", AllowZero: true, Hint: "0 — не забывать никогда."},
 			{Key: "linkTTL", Label: "Сколько живёт ссылка", Kind: KindDuration, Default: "10m"},
 			{Key: "statePath", Label: "Файл сеансов", Kind: KindText, Hint: "Где хранить открытые сеансы, чтобы они пережили перезапуск."},
 		},
@@ -425,14 +447,14 @@ var schema = []Section{
 				NameLabel: "Имя модуля", NameHint: "Так же, как называется файл модуля в папке.",
 				Hint: "Каждый модуль читает свои настройки — что в них писать, знает его автор.",
 				Fields: []Field{
-					{Key: "", Label: "Настройки модуля", Kind: KindText, Hint: "JSON целиком, например {\"token\":\"…\"}."},
+					{Key: "", Label: "Настройки модуля", Kind: KindSecretJSON, Hint: "JSON скрыт: модуль может хранить в нём секреты. Введите весь блок для замены; пустой ввод оставит его прежним."},
 				},
 			},
 		},
 	},
 }
 
-func Sections() []Section { return schema }
+func Sections() []Section { return extendedSections(schema) }
 
 func sectionOf(key string) (Section, bool) {
 	for _, section := range schema {

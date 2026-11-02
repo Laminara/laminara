@@ -26,11 +26,14 @@ type Status struct {
 type StatusFunc func() Status
 
 type Service struct {
-	status   StatusFunc
-	bus      *logbus.Bus
-	registry *command.Registry
-	catalog  Catalog
-	settings Settings
+	status        StatusFunc
+	bus           *logbus.Bus
+	registry      *command.Registry
+	catalog       Catalog
+	settings      Settings
+	buildSettings BuildSettings
+	stop          func() error
+	jobs          Jobs
 }
 
 func NewService(status StatusFunc, bus *logbus.Bus, registry *command.Registry, catalog Catalog) *Service {
@@ -39,6 +42,28 @@ func NewService(status StatusFunc, bus *logbus.Bus, registry *command.Registry, 
 
 func (s *Service) SetSettings(store Settings) {
 	s.settings = store
+}
+
+func (s *Service) SetStop(stop func() error) { s.stop = stop }
+
+func (s *Service) Stop(context.Context, *connect.Request[adminv1.StopRequest]) (*connect.Response[adminv1.StopResponse], error) {
+	if s.stop == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("остановка недоступна"))
+	}
+	if err := s.stop(); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&adminv1.StopResponse{}), nil
+}
+
+func (s *Service) ListCommands(context.Context, *connect.Request[adminv1.ListCommandsRequest]) (*connect.Response[adminv1.ListCommandsResponse], error) {
+	response := &adminv1.ListCommandsResponse{}
+	if s.registry != nil {
+		for _, entry := range s.registry.List() {
+			response.Commands = append(response.Commands, &adminv1.CommandInfo{Name: entry.Name, Aliases: entry.Aliases, Synopsis: entry.Synopsis, SecretArguments: entry.SecretArgs || entry.Secret, SecretOutput: entry.Secret})
+		}
+	}
+	return connect.NewResponse(response), nil
 }
 
 func (s *Service) ListVersions(ctx context.Context, req *connect.Request[adminv1.ListVersionsRequest]) (*connect.Response[adminv1.ListVersionsResponse], error) {
@@ -105,14 +130,26 @@ func (s *Service) ListPlayers(ctx context.Context, _ *connect.Request[adminv1.Li
 }
 
 func (s *Service) Status(_ context.Context, _ *connect.Request[adminv1.StatusRequest]) (*connect.Response[adminv1.StatusResponse], error) {
-	st := s.status()
-	return connect.NewResponse(&adminv1.StatusResponse{
+	var st Status
+	if s.status != nil {
+		st = s.status()
+	}
+	response := &adminv1.StatusResponse{
 		Version:            st.Version,
 		StartedAtUnixNanos: st.StartedAtNano,
 		ModulesLoaded:      st.ModulesLoaded,
 		MemoryBytes:        st.MemoryBytes,
 		Goroutines:         st.Goroutines,
-	}), nil
+		Capabilities: []adminv1.AdminCapability{
+			adminv1.AdminCapability_ADMIN_CAPABILITY_STRUCTURED_ARGUMENTS,
+			adminv1.AdminCapability_ADMIN_CAPABILITY_REDACTED_SETTINGS,
+			adminv1.AdminCapability_ADMIN_CAPABILITY_SETTINGS_PATCH,
+		},
+	}
+	if s.jobs != nil {
+		response.Capabilities = append(response.Capabilities, adminv1.AdminCapability_ADMIN_CAPABILITY_JOBS)
+	}
+	return connect.NewResponse(response), nil
 }
 
 func (s *Service) StreamLogs(ctx context.Context, req *connect.Request[adminv1.StreamLogsRequest], stream *connect.ServerStream[adminv1.StreamLogsResponse]) error {
@@ -151,11 +188,22 @@ func (s *Service) StreamLogs(ctx context.Context, req *connect.Request[adminv1.S
 }
 
 func (s *Service) Exec(ctx context.Context, req *connect.Request[adminv1.ExecRequest], stream *connect.ServerStream[adminv1.ExecResponse]) error {
+	if req.Msg.Line != "" && len(req.Msg.Arguments) > 0 {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("передайте строку команды или список аргументов, но не оба"))
+	}
+	arguments := req.Msg.Arguments
+	if len(arguments) == 0 {
+		parsed, err := command.Split(req.Msg.Line)
+		if err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		arguments = parsed
+	}
 	sender := &streamSender{stream: stream}
 	ctx = progress.With(ctx, &streamReporter{sender: sender})
 	out := &chunkWriter{sender: sender}
 	code := int32(0)
-	if err := s.registry.Dispatch(ctx, req.Msg.Line, out); err != nil {
+	if err := s.registry.DispatchArgs(ctx, arguments, out); err != nil {
 		code = 1
 		fmt.Fprintf(&chunkWriter{sender: sender, stderr: true}, "%v\n", err)
 	}
@@ -241,20 +289,24 @@ func passes(l logbus.Line, minLevel adminv1.LogLevel, source string) bool {
 
 func BuildInfoOf(entry BuildEntry) *adminv1.BuildInfo {
 	info := &adminv1.BuildInfo{
-		Name:             entry.Name,
-		Status:           entry.Status,
-		Prepared:         entry.Prepared,
-		Published:        entry.Published,
-		MinecraftVersion: entry.Minecraft,
-		JavaMajor:        entry.JavaMajor,
-		Loader:           entry.Loader,
-		Compat:           entry.Compat,
-		Trouble:          entry.Trouble,
-		SizeBytes:        entry.SizeBytes,
-		Files:            uint32(entry.Files),
-		ServerAddress:    entry.ServerAddress,
-		Access:           entry.Access,
-		HasFeatures:      entry.HasFeatures,
+		SourceRevision: entry.SourceRevision, InputDigest: entry.InputDigest, ReleaseId: entry.ReleaseID, RetainedReleases: entry.RetainedReleases,
+		SettingsRevision:          entry.SettingsRevision,
+		PublishedSettingsRevision: entry.PublishedSettingsRevision,
+		Install:                   entry.Install,
+		Name:                      entry.Name,
+		Status:                    entry.Status,
+		Prepared:                  entry.Prepared,
+		Published:                 entry.Published,
+		MinecraftVersion:          entry.Minecraft,
+		JavaMajor:                 entry.JavaMajor,
+		Loader:                    entry.Loader,
+		Compat:                    entry.Compat,
+		Trouble:                   entry.Trouble,
+		SizeBytes:                 entry.SizeBytes,
+		Files:                     uint32(entry.Files),
+		ServerAddress:             entry.ServerAddress,
+		Access:                    entry.Access,
+		HasFeatures:               entry.HasFeatures,
 	}
 	if !entry.PublishedAt.IsZero() {
 		info.PublishedAtUnixNanos = entry.PublishedAt.UnixNano()

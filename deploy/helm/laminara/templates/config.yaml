@@ -1,0 +1,9 @@
+{{- if not .Values.existingConfigSecret }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "laminara.name" . }}
+data:
+  config.json: |
+    {{- .Values.config | toPrettyJson | nindent 4 }}
+{{- end }}

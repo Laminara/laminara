@@ -169,6 +169,8 @@ type CommandSpec struct {
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Aliases       []string               `protobuf:"bytes,2,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	Synopsis      string                 `protobuf:"bytes,3,opt,name=synopsis,proto3" json:"synopsis,omitempty"`
+	SafeArguments bool                   `protobuf:"varint,4,opt,name=safe_arguments,json=safeArguments,proto3" json:"safe_arguments,omitempty"`
+	SecretOutput  bool                   `protobuf:"varint,5,opt,name=secret_output,json=secretOutput,proto3" json:"secret_output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -224,6 +226,20 @@ func (x *CommandSpec) GetSynopsis() string {
 	return ""
 }
 
+func (x *CommandSpec) GetSafeArguments() bool {
+	if x != nil {
+		return x.SafeArguments
+	}
+	return false
+}
+
+func (x *CommandSpec) GetSecretOutput() bool {
+	if x != nil {
+		return x.SecretOutput
+	}
+	return false
+}
+
 type ProviderSpec struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          ProviderKind           `protobuf:"varint,1,opt,name=kind,proto3,enum=laminara.module.v1.ProviderKind" json:"kind,omitempty"`
@@ -277,15 +293,16 @@ func (x *ProviderSpec) GetName() string {
 }
 
 type InfoResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Commands      []*CommandSpec         `protobuf:"bytes,4,rep,name=commands,proto3" json:"commands,omitempty"`
-	Events        []string               `protobuf:"bytes,5,rep,name=events,proto3" json:"events,omitempty"`
-	Providers     []*ProviderSpec        `protobuf:"bytes,6,rep,name=providers,proto3" json:"providers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version            string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Description        string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Commands           []*CommandSpec         `protobuf:"bytes,4,rep,name=commands,proto3" json:"commands,omitempty"`
+	Events             []string               `protobuf:"bytes,5,rep,name=events,proto3" json:"events,omitempty"`
+	Providers          []*ProviderSpec        `protobuf:"bytes,6,rep,name=providers,proto3" json:"providers,omitempty"`
+	SettingsSchemaJson []byte                 `protobuf:"bytes,7,opt,name=settings_schema_json,json=settingsSchemaJson,proto3" json:"settings_schema_json,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *InfoResponse) Reset() {
@@ -356,6 +373,13 @@ func (x *InfoResponse) GetEvents() []string {
 func (x *InfoResponse) GetProviders() []*ProviderSpec {
 	if x != nil {
 		return x.Providers
+	}
+	return nil
+}
+
+func (x *InfoResponse) GetSettingsSchemaJson() []byte {
+	if x != nil {
+		return x.SettingsSchemaJson
 	}
 	return nil
 }
@@ -1349,21 +1373,24 @@ var File_laminara_module_v1_module_proto protoreflect.FileDescriptor
 const file_laminara_module_v1_module_proto_rawDesc = "" +
 	"\n" +
 	"\x1flaminara/module/v1/module.proto\x12\x12laminara.module.v1\"\r\n" +
-	"\vInfoRequest\"W\n" +
+	"\vInfoRequest\"\xa3\x01\n" +
 	"\vCommandSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x1a\n" +
-	"\bsynopsis\x18\x03 \x01(\tR\bsynopsis\"X\n" +
+	"\bsynopsis\x18\x03 \x01(\tR\bsynopsis\x12%\n" +
+	"\x0esafe_arguments\x18\x04 \x01(\bR\rsafeArguments\x12#\n" +
+	"\rsecret_output\x18\x05 \x01(\bR\fsecretOutput\"X\n" +
 	"\fProviderSpec\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .laminara.module.v1.ProviderKindR\x04kind\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xf3\x01\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xa5\x02\n" +
 	"\fInfoResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12;\n" +
 	"\bcommands\x18\x04 \x03(\v2\x1f.laminara.module.v1.CommandSpecR\bcommands\x12\x16\n" +
 	"\x06events\x18\x05 \x03(\tR\x06events\x12>\n" +
-	"\tproviders\x18\x06 \x03(\v2 .laminara.module.v1.ProviderSpecR\tproviders\">\n" +
+	"\tproviders\x18\x06 \x03(\v2 .laminara.module.v1.ProviderSpecR\tproviders\x120\n" +
+	"\x14settings_schema_json\x18\a \x01(\fR\x12settingsSchemaJson\">\n" +
 	"\x0eExecuteRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x02 \x03(\tR\x04args\"S\n" +

@@ -76,7 +76,55 @@ func validateFeatures(model *corev1.FeatureModel, policyByPath map[string]corev1
 	}
 	known := make(map[string]bool)
 	collectOptionAddresses(model.Groups, "", known)
-	return validateConstraints(model.Groups, "", known)
+	if err := validateConstraints(model.Groups, "", known); err != nil {
+		return err
+	}
+	return validateRequirementCycles(model.Groups)
+}
+
+func validateRequirementCycles(groups []*corev1.FeatureGroup) error {
+	dependencies := map[string][]string{}
+	var collect func([]*corev1.FeatureGroup, string)
+	collect = func(groups []*corev1.FeatureGroup, parent string) {
+		for _, group := range groups {
+			prefix := group.Id
+			if parent != "" {
+				prefix = parent + "/" + group.Id
+			}
+			for _, option := range group.Options {
+				address := prefix + "#" + option.Id
+				if option.Meta != nil {
+					dependencies[address] = option.Meta.Requires
+				}
+				collect(option.Groups, address)
+			}
+		}
+	}
+	collect(groups, "")
+	visited, active := map[string]bool{}, map[string]bool{}
+	var visit func(string) error
+	visit = func(address string) error {
+		if active[address] {
+			return fmt.Errorf("циклическая зависимость вариантов модов: %s", address)
+		}
+		if visited[address] {
+			return nil
+		}
+		active[address] = true
+		for _, dependency := range dependencies[address] {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		active[address], visited[address] = false, true
+		return nil
+	}
+	for address := range dependencies {
+		if err := visit(address); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func collectOptionAddresses(groups []*corev1.FeatureGroup, parentAddr string, known map[string]bool) {

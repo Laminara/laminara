@@ -31,21 +31,28 @@ type RecipeEntry struct {
 }
 
 type BuildEntry struct {
-	Name          string
-	Status        string
-	Minecraft     string
-	JavaMajor     uint32
-	Loader        string
-	Compat        string
-	Trouble       string
-	SizeBytes     uint64
-	Files         int
-	ServerAddress string
-	Access        string
-	HasFeatures   bool
-	Prepared      []corev1.Platform
-	Published     []corev1.Platform
-	PublishedAt   time.Time
+	SourceRevision            string
+	InputDigest               string
+	ReleaseID                 string
+	RetainedReleases          []string
+	SettingsRevision          string
+	PublishedSettingsRevision string
+	Install                   string
+	Name                      string
+	Status                    string
+	Minecraft                 string
+	JavaMajor                 uint32
+	Loader                    string
+	Compat                    string
+	Trouble                   string
+	SizeBytes                 uint64
+	Files                     int
+	ServerAddress             string
+	Access                    string
+	HasFeatures               bool
+	Prepared                  []corev1.Platform
+	Published                 []corev1.Platform
+	PublishedAt               time.Time
 }
 
 type BuildPlayers struct {

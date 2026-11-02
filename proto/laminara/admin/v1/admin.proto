@@ -6,12 +6,54 @@ import "laminara/core/v1/platform.proto";
 
 message StatusRequest {}
 
+message PlanBuildRequest { bytes specification_json = 1; }
+message PlanBuildResponse {
+  string revision = 1;
+  string input_digest = 2;
+  bool no_op = 3;
+  repeated string missing_hashes = 4;
+}
+message UploadBuildChunkRequest {
+  string sha256 = 1;
+  uint64 size = 2;
+  uint64 offset = 3;
+  bytes data = 4;
+}
+message UploadBuildChunkResponse { uint64 offset = 1; bool complete = 2; }
+
+message StopRequest {}
+
+message StopResponse {}
+
+message ListCommandsRequest {}
+
+message CommandInfo {
+  string name = 1;
+  repeated string aliases = 2;
+  string synopsis = 3;
+  bool secret_arguments = 4;
+  bool secret_output = 5;
+}
+
+message ListCommandsResponse {
+  repeated CommandInfo commands = 1;
+}
+
 message StatusResponse {
   string version = 1;
   int64 started_at_unix_nanos = 2;
   uint32 modules_loaded = 3;
   uint64 memory_bytes = 4;
   uint32 goroutines = 5;
+  repeated AdminCapability capabilities = 6;
+}
+
+enum AdminCapability {
+  ADMIN_CAPABILITY_UNSPECIFIED = 0;
+  ADMIN_CAPABILITY_STRUCTURED_ARGUMENTS = 1;
+  ADMIN_CAPABILITY_REDACTED_SETTINGS = 2;
+  ADMIN_CAPABILITY_SETTINGS_PATCH = 3;
+  ADMIN_CAPABILITY_JOBS = 4;
 }
 
 enum LogLevel {
@@ -43,6 +85,49 @@ message StreamLogsResponse {
 
 message ExecRequest {
   string line = 1;
+  repeated string arguments = 2;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_RUNNING = 1;
+  JOB_STATE_SUCCEEDED = 2;
+  JOB_STATE_FAILED = 3;
+  JOB_STATE_CANCELLED = 4;
+  JOB_STATE_INTERRUPTED = 5;
+}
+
+message JobInfo {
+  string id = 1;
+  string command = 2;
+  JobState state = 3;
+  int64 created_at_unix_nanos = 4;
+  int64 finished_at_unix_nanos = 5;
+  int32 exit_code = 6;
+  bool cancel_requested = 7;
+  uint64 last_sequence = 8;
+  bool output_truncated = 9;
+}
+
+message StartJobRequest {
+  repeated string arguments = 1;
+  string idempotency_key = 2;
+}
+
+message StartJobResponse { JobInfo job = 1; }
+message GetJobRequest { string id = 1; }
+message GetJobResponse { JobInfo job = 1; }
+message ListJobsRequest {}
+message ListJobsResponse { repeated JobInfo jobs = 1; }
+message CancelJobRequest { string id = 1; }
+message CancelJobResponse { JobInfo job = 1; }
+message StreamJobRequest {
+  string id = 1;
+  uint64 after_sequence = 2;
+}
+message StreamJobResponse {
+  uint64 sequence = 1;
+  ExecResponse event = 2;
 }
 
 message ExecOutputChunk {
@@ -123,6 +208,13 @@ message BuildInfo {
   string access = 13;
   string compat = 14;
   string trouble = 15;
+  string settings_revision = 16;
+  string published_settings_revision = 17;
+  string install = 18;
+  string source_revision = 19;
+  string input_digest = 20;
+  string release_id = 21;
+  repeated string retained_releases = 22;
 }
 
 message ListBuildsResponse {
@@ -190,11 +282,91 @@ message ListSettingsResponse {
   repeated SettingCollection collections = 3;
   string config_path = 4;
   bool restart_pending = 5;
+  string revision = 6;
+  string active_revision = 7;
+  string read_only_reason = 8;
+}
+
+message SettingChange {
+  oneof action {
+    SetSettingRequest set = 1;
+    AddSettingEntryRequest add = 2;
+    RemoveSettingEntryRequest remove = 3;
+    SetSettingItemRequest item = 4;
+  }
+}
+
+message SetSettingItemRequest {
+  string path = 1;
+  string key = 2;
+  string value = 3;
+  bool remove = 4;
+}
+
+message SettingsPatch {
+  string revision = 1;
+  repeated SettingChange changes = 2;
+  string target_build = 3;
+}
+
+message SettingDifference {
+  string path = 1;
+  string before = 2;
+  string after = 3;
+}
+
+message PreviewSettingsRequest {
+  SettingsPatch patch = 1;
+  string section = 2;
+  string entry = 3;
+  string query = 4;
+}
+
+message PreviewSettingsResponse {
+  ListSettingsResponse page = 1;
+  repeated SettingDifference differences = 2;
+  string added_path = 3;
+  string validation_error = 4;
+}
+
+message ApplySettingsRequest {
+  SettingsPatch patch = 1;
+}
+
+message ApplySettingsResponse {
+  string revision = 1;
+}
+
+message PreviewBuildSettingsRequest {
+  string build = 1;
+  PreviewSettingsRequest settings = 2;
+}
+
+message PreviewBuildSettingsResponse {
+  PreviewSettingsResponse settings = 1;
+}
+
+message ApplyBuildSettingsRequest {
+  string build = 1;
+  SettingsPatch patch = 2;
+}
+
+message ApplyBuildSettingsResponse {
+  string revision = 1;
 }
 
 message SetSettingRequest {
   string path = 1;
   string value = 2;
+  SettingWriteMode mode = 3;
+}
+
+enum SettingWriteMode {
+  SETTING_WRITE_MODE_UNSPECIFIED = 0;
+  SETTING_WRITE_MODE_REPLACE = 1;
+  SETTING_WRITE_MODE_EDIT_REDACTED = 2;
+  SETTING_WRITE_MODE_CLEAR = 3;
+  SETTING_WRITE_MODE_PASSWORD = 4;
 }
 
 message SetSettingResponse {
@@ -221,6 +393,15 @@ message RestartRequest {}
 message RestartResponse {}
 
 service AdminService {
+  rpc PlanBuild(PlanBuildRequest) returns (PlanBuildResponse);
+  rpc UploadBuildChunk(UploadBuildChunkRequest) returns (UploadBuildChunkResponse);
+  rpc StartJob(StartJobRequest) returns (StartJobResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc StreamJob(StreamJobRequest) returns (stream StreamJobResponse);
+  rpc Stop(StopRequest) returns (StopResponse);
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
   rpc Status(StatusRequest) returns (StatusResponse);
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
   rpc Exec(ExecRequest) returns (stream ExecResponse);
@@ -230,6 +411,10 @@ service AdminService {
   rpc ListPlayers(ListPlayersRequest) returns (ListPlayersResponse);
   rpc ListSettings(ListSettingsRequest) returns (ListSettingsResponse);
   rpc SetSetting(SetSettingRequest) returns (SetSettingResponse);
+  rpc PreviewSettings(PreviewSettingsRequest) returns (PreviewSettingsResponse);
+  rpc ApplySettings(ApplySettingsRequest) returns (ApplySettingsResponse);
+  rpc PreviewBuildSettings(PreviewBuildSettingsRequest) returns (PreviewBuildSettingsResponse);
+  rpc ApplyBuildSettings(ApplyBuildSettingsRequest) returns (ApplyBuildSettingsResponse);
   rpc AddSettingEntry(AddSettingEntryRequest) returns (AddSettingEntryResponse);
   rpc RemoveSettingEntry(RemoveSettingEntryRequest) returns (RemoveSettingEntryResponse);
   rpc Restart(RestartRequest) returns (RestartResponse);

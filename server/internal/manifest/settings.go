@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"github.com/laminara/laminara/server/internal/atomicfile"
 
 	"encoding/json"
@@ -85,8 +86,44 @@ func UpdateSettings(root string, apply func(*Settings)) error {
 	if err != nil {
 		return err
 	}
+	before, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
 	apply(&settings)
-	data, err := json.MarshalIndent(settings, "", "  ")
+	after, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(root, SettingsFileName)
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	original := map[string]json.RawMessage{}
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &original); err != nil {
+			return err
+		}
+	}
+	oldFields, newFields := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	if err := json.Unmarshal(before, &oldFields); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(after, &newFields); err != nil {
+		return err
+	}
+	for key, value := range newFields {
+		if !bytes.Equal(value, oldFields[key]) {
+			original[key] = value
+		}
+	}
+	for key := range oldFields {
+		if _, ok := newFields[key]; !ok {
+			delete(original, key)
+		}
+	}
+	data, err = json.MarshalIndent(original, "", "  ")
 	if err != nil {
 		return err
 	}

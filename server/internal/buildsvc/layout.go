@@ -24,7 +24,7 @@ type placement struct {
 }
 
 func (s *Service) layout(name string) buildLayout {
-	root := filepath.Join(s.profilesDir, name)
+	root := s.profileRoot(name)
 	layout := buildLayout{root: root}
 	if _, err := os.Stat(filepath.Join(root, manifest.LaunchProfileName)); err == nil {
 		layout.flat = true

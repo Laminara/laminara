@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -26,6 +29,8 @@ const (
 	editSecret
 	editSelect
 	editToggle
+	editJSON
+	editLiteral
 )
 
 type menuItem struct {
@@ -48,6 +53,7 @@ const (
 	menuBrowsing menuMode = iota
 	menuTyping
 	menuChoosing
+	menuMultiline
 )
 
 type menuEventKind int
@@ -67,25 +73,44 @@ type menuEvent struct {
 }
 
 type menu struct {
-	title    string
-	subtitle string
-	empty    string
-	items    []menuItem
-	cursor   int
-	first    int
-	width    int
-	height   int
-	mode     menuMode
-	input    textinput.Model
-	choice   int
-	notice   string
-	problem  string
+	title     string
+	subtitle  string
+	empty     string
+	items     []menuItem
+	cursor    int
+	first     int
+	width     int
+	height    int
+	mode      menuMode
+	input     textinput.Model
+	choice    int
+	notice    string
+	problem   string
+	jsonInput textarea.Model
 }
 
 func (m *menu) resize(width, height int) {
 	m.width = min(max(width-12, 40), 96)
 	m.height = max(height, menuChrome+3)
+	m.resizeInput()
+	if m.mode == menuMultiline {
+		m.jsonInput.SetWidth(m.width)
+		m.jsonInput.SetHeight(max(m.height-6, 3))
+	}
 	m.scroll()
+}
+
+func (m menu) labelWidth() int {
+	width := 0
+	for _, item := range m.items {
+		width = max(width, lipgloss.Width(item.label))
+	}
+	return min(width, m.width/2)
+}
+
+func (m *menu) resizeInput() {
+	m.input.Width = max(m.width-m.labelWidth()-6, 1)
+	m.input.SetCursor(m.input.Position())
 }
 
 func (m menu) rows() int {
@@ -121,7 +146,7 @@ func (m *menu) scroll() {
 func newMenu(title string) menu {
 	input := textinput.New()
 	input.Prompt = ""
-	input.CharLimit = 1024
+	input.CharLimit = 0
 	return menu{title: title, input: input}
 }
 
@@ -193,6 +218,20 @@ func (m *menu) startEditing() {
 		return
 	}
 	switch item.editor {
+	case editJSON:
+		m.mode = menuMultiline
+		m.jsonInput = textarea.New()
+		m.jsonInput.CharLimit, m.jsonInput.MaxHeight = 0, 0
+		m.jsonInput.Prompt = ""
+		m.jsonInput.SetWidth(m.width)
+		m.jsonInput.SetHeight(max(m.height-6, 3))
+		value := item.editable()
+		var formatted bytes.Buffer
+		if json.Indent(&formatted, []byte(value), "", "  ") == nil {
+			value = formatted.String()
+		}
+		m.jsonInput.SetValue(value)
+		m.jsonInput.Focus()
 	case editSelect:
 		m.mode = menuChoosing
 		m.choice = 0
@@ -201,14 +240,19 @@ func (m *menu) startEditing() {
 				m.choice = index
 			}
 		}
-	case editText, editSecret:
+	case editText, editSecret, editLiteral:
 		m.mode = menuTyping
+		m.input.EchoMode = textinput.EchoNormal
+		m.input.Placeholder = ""
 		if item.editor == editSecret {
+			m.input.EchoMode = textinput.EchoPassword
+			m.input.EchoCharacter = '•'
+			m.input.Placeholder = "новое значение"
 			m.input.SetValue("")
 		} else {
 			m.input.SetValue(item.editable())
 		}
-		m.input.Width = max(m.width/2, 24)
+		m.resizeInput()
 		m.input.CursorEnd()
 		m.input.Focus()
 	}
@@ -223,6 +267,31 @@ func (i menuItem) editable() string {
 }
 
 func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
+	if m.mode == menuMultiline {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "esc":
+				m.jsonInput.Blur()
+				m.jsonInput.SetValue("")
+				m.mode = menuBrowsing
+				return m, menuEvent{}
+			case "ctrl+s":
+				value := m.jsonInput.Value()
+				if !json.Valid([]byte(value)) {
+					m.problem = "JSON содержит ошибку; исправьте текст или нажмите Esc"
+					return m, menuEvent{}
+				}
+				item, _ := m.current()
+				m.jsonInput.Blur()
+				m.jsonInput.SetValue("")
+				m.mode = menuBrowsing
+				m.problem = ""
+				return m, menuEvent{kind: menuSubmitted, id: item.id, value: value}
+			}
+		}
+		m.jsonInput, _ = m.jsonInput.Update(msg)
+		return m, menuEvent{}
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, menuEvent{}
@@ -235,11 +304,20 @@ func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
 		case "esc":
 			m.mode = menuBrowsing
 			m.input.Blur()
+			m.input.SetValue("")
 			return m, menuEvent{}
 		case "enter":
+			value := strings.TrimSpace(m.input.Value())
+			if item.editor == editSecret || item.editor == editLiteral {
+				value = m.input.Value()
+			}
 			m.mode = menuBrowsing
 			m.input.Blur()
-			return m, menuEvent{kind: menuSubmitted, id: item.id, value: strings.TrimSpace(m.input.Value())}
+			m.input.SetValue("")
+			if item.editor == editSecret && value == "" {
+				return m, menuEvent{}
+			}
+			return m, menuEvent{kind: menuSubmitted, id: item.id, value: value}
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -302,7 +380,7 @@ func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
 		switch item.editor {
 		case editToggle:
 			return m, menuEvent{kind: menuSubmitted, id: item.id, value: flipWord(item.value)}
-		case editText, editSecret, editSelect:
+		case editText, editSecret, editLiteral, editSelect, editJSON:
 			m.startEditing()
 			return m, menuEvent{}
 		default:
@@ -325,15 +403,20 @@ const (
 )
 
 func (m menu) View(st styles, icons iconSet) string {
+	if m.mode == menuMultiline {
+		item, _ := m.current()
+		body := st.selected.Render(clip(item.label, m.width)) + "\n" + st.dim.Render(clip("JSON · Ctrl+S — принять, Esc — отменить", m.width)) + "\n\n" + m.jsonInput.View()
+		footer := st.faint.Render(wrapText(item.hint, m.width, menuHintRows))
+		if m.problem != "" {
+			footer = st.bad.Render(wrapText(m.problem, m.width, menuHintRows))
+		}
+		return lipgloss.NewStyle().Width(m.width).Height(max(m.height-menuHintRows-1, 1)).Render(body) + "\n" + footer
+	}
 	rows := m.rows()
 	first := m.first
 	last := min(first+rows, len(m.items))
 
-	labelWidth := 0
-	for _, item := range m.items {
-		labelWidth = max(labelWidth, lipgloss.Width(item.label))
-	}
-	labelWidth = min(labelWidth, m.width/2)
+	labelWidth := m.labelWidth()
 
 	lines := []string{st.selected.Render(m.title)}
 	if m.subtitle != "" {
@@ -382,6 +465,9 @@ func (m menu) View(st styles, icons iconSet) string {
 func (m menu) renderRow(item menuItem, index, labelWidth int, st styles, icons iconSet) string {
 	mark := "  "
 	label := item.label
+	if item.value != "" || (m.mode == menuTyping && index == m.cursor) {
+		label = clip(label, labelWidth)
+	}
 	if index == m.cursor && !item.static {
 		mark = st.selected.Render(icons.cursor + " ")
 	}

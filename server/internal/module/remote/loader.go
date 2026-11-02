@@ -35,11 +35,12 @@ type eventTarget struct {
 }
 
 type Loader struct {
-	clients   []*goplugin.Client
-	handlers  []*eventTarget
-	log       *slog.Logger
-	done      chan struct{}
-	closeOnce sync.Once
+	schemaCleanup []func()
+	clients       []*goplugin.Client
+	handlers      []*eventTarget
+	log           *slog.Logger
+	done          chan struct{}
+	closeOnce     sync.Once
 }
 
 func NewLoader(log *slog.Logger) *Loader {
@@ -114,6 +115,9 @@ func (l *Loader) load(path string, config []byte, registry *module.Registry) err
 		client.Kill()
 		return err
 	}
+	if err := l.registerSchemas(path, manifest); err != nil {
+		l.log.Warn("схема настроек модуля отклонена", "module", manifest.Info.Name, "error", err)
+	}
 	registry.Add(newRemoteModule(manifest.Info, manifest.Commands, svc))
 	l.clients = append(l.clients, client)
 	if len(manifest.Events) > 0 {
@@ -184,6 +188,10 @@ func (l *Loader) dispatch(target *eventTarget, e events.Event) {
 
 func (l *Loader) Close() {
 	l.closeOnce.Do(func() { close(l.done) })
+	for _, remove := range l.schemaCleanup {
+		remove()
+	}
+	l.schemaCleanup = nil
 	for _, client := range l.clients {
 		client.Kill()
 	}
@@ -210,9 +218,11 @@ func (r *remoteModule) Register(host module.Host) error {
 	for _, spec := range r.specs {
 		name := spec.Name
 		host.AddCommand(command.Command{
-			Name:     name,
-			Aliases:  spec.Aliases,
-			Synopsis: spec.Synopsis,
+			Name:       name,
+			Aliases:    spec.Aliases,
+			Synopsis:   spec.Synopsis,
+			SecretArgs: !spec.SafeArguments,
+			Secret:     spec.SecretOutput,
 			Run: func(ctx context.Context, args []string, out io.Writer) error {
 				return r.svc.Execute(ctx, name, args, out)
 			},

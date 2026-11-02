@@ -2,6 +2,7 @@ package buildsvc
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,29 @@ import (
 	"github.com/laminara/laminara/server/internal/compat"
 	"github.com/laminara/laminara/server/internal/manifest"
 )
+
+func TestPreparedBuildShowsLaunchMetadata(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "example")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(manifest.LaunchProfile{MinecraftVersion: "1.21.1", JavaMajor: 21})
+	if err := os.WriteFile(filepath.Join(dir, manifest.LaunchProfileName), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.SetLoader(dir, "fabric"); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{profilesDir: root}
+	builds, err := s.Builds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(builds) != 1 || builds[0].Minecraft != "1.21.1" || builds[0].JavaMajor != 21 || builds[0].Loader != "fabric" {
+		t.Fatalf("prepared metadata missing: %+v", builds)
+	}
+}
 
 func TestRecordedInstallIsAValidInstallCommand(t *testing.T) {
 	cases := []struct {
@@ -33,7 +57,10 @@ func TestRecordedInstallIsAValidInstallCommand(t *testing.T) {
 			if len(args) == 0 || args[0] != c.version {
 				t.Fatalf("the line must start with the Minecraft version: %q", args)
 			}
-			got := parseKV(args[1:])
+			got, err := parseKV(args[1:])
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(got) != len(args)-1 {
 				t.Fatalf("every word after the version must be key=value: %q", args)
 			}

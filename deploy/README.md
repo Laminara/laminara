@@ -19,10 +19,18 @@ nginx.
 ## Docker
 
 ```sh
-make generate                                        # protobuf перед сборкой образа
 cp deploy/config.example.json deploy/config.json     # и отредактировать
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+Dockerfile выполняет codegen сам. В `docker-compose.yml` конфиг внешний и доступен только
+для чтения. Для сохранения из TUI используйте `docker-compose.managed.yml`: положите
+`config.json` в `deploy/managed-config`, выдайте UID 10001 права на весь этот каталог
+и задайте доступные из контейнера источники аккаунтов и хранилище. Атомарное сохранение
+требует монтирования каталога, а не отдельного файла. Оба примера используют постоянный том.
+
+Helm-чарт одной реплики находится в `deploy/helm/laminara`; инструкции — в
+`docs/server/kubernetes.mdx`, удалённый доступ — в `docs/server/administration.mdx`.
 
 ## systemd
 

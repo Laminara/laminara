@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -21,9 +23,11 @@ type settingsStore struct {
 	restart func() error
 	verify  func(path string) error
 
-	mu      sync.Mutex
-	pending bool
-	changed func(path string)
+	mu             sync.Mutex
+	pending        bool
+	changed        func(path string)
+	activeRevision string
+	external       bool
 }
 
 func buildable(path string) error {
@@ -47,62 +51,28 @@ func (s *settingsStore) List(section, entry string) (admin.SettingsPage, error) 
 	if err != nil {
 		return admin.SettingsPage{}, err
 	}
-	page := admin.SettingsPage{ConfigPath: s.path, Pending: s.pending}
-	switch {
-	case entry != "":
-		fields, err := doc.EntryFields(entry)
-		if err != nil {
-			return admin.SettingsPage{}, err
-		}
-		page.Entries = entriesToProto(fields)
-	case section != "":
-		fields, err := doc.Section(section)
-		if err != nil {
-			return admin.SettingsPage{}, err
-		}
-		page.Entries = entriesToProto(fields)
-		collections, err := doc.Collections(section)
-		if err != nil {
-			return admin.SettingsPage{}, err
-		}
-		for _, collection := range collections {
-			view := &adminv1.SettingCollection{
-				Path:      collection.Path,
-				Title:     collection.Title,
-				Hint:      collection.Hint,
-				Keyed:     collection.Keyed,
-				NameLabel: collection.NameLabel,
-				NameHint:  collection.NameHint,
-			}
-			for _, item := range collection.Entries {
-				view.Entries = append(view.Entries, &adminv1.SettingCollectionEntry{Path: item.Path, Title: item.Title})
-			}
-			page.Collections = append(page.Collections, view)
-		}
-	default:
-		for _, item := range settings.Sections() {
-			page.Sections = append(page.Sections, &adminv1.SettingSection{Key: item.Key, Title: item.Title, Hint: item.Hint})
-		}
+	return s.page(doc, section, entry, "")
+}
+
+func (s *settingsStore) page(doc *settings.Doc, section, entry, query string) (admin.SettingsPage, error) {
+	page, err := admin.DescribeSettings(doc, section, entry, query)
+	if err != nil {
+		return admin.SettingsPage{}, err
+	}
+	page.Pending, page.ActiveRevision = s.pending, s.activeRevision
+	if s.activeRevision != "" {
+		page.Pending = doc.Revision() != s.activeRevision
+	}
+	if s.external {
+		page.ReadOnlyReason = "конфиг управляется извне; экспортируйте правки и примените их в источнике"
+	} else if err := unix.Access(filepath.Dir(s.path), unix.W_OK); err != nil {
+		page.ReadOnlyReason = "каталог настроек недоступен для записи; измените права каталога или экспортируйте правки"
 	}
 	return page, nil
 }
 
 func entriesToProto(entries []settings.Entry) []*adminv1.SettingEntry {
-	out := make([]*adminv1.SettingEntry, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, &adminv1.SettingEntry{
-			Path:         entry.Path,
-			Label:        entry.Label,
-			Hint:         entry.Hint,
-			Kind:         string(entry.Kind),
-			Value:        entry.Value,
-			DefaultValue: entry.Default,
-			IsSet:        entry.IsSet,
-			Options:      entry.Options,
-			Display:      entry.Display,
-		})
-	}
-	return out
+	return admin.SettingEntriesProto(entries)
 }
 
 func (s *settingsStore) Entry(path string) (entryView, error) {
@@ -123,13 +93,28 @@ func (s *settingsStore) Entry(path string) (entryView, error) {
 }
 
 func (s *settingsStore) Set(path, value string) (*adminv1.SettingEntry, error) {
+	return s.set(path, value, false)
+}
+
+func (s *settingsStore) Edit(path, value string) (*adminv1.SettingEntry, error) {
+	return s.set(path, value, true)
+}
+
+func (s *settingsStore) set(path, value string, preserveSecrets bool) (*adminv1.SettingEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.external {
+		return nil, errExternalSettings
+	}
 	doc, err := settings.Open(s.path)
 	if err != nil {
 		return nil, err
 	}
-	if err := doc.Set(path, value); err != nil {
+	apply := doc.Set
+	if preserveSecrets {
+		apply = doc.Edit
+	}
+	if err := apply(path, value); err != nil {
 		return nil, err
 	}
 	if err := doc.Save(); err != nil {
@@ -149,6 +134,9 @@ func (s *settingsStore) Set(path, value string) (*adminv1.SettingEntry, error) {
 func (s *settingsStore) Add(collection, name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.external {
+		return "", errExternalSettings
+	}
 	doc, err := settings.Open(s.path)
 	if err != nil {
 		return "", err
@@ -170,6 +158,9 @@ func (s *settingsStore) Add(collection, name string) (string, error) {
 func (s *settingsStore) Remove(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.external {
+		return errExternalSettings
+	}
 	doc, err := settings.Open(s.path)
 	if err != nil {
 		return err

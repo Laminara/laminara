@@ -10,16 +10,20 @@ import (
 )
 
 type SettingsPage struct {
-	Sections    []*adminv1.SettingSection
-	Entries     []*adminv1.SettingEntry
-	Collections []*adminv1.SettingCollection
-	ConfigPath  string
-	Pending     bool
+	Sections       []*adminv1.SettingSection
+	Entries        []*adminv1.SettingEntry
+	Collections    []*adminv1.SettingCollection
+	ConfigPath     string
+	Pending        bool
+	Revision       string
+	ActiveRevision string
+	ReadOnlyReason string
 }
 
 type Settings interface {
 	List(section, entry string) (SettingsPage, error)
 	Set(path, value string) (*adminv1.SettingEntry, error)
+	Edit(path, value string) (*adminv1.SettingEntry, error)
 	Add(collection, name string) (string, error)
 	Remove(path string) error
 	Restart() error
@@ -41,13 +45,20 @@ func (s *Service) ListSettings(_ context.Context, req *connect.Request[adminv1.L
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&adminv1.ListSettingsResponse{
+	return connect.NewResponse(SettingsPageProto(page)), nil
+}
+
+func SettingsPageProto(page SettingsPage) *adminv1.ListSettingsResponse {
+	return &adminv1.ListSettingsResponse{
 		Sections:       page.Sections,
 		Entries:        page.Entries,
 		Collections:    page.Collections,
 		ConfigPath:     page.ConfigPath,
 		RestartPending: page.Pending,
-	}), nil
+		Revision:       page.Revision,
+		ActiveRevision: page.ActiveRevision,
+		ReadOnlyReason: page.ReadOnlyReason,
+	}
 }
 
 func (s *Service) SetSetting(_ context.Context, req *connect.Request[adminv1.SetSettingRequest]) (*connect.Response[adminv1.SetSettingResponse], error) {
@@ -55,7 +66,20 @@ func (s *Service) SetSetting(_ context.Context, req *connect.Request[adminv1.Set
 	if err != nil {
 		return nil, err
 	}
-	entry, err := store.Set(req.Msg.Path, req.Msg.Value)
+	var entry *adminv1.SettingEntry
+	switch req.Msg.Mode {
+	case adminv1.SettingWriteMode_SETTING_WRITE_MODE_UNSPECIFIED, adminv1.SettingWriteMode_SETTING_WRITE_MODE_REPLACE:
+		entry, err = store.Set(req.Msg.Path, req.Msg.Value)
+	case adminv1.SettingWriteMode_SETTING_WRITE_MODE_EDIT_REDACTED:
+		entry, err = store.Edit(req.Msg.Path, req.Msg.Value)
+	case adminv1.SettingWriteMode_SETTING_WRITE_MODE_CLEAR:
+		if req.Msg.Value != "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("очистка настройки не принимает новое значение"))
+		}
+		entry, err = store.Set(req.Msg.Path, "")
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("неизвестный режим изменения настройки"))
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

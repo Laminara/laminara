@@ -22,12 +22,16 @@ type CollectionEntryView struct {
 }
 
 func (d *Doc) Collections(sectionKey string) ([]CollectionView, error) {
-	section, ok := sectionOf(sectionKey)
-	if !ok {
-		return nil, fmt.Errorf("раздела «%s» нет", sectionKey)
+	var collections []Collection
+	if section, ok := d.sectionOf(sectionKey); ok {
+		collections = section.Collections
+	} else if collection, _, ok := d.collectionAt(sectionKey); ok {
+		collections = collection.children()
+	} else {
+		return nil, fmt.Errorf("нет раздела или записи %s", sectionKey)
 	}
-	views := make([]CollectionView, 0, len(section.Collections))
-	for _, collection := range section.Collections {
+	views := make([]CollectionView, 0, len(collections))
+	for _, collection := range collections {
 		path := sectionKey + "." + collection.Key
 		view := CollectionView{
 			Path:      path,
@@ -73,7 +77,7 @@ func (d *Doc) EntryFields(entryPath string) ([]Entry, error) {
 	var entries []Entry
 	for _, field := range collection.Fields {
 		if field.Key == "" {
-			entries = append(entries, d.entryOf(entryPath, Field{Key: "", Label: field.Label, Hint: field.Hint, Kind: KindJSON}, ""))
+			entries = append(entries, d.entryOf(entryPath, field, ""))
 			continue
 		}
 		if field.Variants == nil {
@@ -81,6 +85,10 @@ func (d *Doc) EntryFields(entryPath string) ([]Entry, error) {
 			continue
 		}
 		chosen := d.stringAt(entryPath+"."+field.VariantOf, fieldDefault(collection.Fields, field.VariantOf))
+		if _, known := field.Variants[chosen]; !known {
+			entries = append(entries, d.entryOf(entryPath, field, field.Key))
+			continue
+		}
 		for _, nested := range field.Variants[chosen] {
 			entries = append(entries, d.entryOf(entryPath, nested, field.Key+"."+nested.Key))
 		}
@@ -98,33 +106,78 @@ func fieldDefault(fields []Field, key string) string {
 }
 
 func (d *Doc) collectionAt(entryPath string) (Collection, string, bool) {
-	parts := strings.Split(entryPath, ".")
-	if len(parts) < 3 {
-		return Collection{}, "", false
-	}
-	section, ok := sectionOf(parts[0])
+	sectionKey, _, _ := strings.Cut(entryPath, ".")
+	section, ok := d.sectionOf(sectionKey)
 	if !ok {
 		return Collection{}, "", false
 	}
-	collection, ok := collectionOf(section, parts[1])
-	if !ok {
-		return Collection{}, "", false
+	return entryCollection(sectionKey, section.Collections, entryPath)
+}
+
+func (c Collection) children() []Collection {
+	if c.Children == nil {
+		return nil
 	}
-	return collection, parts[2], true
+	return c.Children()
+}
+
+func entryCollection(base string, collections []Collection, path string) (Collection, string, bool) {
+	for _, collection := range collections {
+		prefix := base + "." + collection.Key + "."
+		tail, ok := strings.CutPrefix(path, prefix)
+		if !ok {
+			continue
+		}
+		id, nested, hasNested := strings.Cut(tail, ".")
+		if id == "" {
+			return Collection{}, "", false
+		}
+		if !hasNested {
+			return collection.forEntry(id), id, true
+		}
+		return entryCollection(prefix+id, collection.children(), prefix+id+"."+nested)
+	}
+	return Collection{}, "", false
+}
+
+func (c Collection) forEntry(id string) Collection {
+	if c.EntryFields != nil {
+		if fields := c.EntryFields(id); len(fields) > 0 {
+			c.Fields = fields
+		}
+	}
+	return c
+}
+
+func (d *Doc) findCollection(path string) (Collection, bool) {
+	sectionKey, _, _ := strings.Cut(path, ".")
+	section, ok := d.sectionOf(sectionKey)
+	if !ok {
+		return Collection{}, false
+	}
+	var find func(string, []Collection) (Collection, bool)
+	find = func(base string, collections []Collection) (Collection, bool) {
+		for _, collection := range collections {
+			prefix := base + "." + collection.Key
+			if path == prefix {
+				return collection, true
+			}
+			if rest, ok := strings.CutPrefix(path, prefix+"."); ok {
+				id, _, nested := strings.Cut(rest, ".")
+				if nested {
+					return find(prefix+"."+id, collection.children())
+				}
+			}
+		}
+		return Collection{}, false
+	}
+	return find(sectionKey, section.Collections)
 }
 
 func (d *Doc) AddEntry(collectionPath, name string) (string, error) {
-	sectionKey, collectionKey, ok := strings.Cut(collectionPath, ".")
+	collection, ok := d.findCollection(collectionPath)
 	if !ok {
 		return "", fmt.Errorf("нет списка %s", collectionPath)
-	}
-	section, ok := sectionOf(sectionKey)
-	if !ok {
-		return "", fmt.Errorf("раздела «%s» нет", sectionKey)
-	}
-	collection, ok := collectionOf(section, collectionKey)
-	if !ok {
-		return "", fmt.Errorf("в разделе «%s» нет списка «%s»", section.Title, collectionKey)
 	}
 	if collection.Keyed {
 		name = strings.TrimSpace(name)
@@ -157,10 +210,14 @@ func blank(collection Collection) any {
 		if field.Key == "" {
 			return map[string]any{}
 		}
-		if field.Default == "" {
+		initial := field.Initial
+		if initial == "" {
+			initial = field.Default
+		}
+		if initial == "" {
 			continue
 		}
-		if value, err := parse(field, field.Default); err == nil {
+		if value, err := parse(field, initial); err == nil {
 			assign(entry, field.Key, value)
 		}
 	}

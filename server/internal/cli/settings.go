@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
+	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/spf13/cobra"
 
 	"github.com/laminara/laminara/server/internal/control"
@@ -20,8 +20,8 @@ func settingsCmd() *cobra.Command {
 		Short: "показать или изменить настройку",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if daemonAnswers() {
-				code, err := runExec(cmd.Context(), adminClient(), "settings "+quoteArgs(args))
+			if configPath == "" && (remoteClient(cmd.Context()) || daemonAnswers()) {
+				code, err := runExecRequest(cmd.Context(), adminClient(cmd.Context()), &adminv1.ExecRequest{Arguments: append([]string{"settings"}, args...)})
 				if err != nil {
 					return err
 				}
@@ -55,7 +55,8 @@ func settingsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "путь к конфигу сервера (нужен, когда сервер не запущен)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "путь к конфигу для прямой правки файла")
+	cmd.AddCommand(settingsApplyCmd(&configPath))
 	return cmd
 }
 
@@ -66,15 +67,4 @@ func daemonAnswers() bool {
 	}
 	conn.Close()
 	return true
-}
-
-func quoteArgs(args []string) string {
-	quoted := make([]string, 0, len(args))
-	for _, arg := range args {
-		if arg == "" || strings.ContainsAny(arg, " \t\"") {
-			arg = `"` + strings.ReplaceAll(arg, `"`, `\"`) + `"`
-		}
-		quoted = append(quoted, arg)
-	}
-	return strings.Join(quoted, " ")
 }

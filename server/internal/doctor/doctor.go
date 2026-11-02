@@ -30,6 +30,7 @@ type section struct {
 }
 
 var sections = []section{
+	{key: "admin", title: "удалённое управление", run: checkAdmin},
 	{key: "config", title: "настройки", run: checkConfigFile},
 	{key: "auth", title: "аккаунты и вход", run: checkAuth},
 	{key: "storage", title: "хранилище файлов", run: checkStorage},

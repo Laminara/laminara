@@ -16,6 +16,7 @@ import (
 )
 
 type Config struct {
+	Admin     *AdminConfig       `json:"admin"`
 	Auth      *AuthConfig        `json:"auth"`
 	Storage   *StorageConfig     `json:"storage"`
 	Build     *BuildConfig       `json:"build"`
@@ -34,6 +35,15 @@ type Config struct {
 	Crashes   *crash.Config      `json:"crashReports"`
 }
 
+type AdminConfig struct {
+	Addr                  string `json:"addr"`
+	TLSCert               string `json:"tlsCert"`
+	TLSKey                string `json:"tlsKey"`
+	AllowInsecureLoopback bool   `json:"allowInsecureLoopback"`
+	TokensPath            string `json:"tokensPath"`
+	JobsDir               string `json:"jobsDir"`
+}
+
 type BrandingConfig struct {
 	Name            string `json:"name"`
 	WindowTitle     string `json:"windowTitle"`
@@ -48,6 +58,8 @@ type BrandingConfig struct {
 }
 
 type LogConfig struct {
+	Level     string   `json:"level"`
+	Format    string   `json:"format"`
 	File      string   `json:"file"`
 	MaxSizeMB int      `json:"maxSizeMB"`
 	Keep      int      `json:"keep"`
@@ -113,6 +125,7 @@ type BuildConfig struct {
 }
 
 type APIConfig struct {
+	Metrics        bool     `json:"metrics"`
 	Addr           string   `json:"addr"`
 	XAccel         bool     `json:"xAccel"`
 	TrustedProxies []string `json:"trustedProxies"`
@@ -174,6 +187,15 @@ func LoadChecked(path string) (*Config, error) {
 
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data, path)
+}
+
+func Parse(data []byte, path string) (*Config, error) {
+	var err error
+	data, err = Resolve(data, path)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,41 @@
+name: Применить игровую сборку
+on:
+  workflow_dispatch:
+    inputs:
+      specification:
+        description: Путь к JSON описанию сборки
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: build-apply-${{ inputs.specification }}
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    environment: laminara
+    env:
+      CLI_IMAGE: ${{ vars.LAMINARA_CLI_IMAGE }}
+      SPEC_FILE: ${{ inputs.specification }}
+      LAMINARA_ADMIN_URL: ${{ vars.LAMINARA_ADMIN_URL }}
+      LAMINARA_ADMIN_TOKEN: ${{ secrets.LAMINARA_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Проверить, спланировать и применить
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLI_IMAGE"
+          test -n "$LAMINARA_ADMIN_URL"
+          test -n "$LAMINARA_ADMIN_TOKEN"
+          cli() {
+            docker run --rm --mount "type=bind,source=$PWD,target=/work,readonly" -w /work \
+              -e LAMINARA_ADMIN_URL -e LAMINARA_ADMIN_TOKEN "$CLI_IMAGE" "$@"
+          }
+          cli build validate "$SPEC_FILE" > /tmp/build-input.json
+          cli build plan "$SPEC_FILE" > /tmp/build-plan.json
+          cat /tmp/build-plan.json
+          cli build push "$SPEC_FILE"
+          cli build apply "$SPEC_FILE" --revision "$(jq -r .revision /tmp/build-plan.json)" \
+            --key "$GITHUB_REPOSITORY:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" --json

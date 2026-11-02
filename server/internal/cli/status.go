@@ -18,7 +18,7 @@ func statusCmd() *cobra.Command {
 		Short: "состояние сервера",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			resp, err := adminClient().Status(cmd.Context(), connect.NewRequest(&adminv1.StatusRequest{}))
+			resp, err := adminClient(cmd.Context()).Status(cmd.Context(), connect.NewRequest(&adminv1.StatusRequest{}))
 			if err != nil {
 				return err
 			}

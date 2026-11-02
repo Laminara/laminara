@@ -37,10 +37,11 @@ socket.onopen = () => {
 };
 
 socket.onmessage = (event) => {
-  terminal.write(decoder.decode(event.data));
+  terminal.write(decoder.decode(event.data, { stream: true }));
 };
 
 socket.onclose = () => {
+  terminal.write(decoder.decode());
   status.textContent = "сеанс закрыт — обновите страницу, чтобы начать заново";
 };
 

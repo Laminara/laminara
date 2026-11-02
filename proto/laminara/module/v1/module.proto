@@ -8,6 +8,8 @@ message CommandSpec {
   string name = 1;
   repeated string aliases = 2;
   string synopsis = 3;
+  bool safe_arguments = 4;
+  bool secret_output = 5;
 }
 
 enum ProviderKind {
@@ -30,6 +32,7 @@ message InfoResponse {
   repeated CommandSpec commands = 4;
   repeated string events = 5;
   repeated ProviderSpec providers = 6;
+  bytes settings_schema_json = 7;
 }
 
 message ExecuteRequest {

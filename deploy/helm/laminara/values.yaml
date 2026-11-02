@@ -1,0 +1,71 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/laminara/laminara-server
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+existingConfigSecret: ""
+config:
+  auth:
+    provider: jsonfile
+    config:
+      path: /var/lib/laminara/users.json
+      hash: argon2id
+    sessions:
+      backend: memory
+  storage:
+    backend: fs
+    config:
+      root: /var/lib/laminara/objects
+  build:
+    profilesDir: /var/lib/laminara/profiles
+    signingKeyPath: /var/lib/laminara/signing.key
+  api:
+    addr: 0.0.0.0:8099
+    xAccel: false
+    metrics: false
+  console:
+    enabled: false
+  update:
+    check: false
+    install: false
+  log:
+    format: json
+    level: info
+bootstrapUsersFile: true
+persistence:
+  existingClaim: ""
+  storageClass: null
+  size: 20Gi
+  accessModes: [ReadWriteOnce]
+service:
+  port: 8099
+adminService:
+  enabled: false
+  port: 9443
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tlsSecret: ""
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountToken: false
+env: []
+envFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+podAnnotations: {}
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 2Gi
+nodeSelector: {}
+tolerations: []
+affinity: {}

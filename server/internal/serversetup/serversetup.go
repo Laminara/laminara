@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
@@ -25,6 +26,7 @@ import (
 	"github.com/laminara/laminara/server/internal/hwid"
 	"github.com/laminara/laminara/server/internal/launchersvc"
 	"github.com/laminara/laminara/server/internal/manifest"
+	"github.com/laminara/laminara/server/internal/metrics"
 	"github.com/laminara/laminara/server/internal/news"
 	"github.com/laminara/laminara/server/internal/ratelimit"
 	"github.com/laminara/laminara/server/internal/selfupdate"
@@ -53,6 +55,7 @@ type Wired struct {
 	PublicHandler http.Handler
 	PublicAddr    string
 	Events        *events.Bus
+	Metrics       *metrics.Handler
 }
 
 const healthProbeKey = "healthz/probe"
@@ -147,6 +150,9 @@ func Build(cfg *config.Config) (*Wired, error) {
 	}
 	wired.Console = console
 	if cfg.Build != nil && cfg.Build.ProfilesDir != "" {
+		if err := os.MkdirAll(cfg.Build.ProfilesDir, 0o755); err != nil {
+			return nil, err
+		}
 		wired.Catalog = catalog.New(cfg.Build.ProfilesDir)
 		served := wired.Catalog
 		wired.Events.Subscribe(func(e events.Event) {
@@ -164,6 +170,10 @@ func Build(cfg *config.Config) (*Wired, error) {
 		return nil, err
 	}
 	if handler != nil && cfg.API != nil && cfg.API.Addr != "" {
+		if cfg.API.Metrics {
+			wired.Metrics = metrics.New()
+			handler = wired.Metrics.Wrap(handler)
+		}
 		wired.PublicHandler = handler
 		wired.PublicAddr = cfg.API.Addr
 	}
@@ -248,10 +258,24 @@ func gameSessionStore(cfg *config.Config) *redis.Client {
 
 func healthChecks(wired *Wired, backend storage.Backend) *health.Handler {
 	var checks []health.Check
+	add := func(name string, dependency any) {
+		if ready, ok := dependency.(interface{ Readiness(context.Context) error }); ok {
+			checks = append(checks, health.Check{Name: name, Probe: ready.Readiness})
+		}
+	}
+	if wired.Auth != nil {
+		add("auth", wired.Auth.Provider())
+		add("sessions", wired.Auth.Sessions())
+	}
+	add("machines", wired.Machines)
+	add("rateLimit", wired.Limits)
 	if backend != nil {
 		checks = append(checks, health.Check{
 			Name: "storage",
 			Probe: func(ctx context.Context) error {
+				if ready, ok := backend.(interface{ Readiness(context.Context) error }); ok {
+					return ready.Readiness(ctx)
+				}
 				_, _, err := backend.Stat(ctx, healthProbeKey)
 				return err
 			},
@@ -262,8 +286,7 @@ func healthChecks(wired *Wired, backend storage.Backend) *health.Handler {
 		checks = append(checks, health.Check{
 			Name: "catalog",
 			Probe: func(context.Context) error {
-				_, err := served.List()
-				return err
+				return served.Check()
 			},
 		})
 	}
