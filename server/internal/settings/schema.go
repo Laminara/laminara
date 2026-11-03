@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	sdkmodule "github.com/laminara/laminara/sdk/go/module"
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/auth"
 	"github.com/laminara/laminara/server/internal/auth/hash"
@@ -18,22 +19,26 @@ import (
 	"github.com/laminara/laminara/server/internal/storage"
 )
 
-type Kind string
+type Kind = sdkmodule.SettingKind
 
 const (
-	KindText       Kind = "text"
-	KindSecret     Kind = "secret"
-	KindBool       Kind = "bool"
-	KindInt        Kind = "int"
-	KindDuration   Kind = "duration"
-	KindChoice     Kind = "choice"
-	KindList       Kind = "list"
-	KindPairs      Kind = "pairs"
-	KindJSON       Kind = "json"
-	KindSecretJSON Kind = "secret-json"
+	KindText       Kind = sdkmodule.SettingText
+	KindSecret     Kind = sdkmodule.SettingSecret
+	KindBool       Kind = sdkmodule.SettingBool
+	KindInt        Kind = sdkmodule.SettingInt
+	KindDuration   Kind = sdkmodule.SettingDuration
+	KindChoice     Kind = sdkmodule.SettingChoice
+	KindList       Kind = sdkmodule.SettingList
+	KindPairs      Kind = sdkmodule.SettingPairs
+	KindMap        Kind = sdkmodule.SettingMap
+	KindJSON       Kind = sdkmodule.SettingJSON
+	KindSecretJSON Kind = sdkmodule.SettingSecretJSON
 )
 
 type Field struct {
+	Group     string
+	Min       *int64
+	Max       *int64
 	Required  bool
 	Extension bool
 	Key       string
@@ -57,6 +62,7 @@ type Section struct {
 }
 
 type Collection struct {
+	Discover    func() map[string]CollectionEntryView
 	EntryFields func(string) []Field
 	Key         string
 	Title       string
@@ -445,7 +451,7 @@ var schema = []Section{
 			{
 				Key: "config", Title: "Настройки модулей", Keyed: true,
 				NameLabel: "Имя модуля", NameHint: "Так же, как называется файл модуля в папке.",
-				Hint: "Каждый модуль читает свои настройки — что в них писать, знает его автор.",
+				Hint: "Установленные модули и сохранённые настройки. Поля описывает модуль; изменения применяются после перезапуска сервера.",
 				Fields: []Field{
 					{Key: "", Label: "Настройки модуля", Kind: KindSecretJSON, Hint: "JSON скрыт: модуль может хранить в нём секреты. Введите весь блок для замены; пустой ввод оставит его прежним."},
 				},

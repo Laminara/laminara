@@ -86,6 +86,7 @@ func (d *Doc) sectionOf(key string) (Section, bool) {
 func (d *Doc) raw(path string) (any, bool) {
 	var current any = d.tree
 	for _, step := range strings.Split(path, ".") {
+		step = unescapeKey(step)
 		switch node := current.(type) {
 		case map[string]any:
 			value, ok := node[step]
@@ -110,11 +111,13 @@ func (d *Doc) put(path string, value any) error {
 	steps := strings.Split(path, ".")
 	var current any = d.tree
 	for i, step := range steps[:len(steps)-1] {
+		step = unescapeKey(step)
 		switch node := current.(type) {
 		case map[string]any:
 			next, ok := node[step]
 			if !ok || next == nil {
-				if _, err := strconv.Atoi(steps[i+1]); err == nil {
+				collection, known := d.findCollection(strings.Join(steps[:i+1], "."))
+				if _, err := strconv.Atoi(steps[i+1]); err == nil && !(known && collection.Keyed) {
 					next = []any{}
 				} else {
 					next = map[string]any{}
@@ -132,7 +135,7 @@ func (d *Doc) put(path string, value any) error {
 			return fmt.Errorf("нет записи %s", path)
 		}
 	}
-	last := steps[len(steps)-1]
+	last := unescapeKey(steps[len(steps)-1])
 	switch node := current.(type) {
 	case map[string]any:
 		if value == nil {
@@ -156,7 +159,7 @@ func (d *Doc) put(path string, value any) error {
 func (d *Doc) drop(path string) error {
 	steps := strings.Split(path, ".")
 	parent := strings.Join(steps[:len(steps)-1], ".")
-	last := steps[len(steps)-1]
+	last := unescapeKey(steps[len(steps)-1])
 	if parent == "" {
 		delete(d.tree, last)
 		return nil

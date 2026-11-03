@@ -35,7 +35,7 @@ func DescribeSettings(doc *settings.Doc, section, entry, query string) (Settings
 		for _, collection := range collections {
 			view := &adminv1.SettingCollection{Path: collection.Path, Title: collection.Title, Hint: collection.Hint, Keyed: collection.Keyed, NameLabel: collection.NameLabel, NameHint: collection.NameHint}
 			for _, item := range collection.Entries {
-				view.Entries = append(view.Entries, &adminv1.SettingCollectionEntry{Path: item.Path, Title: item.Title})
+				view.Entries = append(view.Entries, &adminv1.SettingCollectionEntry{Path: item.Path, Title: item.Title, Hint: item.Hint})
 			}
 			page.Collections = append(page.Collections, view)
 		}
@@ -46,7 +46,7 @@ func DescribeSettings(doc *settings.Doc, section, entry, query string) (Settings
 func SettingEntriesProto(entries []settings.Entry) []*adminv1.SettingEntry {
 	result := make([]*adminv1.SettingEntry, 0, len(entries))
 	for _, entry := range entries {
-		result = append(result, &adminv1.SettingEntry{Path: entry.Path, Label: entry.Label, Hint: entry.Hint, Kind: string(entry.Kind), Value: entry.Value, DefaultValue: entry.Default, IsSet: entry.IsSet, Options: entry.Options, Display: entry.Display})
+		result = append(result, &adminv1.SettingEntry{Path: entry.Path, Label: entry.Label, Hint: entry.Hint, Kind: string(entry.Kind), Value: entry.Value, DefaultValue: entry.Default, IsSet: entry.IsSet, Options: entry.Options, Display: entry.Display, Group: entry.Group, Required: entry.Required, Min: entry.Min, Max: entry.Max, AllowZero: entry.AllowZero})
 	}
 	return result
 }

@@ -4,6 +4,12 @@ package laminara.module.v1;
 
 message InfoRequest {}
 
+message DescribeSettingsRequest {}
+
+message DescribeSettingsResponse {
+  InfoResponse description = 1;
+}
+
 message CommandSpec {
   string name = 1;
   repeated string aliases = 2;
@@ -137,6 +143,7 @@ message NewsItemsResponse {
 }
 
 service ModuleService {
+  rpc DescribeSettings(DescribeSettingsRequest) returns (DescribeSettingsResponse);
   rpc Configure(ConfigureRequest) returns (ConfigureResponse);
   rpc Info(InfoRequest) returns (InfoResponse);
   rpc Execute(ExecuteRequest) returns (stream ExecuteResponse);

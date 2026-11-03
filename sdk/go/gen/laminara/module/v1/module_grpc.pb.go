@@ -19,21 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ModuleService_Configure_FullMethodName    = "/laminara.module.v1.ModuleService/Configure"
-	ModuleService_Info_FullMethodName         = "/laminara.module.v1.ModuleService/Info"
-	ModuleService_Execute_FullMethodName      = "/laminara.module.v1.ModuleService/Execute"
-	ModuleService_Emit_FullMethodName         = "/laminara.module.v1.ModuleService/Emit"
-	ModuleService_OpenProvider_FullMethodName = "/laminara.module.v1.ModuleService/OpenProvider"
-	ModuleService_Authenticate_FullMethodName = "/laminara.module.v1.ModuleService/Authenticate"
-	ModuleService_Textures_FullMethodName     = "/laminara.module.v1.ModuleService/Textures"
-	ModuleService_Allows_FullMethodName       = "/laminara.module.v1.ModuleService/Allows"
-	ModuleService_NewsItems_FullMethodName    = "/laminara.module.v1.ModuleService/NewsItems"
+	ModuleService_DescribeSettings_FullMethodName = "/laminara.module.v1.ModuleService/DescribeSettings"
+	ModuleService_Configure_FullMethodName        = "/laminara.module.v1.ModuleService/Configure"
+	ModuleService_Info_FullMethodName             = "/laminara.module.v1.ModuleService/Info"
+	ModuleService_Execute_FullMethodName          = "/laminara.module.v1.ModuleService/Execute"
+	ModuleService_Emit_FullMethodName             = "/laminara.module.v1.ModuleService/Emit"
+	ModuleService_OpenProvider_FullMethodName     = "/laminara.module.v1.ModuleService/OpenProvider"
+	ModuleService_Authenticate_FullMethodName     = "/laminara.module.v1.ModuleService/Authenticate"
+	ModuleService_Textures_FullMethodName         = "/laminara.module.v1.ModuleService/Textures"
+	ModuleService_Allows_FullMethodName           = "/laminara.module.v1.ModuleService/Allows"
+	ModuleService_NewsItems_FullMethodName        = "/laminara.module.v1.ModuleService/NewsItems"
 )
 
 // ModuleServiceClient is the client API for ModuleService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ModuleServiceClient interface {
+	DescribeSettings(ctx context.Context, in *DescribeSettingsRequest, opts ...grpc.CallOption) (*DescribeSettingsResponse, error)
 	Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error)
 	Info(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*InfoResponse, error)
 	Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecuteResponse], error)
@@ -51,6 +53,16 @@ type moduleServiceClient struct {
 
 func NewModuleServiceClient(cc grpc.ClientConnInterface) ModuleServiceClient {
 	return &moduleServiceClient{cc}
+}
+
+func (c *moduleServiceClient) DescribeSettings(ctx context.Context, in *DescribeSettingsRequest, opts ...grpc.CallOption) (*DescribeSettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeSettingsResponse)
+	err := c.cc.Invoke(ctx, ModuleService_DescribeSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *moduleServiceClient) Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error) {
@@ -156,6 +168,7 @@ func (c *moduleServiceClient) NewsItems(ctx context.Context, in *NewsItemsReques
 // All implementations must embed UnimplementedModuleServiceServer
 // for forward compatibility.
 type ModuleServiceServer interface {
+	DescribeSettings(context.Context, *DescribeSettingsRequest) (*DescribeSettingsResponse, error)
 	Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error)
 	Info(context.Context, *InfoRequest) (*InfoResponse, error)
 	Execute(*ExecuteRequest, grpc.ServerStreamingServer[ExecuteResponse]) error
@@ -175,6 +188,9 @@ type ModuleServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedModuleServiceServer struct{}
 
+func (UnimplementedModuleServiceServer) DescribeSettings(context.Context, *DescribeSettingsRequest) (*DescribeSettingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeSettings not implemented")
+}
 func (UnimplementedModuleServiceServer) Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Configure not implemented")
 }
@@ -221,6 +237,24 @@ func RegisterModuleServiceServer(s grpc.ServiceRegistrar, srv ModuleServiceServe
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ModuleService_ServiceDesc, srv)
+}
+
+func _ModuleService_DescribeSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeSettingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModuleServiceServer).DescribeSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModuleService_DescribeSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModuleServiceServer).DescribeSettings(ctx, req.(*DescribeSettingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ModuleService_Configure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -385,6 +419,10 @@ var ModuleService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "laminara.module.v1.ModuleService",
 	HandlerType: (*ModuleServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "DescribeSettings",
+			Handler:    _ModuleService_DescribeSettings_Handler,
+		},
 		{
 			MethodName: "Configure",
 			Handler:    _ModuleService_Configure_Handler,

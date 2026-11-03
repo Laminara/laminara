@@ -26,6 +26,54 @@ func sampleMenu(count int) menu {
 	return menu
 }
 
+func TestMenuLongMetadataKeepsFrameHeight(t *testing.T) {
+	m := sampleMenu(2)
+	m.resize(58, 20)
+	before := lipgloss.Height(m.View(newStyles(), unicodeIcons()))
+	m.title = strings.Repeat("Модуль ", 40)
+	m.subtitle = strings.Repeat("Состояние ", 40)
+	view := m.View(newStyles(), unicodeIcons())
+	if lipgloss.Height(view) != before || lipgloss.Width(view) > m.width {
+		t.Fatalf("metadata expanded frame: before=%d after=%dx%d", before, lipgloss.Width(view), lipgloss.Height(view))
+	}
+}
+
+func TestMenuLongChoiceListStaysInsideFrame(t *testing.T) {
+	m := sampleMenu(2)
+	m.resize(58, 20)
+	for i := range 40 {
+		m.items[0].options = append(m.items[0].options, "Вариант "+itoa(i))
+	}
+	m.items[0].editor = editSelect
+	m.startEditing()
+	m.choice = 39
+	view := m.View(newStyles(), unicodeIcons())
+	if lipgloss.Height(view) > m.height || !strings.Contains(view, "Вариант 39") {
+		t.Fatalf("choice list escaped frame or hid selection: height=%d limit=%d", lipgloss.Height(view), m.height)
+	}
+}
+
+func TestMenuCancelClearsAbandonedValidationError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode menuMode
+	}{{"text", menuTyping}, {"json", menuMultiline}, {"choice", menuChoosing}} {
+		t.Run(test.name, func(t *testing.T) {
+			m := sampleMenu(2)
+			if test.mode == menuMultiline {
+				m.items[0].editor = editJSON
+			}
+			m.startEditing()
+			m.mode = test.mode
+			m.problem = "Значение не соответствует схеме"
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			if m.mode != menuBrowsing || m.problem != "" {
+				t.Fatalf("cancel kept stale error: %q", m.problem)
+			}
+		})
+	}
+}
+
 func press(m menu, key tea.KeyMsg) (menu, menuEvent) {
 	return m.Update(key)
 }

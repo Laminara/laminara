@@ -20,6 +20,13 @@ func (g *greeter) Info() module.Info {
 	return module.Info{Name: "greeter", Version: "0.1.0", Description: "Пример внешнего модуля"}
 }
 
+func (g *greeter) Settings() module.SettingsDescriptor {
+	return module.SettingsDescriptor{Module: []module.SettingField{
+		{Key: "greeting", Label: "Приветствие", Group: "Сообщения", Kind: module.SettingText, Default: "Привет", Required: true, Hint: "Текст перед именем игрока в команде greet."},
+		{Key: "eventLog", Label: "Файл событий", Group: "Журнал", Kind: module.SettingText, Hint: "Пустое значение отключает запись событий. Путь на сервере."},
+	}}
+}
+
 func (g *greeter) Configure(config []byte) error {
 	var settings struct {
 		Greeting string `json:"greeting"`

@@ -117,7 +117,8 @@ func (m menu) rows() int {
 	rows := max(m.height-menuChrome, 3)
 	if m.mode == menuChoosing {
 		if item, ok := m.current(); ok {
-			rows = max(rows-len(item.options), 2)
+			first, last := m.optionRange(item)
+			rows = max(rows-(last-first), 2)
 		}
 	}
 	return rows
@@ -217,6 +218,7 @@ func (m *menu) startEditing() {
 	if !ok {
 		return
 	}
+	m.problem = ""
 	switch item.editor {
 	case editJSON:
 		m.mode = menuMultiline
@@ -274,6 +276,7 @@ func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
 				m.jsonInput.Blur()
 				m.jsonInput.SetValue("")
 				m.mode = menuBrowsing
+				m.problem = ""
 				return m, menuEvent{}
 			case "ctrl+s":
 				value := m.jsonInput.Value()
@@ -305,6 +308,7 @@ func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
 			m.mode = menuBrowsing
 			m.input.Blur()
 			m.input.SetValue("")
+			m.problem = ""
 			return m, menuEvent{}
 		case "enter":
 			value := strings.TrimSpace(m.input.Value())
@@ -327,6 +331,7 @@ func (m menu) Update(msg tea.Msg) (menu, menuEvent) {
 		switch key.String() {
 		case "esc":
 			m.mode = menuBrowsing
+			m.problem = ""
 			return m, menuEvent{}
 		case "up", "k":
 			if m.choice > 0 {
@@ -406,7 +411,7 @@ func (m menu) View(st styles, icons iconSet) string {
 	if m.mode == menuMultiline {
 		item, _ := m.current()
 		body := st.selected.Render(clip(item.label, m.width)) + "\n" + st.dim.Render(clip("JSON · Ctrl+S — принять, Esc — отменить", m.width)) + "\n\n" + m.jsonInput.View()
-		footer := st.faint.Render(wrapText(item.hint, m.width, menuHintRows))
+		footer := st.dim.Render(wrapText(item.hint, m.width, menuHintRows))
 		if m.problem != "" {
 			footer = st.bad.Render(wrapText(m.problem, m.width, menuHintRows))
 		}
@@ -418,16 +423,16 @@ func (m menu) View(st styles, icons iconSet) string {
 
 	labelWidth := m.labelWidth()
 
-	lines := []string{st.selected.Render(m.title)}
+	lines := []string{st.selected.Render(clip(m.title, m.width))}
 	if m.subtitle != "" {
-		lines = append(lines, st.faint.Render(m.subtitle))
+		lines = append(lines, st.dim.Render(clip(m.subtitle, m.width)))
 	} else {
 		lines = append(lines, "")
 	}
 	lines = append(lines, "")
 
 	if first > 0 {
-		lines = append(lines, st.faint.Render("  ↑ выше ещё "+itoa(first)))
+		lines = append(lines, st.dim.Render("  ↑ выше ещё "+itoa(first)))
 	} else {
 		lines = append(lines, "")
 	}
@@ -442,7 +447,7 @@ func (m menu) View(st styles, icons iconSet) string {
 		}
 	}
 	if last < len(m.items) {
-		lines = append(lines, st.faint.Render("  ↓ ниже ещё "+itoa(len(m.items)-last)))
+		lines = append(lines, st.dim.Render("  ↓ ниже ещё "+itoa(len(m.items)-last)))
 	} else {
 		lines = append(lines, "")
 	}
@@ -451,7 +456,7 @@ func (m menu) View(st styles, icons iconSet) string {
 	if item, ok := m.current(); ok {
 		hint = item.hint
 	}
-	footer := st.faint.Render(wrapText(hint, m.width, menuHintRows))
+	footer := st.dim.Render(wrapText(hint, m.width, menuHintRows))
 	if m.problem != "" {
 		footer = st.bad.Render(wrapText(m.problem, m.width, menuHintRows))
 	} else if m.notice != "" {
@@ -519,9 +524,17 @@ func toned(value string, tone menuTone, st styles) string {
 	}
 }
 
+func (m menu) optionRange(item menuItem) (int, int) {
+	count := min(len(item.options), 6, max(m.height-menuChrome-2, 1))
+	first := min(max(m.choice-count+1, 0), len(item.options)-count)
+	return first, first + count
+}
+
 func (m menu) renderOptions(item menuItem, st styles, icons iconSet) []string {
-	lines := make([]string, 0, len(item.options))
-	for index, option := range item.options {
+	first, last := m.optionRange(item)
+	lines := make([]string, 0, last-first)
+	for index := first; index < last; index++ {
+		option := item.options[index]
 		row := "      " + option
 		if index == m.choice {
 			row = "    " + st.selected.Render(icons.cursor+" "+option)

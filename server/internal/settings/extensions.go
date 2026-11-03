@@ -8,18 +8,11 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	sdkmodule "github.com/laminara/laminara/sdk/go/module"
 )
 
-type SchemaField struct {
-	Key       string   `json:"key"`
-	Label     string   `json:"label"`
-	Hint      string   `json:"hint,omitempty"`
-	Kind      Kind     `json:"kind"`
-	Default   string   `json:"default,omitempty"`
-	Options   []string `json:"options,omitempty"`
-	Required  bool     `json:"required,omitempty"`
-	AllowZero bool     `json:"allowZero,omitempty"`
-}
+type SchemaField = sdkmodule.SettingField
 
 var extensions = struct {
 	sync.RWMutex
@@ -34,10 +27,10 @@ func RegisterSchema(kind, name string, descriptors []SchemaField) (func(), error
 	seen := map[string]bool{}
 	for _, descriptor := range descriptors {
 		key := descriptor.Key
-		if key == "" || strings.ContainsAny(key, " /\\\x00") || strings.ContainsFunc(key, unicode.IsControl) || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") || strings.Contains(key, "..") || seen[key] {
+		if key == "" || strings.ContainsAny(key, " /\\%\x00") || strings.ContainsFunc(key, unicode.IsControl) || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") || strings.Contains(key, "..") || seen[key] {
 			return nil, errors.New("неверный ключ поля схемы")
 		}
-		if !slices.Contains([]Kind{KindText, KindSecret, KindBool, KindInt, KindDuration, KindChoice, KindList, KindPairs, KindSecretJSON}, descriptor.Kind) {
+		if !slices.Contains([]Kind{KindText, KindSecret, KindBool, KindInt, KindDuration, KindChoice, KindList, KindPairs, KindMap, KindJSON, KindSecretJSON}, descriptor.Kind) {
 			return nil, errors.New("неподдерживаемый тип поля схемы")
 		}
 		for previous := range seen {
@@ -46,8 +39,21 @@ func RegisterSchema(kind, name string, descriptors []SchemaField) (func(), error
 			}
 		}
 		seen[key] = true
+		if (descriptor.Min != nil || descriptor.Max != nil) && descriptor.Kind != KindInt {
+			return nil, errors.New("границы поддерживаются только для целых чисел")
+		}
+		if descriptor.Min != nil && descriptor.Max != nil && *descriptor.Min > *descriptor.Max {
+			return nil, errors.New("нижняя граница больше верхней")
+		}
+		if descriptor.Kind == KindChoice && len(descriptor.Options) == 0 {
+			return nil, errors.New("у выбора должен быть хотя бы один вариант")
+		}
+		if (descriptor.Kind == KindSecret || descriptor.Kind == KindSecretJSON) && descriptor.Default != "" {
+			return nil, errors.New("секрет не должен иметь значение по умолчанию в схеме")
+		}
 		choices := slices.Clone(descriptor.Options)
 		field := Field{Key: key, Label: descriptor.Label, Hint: descriptor.Hint, Kind: descriptor.Kind, Default: descriptor.Default, Required: descriptor.Required, AllowZero: descriptor.AllowZero, Extension: true}
+		field.Group, field.Min, field.Max = descriptor.Group, cloneBound(descriptor.Min), cloneBound(descriptor.Max)
 		if field.Label == "" {
 			field.Label = key
 		}
@@ -103,6 +109,7 @@ func extendedSections(source []Section) []Section {
 		for i, collection := range result {
 			result[i].Fields = expandFields(kind, collection.Fields)
 			if kind == "modules" && collection.Key == "config" {
+				result[i].Discover = discoveredModules
 				result[i].EntryFields = func(name string) []Field {
 					extensions.RLock()
 					defer extensions.RUnlock()
@@ -132,15 +139,28 @@ func (d *Doc) validateExtensions() error {
 				continue
 			}
 			value, exists := d.raw(entry.Path)
-			if !exists || value == nil || value == "" {
+			if !exists {
 				if field.Required && field.Default == "" {
 					return fmt.Errorf("%s: обязательное поле", entry.Path)
 				}
 				continue
 			}
+			if field.Required && (value == nil || value == "") {
+				return fmt.Errorf("%s: обязательное поле", entry.Path)
+			}
 			var raw string
+			if field.Kind == KindList {
+				if _, ok := value.([]any); !ok {
+					return fmt.Errorf("%s: нужен массив строк", entry.Path)
+				}
+			}
+			if field.Kind == KindPairs || field.Kind == KindMap {
+				if _, ok := value.(map[string]any); !ok {
+					return fmt.Errorf("%s: нужен объект со строковыми значениями", entry.Path)
+				}
+			}
 			switch field.Kind {
-			case KindList, KindPairs, KindSecretJSON:
+			case KindList, KindPairs, KindMap, KindJSON, KindSecretJSON:
 				data, err := json.Marshal(value)
 				if err != nil {
 					return err
@@ -152,7 +172,9 @@ func (d *Doc) validateExtensions() error {
 				}
 				raw = fmt.Sprint(value)
 			case KindInt:
-				if _, ok := value.(float64); !ok {
+				switch value.(type) {
+				case float64, int:
+				default:
 					return fmt.Errorf("%s: нужно число", entry.Path)
 				}
 				raw = fmt.Sprint(value)
@@ -177,6 +199,9 @@ func (d *Doc) validateExtensions() error {
 		}
 		for _, collection := range collections {
 			for _, entry := range collection.Entries {
+				if _, exists := d.raw(entry.Path); !exists {
+					continue
+				}
 				fields, err := d.EntryFields(entry.Path)
 				if err != nil {
 					return err

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -99,10 +100,17 @@ func restartProject(ctx context.Context, client adminv1connect.AdminServiceClien
 }
 
 func (m Model) enterSettings() (tea.Model, tea.Cmd) {
+	return m.enterSettingsAt(false)
+}
+
+func (m Model) enterSettingsAt(modules bool) (tea.Model, tea.Cmd) {
 	m.state = stateSettings
 	m.settings = settingsState{menu: newMenu("Настройки проекта")}
 	m.settings.menu.empty = "Тут пока пусто."
 	m.settings.stack = []settingsLevel{{title: "Настройки проекта"}}
+	if modules {
+		m.settings.stack = append(m.settings.stack, settingsLevel{title: "Модули", section: "modules"}, settingsLevel{title: "Настройки модулей", section: "modules", collection: "modules.config"})
+	}
 	m.settings.menu.resize(m.width, m.contentHeight()-4)
 	return m.loadSettings(nil)
 }
@@ -113,7 +121,7 @@ func (m Model) reloadSettings() tea.Cmd {
 
 func editorOf(kind string) menuEditor {
 	switch kind {
-	case "pairs", "list":
+	case "pairs", "map", "list":
 		return editNone
 	case "json":
 		return editJSON
@@ -139,13 +147,24 @@ func (m *Model) fillSettings(page *adminv1.ListSettingsResponse) {
 
 	if here.collection != "" {
 		if collection := findCollection(page, here.collection); collection != nil {
+			if collection.Path == "modules.config" && len(collection.Entries) == 0 {
+				items = append(items, menuItem{id: "empty:modules", label: "Модули не обнаружены", static: true, tone: toneMuted})
+			}
 			for _, entry := range collection.Entries {
-				items = append(items, menuItem{id: "item:" + entry.Path, label: entry.Title, hint: collection.Hint})
+				hint := collection.Hint
+				if entry.Hint != "" {
+					hint = entry.Hint
+				}
+				items = append(items, menuItem{id: "item:" + entry.Path, label: entry.Title, hint: hint})
 			}
 			add := menuItem{id: "add:" + collection.Path, label: "добавить", hint: collection.NameHint, action: true}
 			if collection.Keyed {
 				add.editor = editText
 				add.hint = collection.NameLabel + ". " + collection.NameHint
+			}
+			if collection.Path == "modules.config" {
+				add.label = "настроить по имени файла"
+				add.hint = "Создаёт только настройки. Поместите исполняемый файл в каталог модулей и перезапустите сервер. " + collection.NameHint
 			}
 			items = append(items, add)
 		}
@@ -159,7 +178,12 @@ func (m *Model) fillSettings(page *adminv1.ListSettingsResponse) {
 	for _, section := range page.Sections {
 		items = append(items, menuItem{id: "section:" + section.Key, label: section.Title, hint: section.Hint})
 	}
+	group := ""
 	for _, entry := range page.Entries {
+		if entry.Group != group && entry.Group != "" && here.query == "" {
+			items = append(items, menuItem{id: "group:" + entry.Path, label: entry.Group, static: true, tone: toneMuted})
+		}
+		group = entry.Group
 		items = append(items, settingItem(entry))
 	}
 	for _, collection := range page.Collections {
@@ -197,6 +221,16 @@ func settingItem(entry *adminv1.SettingEntry) menuItem {
 	if shown == "" {
 		shown = entry.Value
 	}
+	hint := entry.Hint
+	if entry.Required {
+		hint = strings.TrimSpace(hint + " Обязательное поле.")
+	}
+	if entry.Min != nil {
+		hint += fmt.Sprintf(" Минимум: %d.", *entry.Min)
+	}
+	if entry.Max != nil {
+		hint += fmt.Sprintf(" Максимум: %d.", *entry.Max)
+	}
 	tone := toneGood
 	if !entry.IsSet {
 		tone = toneMuted
@@ -210,7 +244,7 @@ func settingItem(entry *adminv1.SettingEntry) menuItem {
 		label:   entry.Label,
 		value:   shown,
 		raw:     &stored,
-		hint:    entry.Hint,
+		hint:    hint,
 		tone:    tone,
 		editor:  editorOf(entry.Kind),
 		options: entry.Options,
@@ -470,6 +504,9 @@ func (m Model) settingsKey(key, kind, path string) (tea.Model, tea.Cmd) {
 				label = item.label
 			}
 			m.settings.menu.notice = "удалить «" + label + "»? y — удалить, любая другая — нет"
+			if m.settings.here().collection == "modules.config" {
+				m.settings.menu.notice = "сбросить настройки «" + label + "»? Файл модуля останется. y — сбросить, другая клавиша — отменить"
+			}
 			return m, nil
 		}
 		return m, nil
@@ -530,7 +567,7 @@ func (m Model) settingsBar() string {
 	case menuChoosing:
 		return m.styles.bar.Render(strings.Join([]string{item("↑↓", "выбрать"), item("Enter", "принять"), item("Esc", "отменить")}, "   "))
 	}
-	left := []string{item("↑↓", "выбрать"), item("Enter", "открыть")}
+	left := []string{item("Enter", "открыть"), item("↑↓", "выбрать")}
 	if current, ok := m.settings.menu.current(); ok {
 		kind, _ := splitID(current.id)
 		switch kind {
@@ -539,9 +576,13 @@ func (m Model) settingsBar() string {
 			if current.editor == editSecret {
 				reset = "очистить"
 			}
-			left = []string{item("↑↓", "выбрать"), item("Enter", "изменить"), item("x", reset)}
+			left = []string{item("Enter", "изменить"), item("↑↓", "выбрать"), item("x", reset)}
 		case "item":
-			left = []string{item("↑↓", "выбрать"), item("Enter", "открыть"), item("x", "удалить")}
+			remove := "удалить"
+			if m.settings.here().collection == "modules.config" {
+				remove = "сбросить настройки"
+			}
+			left = []string{item("Enter", "открыть"), item("↑↓", "выбрать"), item("x", remove)}
 		}
 	}
 	right := []string{item("r", "перезапустить"), item("Esc", "назад")}

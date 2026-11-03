@@ -14,11 +14,14 @@ import (
 
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	sdkmodule "github.com/laminara/laminara/sdk/go/module"
 	"github.com/laminara/laminara/server/internal/command"
 	"github.com/laminara/laminara/server/internal/events"
 	"github.com/laminara/laminara/server/internal/module"
+	"github.com/laminara/laminara/server/internal/settings"
 )
 
 const (
@@ -76,6 +79,8 @@ func (l *Loader) LoadDir(dir string, configs map[string][]byte, registry *module
 }
 
 func (l *Loader) load(path string, config []byte, registry *module.Registry) error {
+	update, remove := settings.TrackModule(filepath.Base(path))
+	l.schemaCleanup = append(l.schemaCleanup, remove)
 	said := &saidAloud{}
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  sdkmodule.Handshake,
@@ -103,20 +108,10 @@ func (l *Loader) load(path string, config []byte, registry *module.Registry) err
 
 	ctx, cancel := context.WithTimeout(context.Background(), moduleLoadTimeout)
 	defer cancel()
-	if len(config) == 0 {
-		config = []byte("{}")
-	}
-	if err := svc.Configure(ctx, config); err != nil {
-		client.Kill()
-		return err
-	}
-	manifest, err := svc.Info(ctx)
+	manifest, err := l.configure(ctx, path, config, svc, update)
 	if err != nil {
 		client.Kill()
 		return err
-	}
-	if err := l.registerSchemas(path, manifest); err != nil {
-		l.log.Warn("схема настроек модуля отклонена", "module", manifest.Info.Name, "error", err)
 	}
 	registry.Add(newRemoteModule(manifest.Info, manifest.Commands, svc))
 	l.clients = append(l.clients, client)
@@ -141,6 +136,83 @@ func (l *Loader) load(path string, config []byte, registry *module.Registry) err
 		"providers", len(manifest.Providers),
 	)
 	return nil
+}
+
+type settingsDiscovery interface {
+	DescribeSettings(context.Context) (sdkmodule.Manifest, error)
+}
+
+func (l *Loader) configure(ctx context.Context, path string, config []byte, svc sdkmodule.Service, update func(string, string)) (sdkmodule.Manifest, error) {
+	name := filepath.Base(path)
+	title := name
+	var description sdkmodule.Manifest
+	discovered := false
+	if discovery, ok := svc.(settingsDiscovery); ok {
+		var err error
+		description, err = discovery.DescribeSettings(ctx)
+		if err != nil && status.Code(err) != codes.Unimplemented {
+			return sdkmodule.Manifest{}, err
+		}
+		discovered = err == nil
+	}
+	validSchema := false
+	var schema sdkmodule.SettingsDescriptor
+	schemaHint := "Нет описания полей: доступна замена скрытого JSON."
+	if discovered {
+		if description.Info.Name != "" && description.Info.Name != name {
+			title = description.Info.Name + " (" + name + ")"
+		}
+		if description.Info.Version != "" {
+			title += " · " + description.Info.Version
+		}
+		var err error
+		schema, err = l.registerSchemas(path, description)
+		if err != nil {
+			l.log.Warn("схема настроек модуля отклонена", "module", name, "error", err)
+			schemaHint = "Описание полей отклонено: доступна замена скрытого JSON."
+		} else {
+			validSchema = true
+		}
+		update(title, "Требует настройки. "+schemaHint+" Сохраните параметры и перезапустите сервер.")
+	}
+	if len(config) == 0 {
+		config = []byte("{}")
+	}
+	if validSchema {
+		if len(schema.Module) > 0 {
+			schemaHint = "Поля описаны модулем."
+			update(title, "Требует настройки. Сохраните обязательные поля и перезапустите сервер.")
+			var err error
+			config, err = settings.PrepareModuleConfig(name, config, schema.Version == 1)
+			if err != nil {
+				return sdkmodule.Manifest{}, err
+			}
+		}
+	}
+	if err := svc.Configure(ctx, config); err != nil {
+		return sdkmodule.Manifest{}, fmt.Errorf("модуль %s отклонил настройки; проверьте параметры по его описанию", name)
+	}
+	manifest, err := svc.Info(ctx)
+	if err != nil {
+		return sdkmodule.Manifest{}, err
+	}
+	if !discovered {
+		if manifest.Info.Name != "" && manifest.Info.Name != name {
+			title = manifest.Info.Name + " (" + name + ")"
+		}
+		if manifest.Info.Version != "" {
+			title += " · " + manifest.Info.Version
+		}
+		schema, err := l.registerSchemas(path, manifest)
+		if err != nil {
+			l.log.Warn("схема настроек модуля отклонена", "module", name, "error", err)
+			schemaHint = "Описание полей отклонено: доступна замена скрытого JSON."
+		} else if len(schema.Module) > 0 {
+			schemaHint = "Поля описаны модулем."
+		}
+	}
+	update(title, "Загружен. "+schemaHint+" Изменения применятся после перезапуска сервера.")
+	return manifest, nil
 }
 
 func (l *Loader) Subscribe(bus *events.Bus) {

@@ -17,6 +17,38 @@ type settingsRecorder struct {
 	patches []*adminv1.SettingsPatch
 }
 
+func TestSettingsNarrowBarKeepsEnter(t *testing.T) {
+	m := Model{width: 58, styles: newStyles(), settings: settingsState{menu: sampleMenu(1)}}
+	if !strings.Contains(m.settingsBar(), "Enter") {
+		t.Fatal("primary action missing from narrow settings footer")
+	}
+}
+
+func TestModuleSettingsUseSharedNavigationAndFieldEditors(t *testing.T) {
+	m := Model{ctx: context.Background(), client: &settingsRecorder{}, width: 100, height: 32}
+	entered, _ := m.enterSettingsAt(true)
+	m = entered.(Model)
+	m.fillSettings(&adminv1.ListSettingsResponse{Collections: []*adminv1.SettingCollection{{Path: "modules.config", Keyed: true, Entries: []*adminv1.SettingCollectionEntry{{Path: "modules.config.demo%2Eplugin", Title: "Демо", Hint: "Требует настройки"}}}}})
+	if m.settings.menu.items[0].id != "item:modules.config.demo%2Eplugin" || m.settings.menu.items[0].hint != "Требует настройки" {
+		t.Fatalf("module item: %+v", m.settings.menu.items[0])
+	}
+	opened, _ := m.openSettings("item", "modules.config.demo%2Eplugin", m.settings.menu.items[0].id)
+	m = opened.(Model)
+	min := int64(1)
+	m.fillSettings(&adminv1.ListSettingsResponse{Entries: []*adminv1.SettingEntry{
+		{Path: "modules.config.demo%2Eplugin.token", Label: "Токен", Group: "Подключение", Kind: "secret", Required: true},
+		{Path: "modules.config.demo%2Eplugin.workers", Label: "Потоки", Group: "Подключение", Kind: "int", Min: &min},
+		{Path: "modules.config.demo%2Eplugin.labels", Label: "Метки", Kind: "map"},
+	}})
+	items := m.settings.menu.items
+	if len(items) != 4 || !items[0].static || items[1].editor != editSecret || !strings.Contains(items[2].hint, "Минимум: 1") || items[3].editor != editNone {
+		t.Fatalf("fields: %+v", items)
+	}
+	if m.settings.here().entry != "modules.config.demo%2Eplugin" {
+		t.Fatal("entry navigation lost")
+	}
+}
+
 func (s *settingsRecorder) Status(context.Context, *connect.Request[adminv1.StatusRequest]) (*connect.Response[adminv1.StatusResponse], error) {
 	return connect.NewResponse(&adminv1.StatusResponse{Capabilities: []adminv1.AdminCapability{adminv1.AdminCapability_ADMIN_CAPABILITY_REDACTED_SETTINGS, adminv1.AdminCapability_ADMIN_CAPABILITY_SETTINGS_PATCH}}), nil
 }

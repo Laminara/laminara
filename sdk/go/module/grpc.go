@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -67,21 +68,61 @@ func (s *grpcServer) Configure(_ context.Context, req *modulev1.ConfigureRequest
 }
 
 func (s *grpcServer) Info(context.Context, *modulev1.InfoRequest) (*modulev1.InfoResponse, error) {
-	info := s.impl.Info()
-	out := &modulev1.InfoResponse{Name: info.Name, Version: info.Version, Description: info.Description}
+	out, err := s.describeSettings()
+	if err != nil {
+		return nil, err
+	}
 	for _, cmd := range s.impl.Commands() {
 		out.Commands = append(out.Commands, &modulev1.CommandSpec{Name: cmd.Name, Aliases: cmd.Aliases, Synopsis: cmd.Synopsis, SafeArguments: cmd.SafeArguments, SecretOutput: cmd.SecretOutput})
 	}
 	if handler, ok := s.impl.(EventHandler); ok {
 		out.Events = handler.Events()
 	}
-	if schema, ok := s.impl.(SettingsSchema); ok {
+	return out, nil
+}
+
+func (s *grpcServer) DescribeSettings(context.Context, *modulev1.DescribeSettingsRequest) (*modulev1.DescribeSettingsResponse, error) {
+	description, err := s.describeSettings()
+	if err != nil {
+		return nil, err
+	}
+	return &modulev1.DescribeSettingsResponse{Description: description}, nil
+}
+
+func (s *grpcServer) describeSettings() (*modulev1.InfoResponse, error) {
+	info := s.impl.Info()
+	out := &modulev1.InfoResponse{Name: info.Name, Version: info.Version, Description: info.Description}
+	if describer, ok := s.impl.(SettingsDescriber); ok {
+		schema := describer.Settings()
+		schema.Version = 1
+		data, err := json.Marshal(schema)
+		if err != nil {
+			return nil, err
+		}
+		out.SettingsSchemaJson = data
+	} else if schema, ok := s.impl.(SettingsSchema); ok {
 		out.SettingsSchemaJson = schema.SettingsSchemaJSON()
 	}
 	for _, spec := range providerSpecs(s.impl) {
 		out.Providers = append(out.Providers, &modulev1.ProviderSpec{Kind: wireKind(spec.Kind), Name: spec.Name})
 	}
 	return out, nil
+}
+
+func (c *grpcClient) DescribeSettings(ctx context.Context) (Manifest, error) {
+	response, err := c.client.DescribeSettings(ctx, &modulev1.DescribeSettingsRequest{})
+	if err != nil {
+		return Manifest{}, err
+	}
+	resp := response.GetDescription()
+	if resp == nil {
+		return Manifest{}, errors.New("module settings description is missing")
+	}
+	manifest := Manifest{Info: Info{Name: resp.Name, Version: resp.Version, Description: resp.Description}, SettingsSchemaJSON: resp.SettingsSchemaJson}
+	for _, provider := range resp.Providers {
+		manifest.Providers = append(manifest.Providers, ProviderSpec{Kind: localKind(provider.Kind), Name: provider.Name})
+	}
+	return manifest, nil
 }
 
 func (s *grpcServer) Emit(ctx context.Context, req *modulev1.EmitRequest) (*modulev1.EmitResponse, error) {

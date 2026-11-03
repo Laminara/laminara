@@ -84,6 +84,9 @@ func (m Model) onSettingsPreview(message settingsPreviewMsg) (tea.Model, tea.Cmd
 			m.settings.menu = *m.settings.retryMenu
 		}
 		m.settings.retryMenu = nil
+		if m.settings.compound != nil {
+			m.settings.compound.focus = ""
+		}
 		m.settings.menu.problem = errorText(message.err)
 		return m, nil
 	}
@@ -95,9 +98,11 @@ func (m Model) onSettingsPreview(message settingsPreviewMsg) (tea.Model, tea.Cmd
 	}
 	m.settings.differences, m.settings.validation = message.response.Differences, message.response.ValidationError
 	m.settings.menu.problem, m.settings.menu.notice = "", ""
-	m.fillSettings(message.response.Page)
 	if m.settings.compound != nil {
+		m.settings.page = message.response.Page
 		m.fillSettingsCompound()
+	} else {
+		m.fillSettings(message.response.Page)
 	}
 	return m, nil
 }

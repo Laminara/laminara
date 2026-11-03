@@ -2,6 +2,7 @@ package settings
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -19,6 +20,7 @@ type CollectionView struct {
 type CollectionEntryView struct {
 	Path  string
 	Title string
+	Hint  string
 }
 
 func (d *Doc) Collections(sectionKey string) ([]CollectionView, error) {
@@ -41,11 +43,35 @@ func (d *Doc) Collections(sectionKey string) ([]CollectionView, error) {
 			NameLabel: collection.NameLabel,
 			NameHint:  collection.NameHint,
 		}
+		known := map[string]CollectionEntryView{}
+		if collection.Discover != nil {
+			known = collection.Discover()
+		}
 		for _, key := range d.Keys(path) {
-			view.Entries = append(view.Entries, CollectionEntryView{
-				Path:  path + "." + key,
-				Title: d.entryTitle(collection, path+"."+key, key),
-			})
+			if _, exists := known[key]; !exists {
+				entry := CollectionEntryView{Title: d.entryTitle(collection, path+"."+pathKey(key), key)}
+				if collection.Discover != nil {
+					entry.Hint = "Модуль не обнаружен. Сохранённые настройки можно изменить или удалить."
+				}
+				known[key] = entry
+			}
+		}
+		keys := make([]string, 0, len(known))
+		for key := range known {
+			keys = append(keys, key)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if !collection.Keyed {
+				a, _ := strconv.Atoi(keys[i])
+				b, _ := strconv.Atoi(keys[j])
+				return a < b
+			}
+			return keys[i] < keys[j]
+		})
+		for _, key := range keys {
+			entry := known[key]
+			entry.Path = path + "." + pathKey(key)
+			view.Entries = append(view.Entries, entry)
 		}
 		views = append(views, view)
 	}
@@ -133,7 +159,7 @@ func entryCollection(base string, collections []Collection, path string) (Collec
 			return Collection{}, "", false
 		}
 		if !hasNested {
-			return collection.forEntry(id), id, true
+			return collection.forEntry(unescapeKey(id)), unescapeKey(id), true
 		}
 		return entryCollection(prefix+id, collection.children(), prefix+id+"."+nested)
 	}
@@ -184,16 +210,17 @@ func (d *Doc) AddEntry(collectionPath, name string) (string, error) {
 		if name == "" {
 			return "", fmt.Errorf("нужно имя")
 		}
-		if strings.ContainsAny(name, ". ") {
+		if collectionPath != "modules.config" && strings.ContainsAny(name, ". ") {
 			return "", fmt.Errorf("имя без точек и пробелов: %s", name)
 		}
-		if _, exists := d.raw(collectionPath + "." + name); exists {
+		path := collectionPath + "." + pathKey(name)
+		if _, exists := d.raw(path); exists {
 			return "", fmt.Errorf("«%s» уже есть", name)
 		}
-		if err := d.put(collectionPath+"."+name, blank(collection)); err != nil {
+		if err := d.put(path, blank(collection.forEntry(name))); err != nil {
 			return "", err
 		}
-		return collectionPath + "." + name, nil
+		return path, nil
 	}
 	existing, _ := d.raw(collectionPath)
 	list, _ := existing.([]any)

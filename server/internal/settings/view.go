@@ -14,15 +14,20 @@ import (
 const SecretMask = "***"
 
 type Entry struct {
-	Path    string
-	Label   string
-	Hint    string
-	Kind    Kind
-	Value   string
-	Display string
-	Default string
-	IsSet   bool
-	Options []string
+	Group     string
+	Required  bool
+	AllowZero bool
+	Min       *int64
+	Max       *int64
+	Path      string
+	Label     string
+	Hint      string
+	Kind      Kind
+	Value     string
+	Display   string
+	Default   string
+	IsSet     bool
+	Options   []string
 }
 
 func (d *Doc) Section(key string) ([]Entry, error) {
@@ -71,6 +76,7 @@ func (d *Doc) entryOf(base string, field Field, relative string) Entry {
 		}
 	}
 	entry := Entry{
+		Group: field.Group, Required: field.Required, AllowZero: field.AllowZero, Min: cloneBound(field.Min), Max: cloneBound(field.Max),
 		Path:    path,
 		Label:   field.Label,
 		Hint:    field.Hint,
@@ -93,7 +99,7 @@ func renderEntry(field Field, path string, raw any) string {
 	if field.Kind == KindSecretJSON {
 		return renderTree("", safe, nil)
 	}
-	if field.Kind == KindPairs || field.Kind == KindList || field.Variants != nil {
+	if field.Kind == KindPairs || field.Kind == KindMap || field.Kind == KindList || field.Variants != nil {
 		return render(KindJSON, safe)
 	}
 	return render(field.Kind, safe)
@@ -147,7 +153,7 @@ func displayDefault(field Field) string {
 	if err != nil {
 		return field.Default
 	}
-	return render(field.Kind, parsed)
+	return renderEntry(field, "", parsed)
 }
 
 func (d *Doc) stringAt(path, fallback string) string {
@@ -192,7 +198,7 @@ func (d *Doc) resolveIn(base string, fields []Field, collections []Collection, r
 			return "", Field{}, "", fmt.Errorf("не указана запись списка")
 		}
 		entryPath := base + "." + collection.Key + "." + id
-		collection = collection.forEntry(id)
+		collection = collection.forEntry(unescapeKey(id))
 		if hasField {
 			return d.resolveIn(entryPath, collection.Fields, collection.children(), fieldKey)
 		}
@@ -236,7 +242,7 @@ func (d *Doc) fieldAt(base string, fields []Field, key string) (Field, bool) {
 }
 
 func render(kind Kind, raw any) string {
-	if kind == KindJSON {
+	if kind == KindJSON || kind == KindMap {
 		data, err := json.Marshal(raw)
 		if err != nil {
 			return ""
@@ -426,6 +432,12 @@ func parse(field Field, value string) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("нужно целое число, а не «%s»", value)
 		}
+		if field.Min != nil && int64(number) < *field.Min {
+			return nil, fmt.Errorf("нужно число не меньше %d", *field.Min)
+		}
+		if field.Max != nil && int64(number) > *field.Max {
+			return nil, fmt.Errorf("нужно число не больше %d", *field.Max)
+		}
 		return number, nil
 	case KindDuration:
 		if field.AllowZero {
@@ -456,15 +468,16 @@ func parse(field Field, value string) (any, error) {
 		return nil, fmt.Errorf("тут выбирают из: %s", strings.Join(options, ", "))
 	case KindList:
 		if strings.HasPrefix(value, "[") {
-			var entries []string
+			var entries []any
 			if err := json.Unmarshal([]byte(value), &entries); err != nil {
 				return nil, fmt.Errorf("нужен JSON-массив строк")
 			}
-			result := make([]any, len(entries))
-			for i, entry := range entries {
-				result[i] = entry
+			for _, entry := range entries {
+				if _, ok := entry.(string); !ok {
+					return nil, fmt.Errorf("нужен JSON-массив строк")
+				}
 			}
-			return result, nil
+			return entries, nil
 		}
 		parts := []any{}
 		for _, part := range strings.Split(value, ",") {
@@ -479,20 +492,11 @@ func parse(field Field, value string) (any, error) {
 			return nil, fmt.Errorf("это должен быть корректный JSON")
 		}
 		return parsed, nil
+	case KindMap:
+		return parseStringMap(value)
 	case KindPairs:
 		if strings.HasPrefix(value, "{") {
-			var pairs map[string]string
-			if err := json.Unmarshal([]byte(value), &pairs); err != nil {
-				return nil, fmt.Errorf("нужен JSON-объект со строковыми значениями")
-			}
-			result := make(map[string]any, len(pairs))
-			for key, item := range pairs {
-				if strings.TrimSpace(key) == "" {
-					return nil, fmt.Errorf("имя заголовка не должно быть пустым")
-				}
-				result[key] = item
-			}
-			return result, nil
+			return parseStringMap(value)
 		}
 		pairs := map[string]any{}
 		for _, part := range strings.Split(value, ",") {
@@ -509,6 +513,22 @@ func parse(field Field, value string) (any, error) {
 	default:
 		return value, nil
 	}
+}
+
+func parseStringMap(value string) (map[string]any, error) {
+	var values map[string]any
+	if err := json.Unmarshal([]byte(value), &values); err != nil || values == nil {
+		return nil, fmt.Errorf("нужен JSON-объект со строковыми значениями")
+	}
+	for key, item := range values {
+		if strings.TrimSpace(key) == "" {
+			return nil, fmt.Errorf("ключ не должен быть пустым")
+		}
+		if _, ok := item.(string); !ok {
+			return nil, fmt.Errorf("нужен JSON-объект со строковыми значениями")
+		}
+	}
+	return values, nil
 }
 
 func ParseDuration(value string) (string, error) {

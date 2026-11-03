@@ -16,20 +16,30 @@ func (d *Doc) SetItem(path, key, value string, remove bool) error {
 	}
 	raw, _ := d.raw(path)
 	switch field.Kind {
-	case KindPairs:
-		if key == "" || strings.ContainsAny(key, "\r\n: \t") {
+	case KindPairs, KindMap:
+		if strings.TrimSpace(key) == "" {
+			return errors.New("введите непустой ключ")
+		}
+		if field.Kind == KindPairs && strings.ContainsAny(key, "\r\n: \t") {
 			return errors.New("введите имя заголовка без пробелов, двоеточия и перевода строки")
 		}
-		if strings.ContainsAny(value, "\r\n") {
+		if field.Kind == KindPairs && strings.ContainsAny(value, "\r\n") {
 			return errors.New("значение заголовка не должно содержать перевод строки")
 		}
 		previous, _ := raw.(map[string]any)
+		if raw == nil && field.Default != "" {
+			initial, err := parse(field, field.Default)
+			if err != nil {
+				return err
+			}
+			previous, _ = initial.(map[string]any)
+		}
 		pairs := maps.Clone(previous)
 		if pairs == nil {
 			pairs = map[string]any{}
 		}
 		for oldKey := range pairs {
-			if strings.EqualFold(oldKey, key) && oldKey != key {
+			if field.Kind == KindPairs && strings.EqualFold(oldKey, key) && oldKey != key {
 				return errors.New("заголовок с таким именем уже есть; откройте существующий")
 			}
 		}

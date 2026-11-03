@@ -394,6 +394,8 @@ func (m Model) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.enterPlayers()
 	case "s":
 		return m.enterSettings()
+	case "m":
+		return m.enterSettingsAt(true)
 	case "p":
 		m.pickerAction = "publish"
 		return m, fetchBuilds(m.ctx, m.client)
@@ -600,6 +602,7 @@ var helpKeys = [][2]string{
 	{"b", "карточка сборки — всё о ней на одном экране"},
 	{"l", "кто сейчас в игре — список игроков по сборкам"},
 	{"s", "настройки проекта — правятся прямо здесь"},
+	{"m", "настройки установленных модулей"},
 	{"u", "пересобрать сборку под новую версию"},
 	{"p", "опубликовать сборку — лаунчеры увидят обновление"},
 	{"d", "удалить сборку из проекта"},
@@ -692,6 +695,7 @@ func (m Model) barView() string {
 		item("b", "сборки"),
 		item("l", "игроки"),
 		item("s", "настройки"),
+		item("m", "модули"),
 		item("u", "обновить"),
 		item("p", "опубликовать"),
 		item("d", "удалить"),
@@ -727,7 +731,7 @@ func errorText(err error) string {
 		return ""
 	}
 	text := err.Error()
-	for _, prefix := range []string{"invalid_argument: ", "unknown: ", "internal: ", "unimplemented: "} {
+	for _, prefix := range []string{"invalid_argument: ", "unknown: ", "internal: ", "unimplemented: ", "aborted: "} {
 		text = strings.TrimPrefix(text, prefix)
 	}
 	return text
