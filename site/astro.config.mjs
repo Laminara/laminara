@@ -50,6 +50,7 @@ export default defineConfig({
         { label: "Хранилище", items: ["storage"] },
         { label: "Модули", items: ["modules"] },
         { label: "Справочник", items: ["reference/cli", "reference/config"] },
+        { label: "План развития", items: ["development/roadmap", "development/quality"] },
       ],
     }),
   ],

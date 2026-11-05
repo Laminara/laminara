@@ -46,6 +46,22 @@ func TestNilControllerAllowsEverything(t *testing.T) {
 	}
 }
 
+func TestInvalidPatternsCannotSilentlyLeaveBuildsPublic(t *testing.T) {
+	path := writeFile(t, "list.json", `["neo"]`)
+	for _, pattern := range []string{"[", "test-[", "", " ", `test-\`} {
+		t.Run(pattern, func(t *testing.T) {
+			var cfg access.Config
+			raw := fmt.Sprintf(`{"sources":{"staff":{"type":"file","config":{"path":%q}}},"rules":[{"builds":[%q],"source":"staff"}]}`, path, pattern)
+			if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := access.New(&cfg); err == nil {
+				t.Fatal("invalid rule accepted; unmatched builds would be public")
+			}
+		})
+	}
+}
+
 func TestUnclaimedBuildStaysPublic(t *testing.T) {
 	path := writeFile(t, "list.json", `["neo"]`)
 	controller := controllerFor(t, fmt.Sprintf(`{

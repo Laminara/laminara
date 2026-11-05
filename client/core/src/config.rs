@@ -12,7 +12,7 @@ pub struct EndpointConfig {
     pub base_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectedAccount {
     pub endpoint_id: String,
@@ -49,6 +49,8 @@ pub struct ClientConfig {
     #[serde(default)]
     pub selected_account: Option<SelectedAccount>,
     #[serde(default)]
+    pub saved_accounts: Vec<SelectedAccount>,
+    #[serde(default)]
     pub selected_profile: Option<String>,
     #[serde(default)]
     pub jvm_tuning: Vec<String>,
@@ -63,6 +65,27 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
+    pub fn accounts(&self) -> Vec<SelectedAccount> {
+        let mut accounts = Vec::new();
+        for account in self
+            .selected_account
+            .iter()
+            .chain(self.saved_accounts.iter())
+        {
+            if self
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.id == account.endpoint_id)
+                && !accounts
+                    .iter()
+                    .any(|saved: &SelectedAccount| saved.uuid == account.uuid)
+            {
+                accounts.push(account.clone());
+            }
+        }
+        accounts
+    }
+
     pub fn load(path: &Path) -> Result<Self, CoreError> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| CoreError::Config(format!("read {}: {e}", path.display())))?;
@@ -100,5 +123,45 @@ impl ClientConfig {
             .iter()
             .map(|value| Self::parse_key(value))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_config_keeps_selected_account_without_storing_credentials() {
+        let cfg: ClientConfig = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1, "endpoints": [{"id": "main", "baseUrl": "https://example.com"}],
+            "serverPublicKeyHex": "", "installDir": "game",
+            "selectedAccount": {"endpointId": "main", "uuid": "alice", "name": "Alice"}
+        }))
+        .unwrap();
+        assert!(cfg.saved_accounts.is_empty());
+        let accounts = cfg.accounts();
+        assert_eq!(accounts.len(), 1);
+        let value = serde_json::to_value(&accounts[0]).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 3);
+        assert_eq!(value["name"], "Alice");
+    }
+
+    #[test]
+    fn mirrors_do_not_duplicate_accounts_and_unknown_endpoints_are_ignored() {
+        let cfg: ClientConfig = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1, "endpoints": [
+                {"id": "main", "baseUrl": "https://example.com"},
+                {"id": "mirror", "baseUrl": "https://mirror.example.com"}
+            ], "serverPublicKeyHex": "", "installDir": "game",
+            "selectedAccount": {"endpointId": "mirror", "uuid": "alice", "name": "NewName"},
+            "savedAccounts": [
+                {"endpointId": "main", "uuid": "alice", "name": "OldName"},
+                {"endpointId": "main", "uuid": "bob", "name": "Bob"},
+                {"endpointId": "removed", "uuid": "eve", "name": "Eve"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(cfg.accounts().len(), 2);
+        assert_eq!(cfg.accounts()[0].name, "NewName");
     }
 }

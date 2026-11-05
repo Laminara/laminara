@@ -50,6 +50,7 @@ jobs:
           cache-dependency-path: client/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm tsc --noEmit -p tsconfig.json
+      - run: pnpm test
       - run: node --test ../server/internal/webconsole/app.test.mjs
 
   core:

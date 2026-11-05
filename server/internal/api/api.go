@@ -27,46 +27,57 @@ import (
 )
 
 type Service struct {
-	auth     *auth.Service
-	catalog  *catalog.Catalog
-	releases *launchersvc.Releases
-	access   *access.Controller
-	machines *hwid.Gate
-	limits   *ratelimit.Guard
-	proxies  *clientaddr.Trust
-	news     *news.Service
-	crashes  *crash.Service
-	log      *slog.Logger
-	tokens   *tokenCache
+	accountPolicy *apiv1.AccountPolicy
+	auth          *auth.Service
+	catalog       *catalog.Catalog
+	releases      *launchersvc.Releases
+	access        *access.Controller
+	machines      *hwid.Gate
+	limits        *ratelimit.Guard
+	proxies       *clientaddr.Trust
+	news          *news.Service
+	crashes       *crash.Service
+	log           *slog.Logger
+	tokens        *tokenCache
 }
 
 type Options struct {
-	Auth     *auth.Service
-	Catalog  *catalog.Catalog
-	Releases *launchersvc.Releases
-	Access   *access.Controller
-	Machines *hwid.Gate
-	Limits   *ratelimit.Guard
-	Proxies  *clientaddr.Trust
-	News     *news.Service
-	Crashes  *crash.Service
-	Log      *slog.Logger
+	AccountPolicy *apiv1.AccountPolicy
+	Auth          *auth.Service
+	Catalog       *catalog.Catalog
+	Releases      *launchersvc.Releases
+	Access        *access.Controller
+	Machines      *hwid.Gate
+	Limits        *ratelimit.Guard
+	Proxies       *clientaddr.Trust
+	News          *news.Service
+	Crashes       *crash.Service
+	Log           *slog.Logger
 }
 
 func NewService(opts Options) *Service {
 	return &Service{
-		auth:     opts.Auth,
-		catalog:  opts.Catalog,
-		releases: opts.Releases,
-		access:   opts.Access,
-		machines: opts.Machines,
-		limits:   opts.Limits,
-		proxies:  opts.Proxies,
-		news:     opts.News,
-		crashes:  opts.Crashes,
-		log:      opts.Log,
-		tokens:   newTokenCache(),
+		accountPolicy: opts.AccountPolicy,
+		auth:          opts.Auth,
+		catalog:       opts.Catalog,
+		releases:      opts.Releases,
+		access:        opts.Access,
+		machines:      opts.Machines,
+		limits:        opts.Limits,
+		proxies:       opts.Proxies,
+		news:          opts.News,
+		crashes:       opts.Crashes,
+		log:           opts.Log,
+		tokens:        newTokenCache(),
 	}
+}
+
+func (s *Service) GetAccountPolicy(_ context.Context, _ *connect.Request[apiv1.GetAccountPolicyRequest]) (*connect.Response[apiv1.GetAccountPolicyResponse], error) {
+	policy := s.accountPolicy
+	if policy == nil {
+		policy = &apiv1.AccountPolicy{MaxAccounts: 1}
+	}
+	return connect.NewResponse(&apiv1.GetAccountPolicyResponse{Policy: policy}), nil
 }
 
 func (s *Service) GetNews(ctx context.Context, _ *connect.Request[apiv1.GetNewsRequest]) (*connect.Response[apiv1.GetNewsResponse], error) {

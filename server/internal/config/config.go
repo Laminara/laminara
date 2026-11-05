@@ -99,9 +99,21 @@ func (u *UpdateConfig) IntervalOr(fallback time.Duration) time.Duration {
 }
 
 type LauncherConfig struct {
-	Dir       string   `json:"dir"`
-	Endpoints []string `json:"endpoints"`
-	AutoBake  *bool    `json:"autoBake"`
+	MultiAccount bool     `json:"multiAccount"`
+	MaxAccounts  int      `json:"maxAccounts"`
+	Dir          string   `json:"dir"`
+	Endpoints    []string `json:"endpoints"`
+	AutoBake     *bool    `json:"autoBake"`
+}
+
+func (l *LauncherConfig) AccountLimit() int {
+	if l == nil || !l.MultiAccount {
+		return 1
+	}
+	if l.MaxAccounts == 0 {
+		return 5
+	}
+	return l.MaxAccounts
 }
 
 func (l *LauncherConfig) Bakes() bool {

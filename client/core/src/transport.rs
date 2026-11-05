@@ -52,6 +52,10 @@ pub fn default_http_client() -> reqwest::Client {
 }
 
 impl Transport {
+    pub fn access_token(&self) -> Option<String> {
+        self.access_token.read().unwrap().clone()
+    }
+
     pub fn new(http: reqwest::Client) -> Self {
         Self {
             http,

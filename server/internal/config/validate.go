@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+
+	"github.com/laminara/laminara/server/internal/access"
 )
 
 const ExitBadConfig = 78
@@ -44,6 +46,12 @@ func badConfig(setting, format string, args ...any) error {
 func Validate(cfg *Config) error {
 	if cfg == nil {
 		return nil
+	}
+	if cfg.Launcher != nil && (cfg.Launcher.MaxAccounts < 0 || cfg.Launcher.MaxAccounts > 20) {
+		return badConfig("launcher.maxAccounts", "допустимо от 1 до 20; 0 использует значение по умолчанию 5")
+	}
+	if err := access.ValidateRules(cfg.Access); err != nil {
+		return badConfig("access.rules", "%s", err)
 	}
 	if err := validateAPI(cfg.API); err != nil {
 		return err

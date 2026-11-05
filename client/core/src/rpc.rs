@@ -1,13 +1,13 @@
 use crate::error::RpcError;
-use crate::proto::api::v1::{CrashReport, LauncherLogReport};
 use crate::proto::api::v1::{
     CheckUpdateRequest, CheckUpdateResponse, GetChallengeRequest, GetChallengeResponse,
     GetManifestRequest, GetManifestResponse, GetNewsRequest, GetNewsResponse, ListProfilesRequest,
     ListProfilesResponse, LoginRequest, LoginResponse, MachineReport, NewsItem, ProfileSummary,
     RefreshRequest, RefreshResponse, ReportCrashRequest, ReportCrashResponse,
-    ReportLauncherLogRequest, ReportLauncherLogResponse, ReportMachineRequest, ReportMachineResponse,
-    Tokens,
+    ReportLauncherLogRequest, ReportLauncherLogResponse, ReportMachineRequest,
+    ReportMachineResponse, Tokens,
 };
+use crate::proto::api::v1::{CrashReport, LauncherLogReport};
 use crate::transport::Transport;
 
 const SERVICE: &str = "laminara.api.v1.LauncherService";
@@ -18,6 +18,24 @@ pub struct LauncherClient<'a> {
 }
 
 impl<'a> LauncherClient<'a> {
+    pub async fn account_policy(&self) -> Result<crate::proto::api::v1::AccountPolicy, RpcError> {
+        let response: Result<crate::proto::api::v1::GetAccountPolicyResponse, RpcError> = self
+            .transport
+            .unary(
+                self.base_url,
+                &format!("{SERVICE}/GetAccountPolicy"),
+                &crate::proto::api::v1::GetAccountPolicyRequest {},
+            )
+            .await;
+        let response = match response {
+            Err(RpcError::PostSend(message)) if message == "http 404 Not Found" => {
+                return Ok(Default::default())
+            }
+            result => result?,
+        };
+        Ok(response.policy.unwrap_or_default())
+    }
+
     pub fn new(transport: &'a Transport, base_url: &'a str) -> Self {
         Self {
             transport,
@@ -163,6 +181,70 @@ impl<'a> LauncherClient<'a> {
                 },
             )
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    async fn policy_reply(
+        status: &str,
+        body: Vec<u8>,
+    ) -> Result<crate::proto::api::v1::AccountPolicy, RpcError> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let status = status.to_string();
+        let responder = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(&body).unwrap();
+        });
+        let transport = Transport::new(reqwest::Client::builder().no_proxy().build().unwrap());
+        let result = LauncherClient::new(&transport, &url).account_policy().await;
+        responder.join().unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn old_servers_keep_single_account_mode() {
+        let policy = policy_reply("404 Not Found", b"404 page not found".to_vec())
+            .await
+            .unwrap();
+        assert!(!policy.multi_account);
+    }
+
+    #[tokio::test]
+    async fn server_failure_is_not_a_default_policy() {
+        assert!(policy_reply("503 Service Unavailable", Vec::new())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn policy_reads_the_server_limit() {
+        use crate::proto::api::v1::{AccountPolicy, GetAccountPolicyResponse};
+        use prost::Message;
+        let expected = AccountPolicy {
+            multi_account: true,
+            max_accounts: 3,
+        };
+        let body = GetAccountPolicyResponse {
+            policy: Some(expected.clone()),
+        }
+        .encode_to_vec();
+        assert_eq!(policy_reply("200 OK", body).await.unwrap(), expected);
     }
 }
 

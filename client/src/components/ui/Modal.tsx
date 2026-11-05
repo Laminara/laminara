@@ -113,7 +113,7 @@ export function Modal({ title, subtitle, compact = false, footer, onClose, child
             <h2 className="text-lg font-bold">{title}</h2>
             {subtitle && <p className="mt-0.5 text-sm text-dim">{subtitle}</p>}
           </div>
-          <button onClick={close} className="-mr-1.5 rounded-md p-1.5 text-dim transition-colors hover:bg-surface-2 hover:text-text" aria-label="Закрыть">
+          <button onClick={close} className="-mr-1.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-dim transition-colors hover:bg-surface-2 hover:text-text" aria-label="Закрыть">
             <X size={18} />
           </button>
         </div>

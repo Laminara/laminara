@@ -77,6 +77,8 @@ import ParamField from "@site/components/ParamField.astro";
 
 ## launcher
 
+<ParamField path="multiAccount" type="boolean" default="false">Разрешить сохранение и переключение аккаунтов в лаунчере.</ParamField>
+<ParamField path="maxAccounts" type="int" default="5">Лимит сохранённых аккаунтов на одну установку: от 1 до 20. Отсутствующее значение или `0` означает 5. Действует при `multiAccount: true`; изменение требует перезапуска сервера.</ParamField>
 <ParamField path="dir" type="string">Каталог с версиями лаунчера: `<dir>/<версия>/<артефакты>`. Туда же кладёт файлы `launcher build`.</ParamField>
 <ParamField path="endpoints" type="string[]">Адреса, по которым лаунчер ходит на сервер **у игрока**. Запекаются в файл, поэтому меняются только новой сборкой.</ParamField>
 <ParamField path="autoBake" type="boolean" default="true">Пересобирать и выпускать лаунчер после обновления сервера — но только если его уже выпускали.</ParamField>

@@ -26,6 +26,17 @@ message LoginResponse {
 
 message TwoFactorRequired {}
 
+message AccountPolicy {
+  bool multi_account = 1;
+  uint32 max_accounts = 2;
+}
+
+message GetAccountPolicyRequest {}
+
+message GetAccountPolicyResponse {
+  AccountPolicy policy = 1;
+}
+
 message RefreshRequest {
   string refresh = 1;
 }
@@ -126,6 +137,7 @@ message ReportLauncherLogResponse {
 }
 
 service LauncherService {
+  rpc GetAccountPolicy(GetAccountPolicyRequest) returns (GetAccountPolicyResponse);
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc Refresh(RefreshRequest) returns (RefreshResponse);
   rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);

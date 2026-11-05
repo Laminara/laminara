@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	apiv1 "github.com/laminara/laminara/gen/go/laminara/api/v1"
 	corev1 "github.com/laminara/laminara/gen/go/laminara/core/v1"
 	"github.com/laminara/laminara/server/internal/access"
 	"github.com/laminara/laminara/server/internal/api"
@@ -199,6 +200,10 @@ func buildPublicHandler(cfg *config.Config, wired *Wired, backend storage.Backen
 			releases = launchersvc.NewReleases(cfg.Launcher.Dir)
 		}
 		service := api.NewService(api.Options{
+			AccountPolicy: &apiv1.AccountPolicy{
+				MultiAccount: cfg.Launcher != nil && cfg.Launcher.MultiAccount,
+				MaxAccounts:  uint32(cfg.Launcher.AccountLimit()),
+			},
 			Auth:     authService,
 			Catalog:  wired.Catalog,
 			Releases: releases,

@@ -44,8 +44,35 @@ async fn load_secret(
 
 #[derive(Default)]
 pub struct AuthManager {
+    pub operation: tokio::sync::Mutex<()>,
     session: Mutex<Option<Session>>,
     generation: AtomicU64,
+}
+
+pub struct CredentialChange<'a> {
+    core: &'a laminara_core::Core,
+    previous: Option<(Option<String>, Option<String>)>,
+}
+
+impl<'a> CredentialChange<'a> {
+    pub fn new(core: &'a laminara_core::Core) -> Self {
+        Self {
+            core,
+            previous: Some(core.credentials()),
+        }
+    }
+
+    pub fn commit(mut self) {
+        self.previous = None;
+    }
+}
+
+impl Drop for CredentialChange<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.core.restore_credentials(previous);
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -78,23 +105,19 @@ impl AuthManager {
         }
     }
 
-    pub async fn keep_game(&self, endpoint_id: &str, uuid: &str, access: &str, client: &str) {
-        if let Err(e) = self.store_game(endpoint_id, uuid, access, client).await {
-            tracing::warn!("game session save failed for {uuid}: {e}");
-        }
-    }
-
     pub async fn load_refresh(&self, endpoint_id: &str, uuid: &str) -> Option<String> {
         let entry = Self::entry(endpoint_id, uuid).ok()?;
         load_secret("refresh token", offload(move || read_password(entry))).await
     }
 
-    pub async fn clear_refresh(&self, endpoint_id: &str, uuid: &str) {
-        if let Ok(entry) = Self::entry(endpoint_id, uuid) {
-            if let Err(e) = offload(move || delete_password(entry)).await {
-                tracing::warn!("refresh token clear failed: {e}");
-            }
-        }
+    pub async fn clear_account(&self, endpoint_id: &str, uuid: &str) -> Result<(), String> {
+        let refresh = Self::entry(endpoint_id, uuid)?;
+        let game = Self::game_entry(endpoint_id, uuid)?;
+        offload(move || {
+            delete_password(refresh)?;
+            delete_password(game)
+        })
+        .await
     }
 
     fn game_entry(endpoint_id: &str, uuid: &str) -> Result<Entry, String> {
@@ -118,14 +141,6 @@ impl AuthManager {
         let raw = load_secret("game session secret", offload(move || read_password(entry))).await?;
         let (access, client) = raw.split_once('\n')?;
         Some((access.to_string(), client.to_string()))
-    }
-
-    pub async fn clear_game(&self, endpoint_id: &str, uuid: &str) {
-        if let Ok(entry) = Self::game_entry(endpoint_id, uuid) {
-            if let Err(e) = offload(move || delete_password(entry)).await {
-                tracing::warn!("game session secret clear failed: {e}");
-            }
-        }
     }
 
     pub fn set_session(&self, session: Session) -> u64 {
@@ -188,5 +203,52 @@ impl AuthManager {
                 s.account.name.clone(),
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn core(path: &std::path::Path) -> laminara_core::Core {
+        let config = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1, "endpoints": [],
+            "serverPublicKeyHex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+            "installDir": path.join("game")
+        })).unwrap();
+        laminara_core::Core::new(
+            laminara_core::paths::LaminaraPaths {
+                config_dir: path.join("config"),
+                data_dir: path.join("data"),
+            },
+            config,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn failed_or_cancelled_change_restores_both_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let core = core(directory.path());
+        let previous = (Some("alice-access".into()), Some("alice-machine".into()));
+        core.restore_credentials(previous.clone());
+        {
+            let _change = CredentialChange::new(&core);
+            core.sign_out();
+            core.restore_credentials((Some("bob-access".into()), Some("bob-machine".into())));
+        }
+        assert_eq!(core.credentials(), previous);
+    }
+
+    #[test]
+    fn successful_change_keeps_new_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let core = core(directory.path());
+        core.restore_credentials((Some("alice-access".into()), Some("alice-machine".into())));
+        let change = CredentialChange::new(&core);
+        let next = (Some("bob-access".into()), Some("bob-machine".into()));
+        core.restore_credentials(next.clone());
+        change.commit();
+        assert_eq!(core.credentials(), next);
     }
 }

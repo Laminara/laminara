@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountOptions,
   AppView,
   AuthStatus,
   Build,
@@ -23,6 +24,15 @@ import { mockAccount, mockBuilds, mockEndpoint, mockFace, mockFeatures, mockGame
 
 export const isTauri =
   !import.meta.env.DEV || (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window);
+
+let demoAccounts: Account[] = [mockAccount, { ...mockAccount, uuid: "test-builder", name: "Builder" }];
+let demoActive: string | null = mockAccount.uuid;
+
+function demoStatus(uuid?: string): AuthStatus {
+  if (uuid) demoActive = uuid;
+  const account = demoAccounts.find((account) => account.uuid === demoActive);
+  return { signedIn: !!account, username: account?.name, uuid: account?.uuid };
+}
 
 const CONSOLE_WINDOW = "console";
 const MOCK_LOG_EVERY_MS = 700;
@@ -69,21 +79,42 @@ async function mockSync(onEvent: (event: SyncEvent) => void): Promise<void> {
 }
 
 export const ipc = {
+  accountOptions: (): Promise<AccountOptions> =>
+    isTauri ? core("account_options") : Promise.resolve({ multiAccount: true, maxAccounts: 5, accounts: demoAccounts }),
+
+  switchAccount: (uuid: string): Promise<AuthStatus> =>
+    isTauri ? core("switch_account", { uuid }) : Promise.resolve(demoStatus(uuid)),
+
+  removeAccount: (uuid: string): Promise<AuthStatus> => {
+    if (isTauri) return core("remove_account", { uuid });
+    demoAccounts = demoAccounts.filter((account) => account.uuid !== uuid);
+    if (demoActive === uuid) demoActive = null;
+    return Promise.resolve(demoStatus());
+  },
   probeEndpoints: (): Promise<EndpointStatus[]> => (isTauri ? core("probe_endpoints") : Promise.resolve([mockEndpoint])),
 
 
   restoreSession: (): Promise<AuthStatus> =>
-    isTauri ? core("restore_session") : Promise.resolve({ signedIn: true, username: mockAccount.name, uuid: mockAccount.uuid }),
+    isTauri ? core("restore_session") : Promise.resolve(demoStatus()),
 
   login: (username: string, password: string, code: string): Promise<Account> => {
     if (isTauri) return core("login", { username, password, code });
     const failure = (kind: LoginFailure["kind"]): LoginFailure => ({ kind, message: mockLoginFailures[kind] });
     if (password === "wrong") return Promise.reject(failure("failed"));
     if (password === "2fa" && code.length !== 6) return Promise.reject(failure("secondFactor"));
-    return Promise.resolve(mockAccount);
+    const account = demoAccounts.find((account) => account.name === username)
+      ?? { ...mockAccount, uuid: crypto.randomUUID(), name: username };
+    if (!demoAccounts.includes(account)) demoAccounts.push(account);
+    demoActive = account.uuid;
+    return Promise.resolve(account);
   },
 
-  logout: (): Promise<void> => (isTauri ? core("logout") : Promise.resolve()),
+  logout: (): Promise<void> => {
+    if (isTauri) return core("logout");
+    demoAccounts = demoAccounts.filter((account) => account.uuid !== demoActive);
+    demoActive = null;
+    return Promise.resolve();
+  },
 
   playerFace: (): Promise<string | null> => (isTauri ? core("player_face") : Promise.resolve(mockFace)),
 

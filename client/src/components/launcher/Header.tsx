@@ -7,6 +7,10 @@ import { BrandMark } from "./BrandMark";
 import { OnlineDot } from "@/components/ui/OnlineDot";
 
 export function Header() {
+  const accountOptions = useLauncher((state) => state.accountOptions);
+  const refreshAccounts = useLauncher((state) => state.refreshAccounts);
+  const phase = useLauncher((state) => state.phase);
+  const busy = useLauncher((state) => state.accountBusy);
   const players = useLauncher((state) => state.players);
   const account = useLauncher((state) => state.account);
   const menuOpen = useLauncher((state) => state.menuOpen);
@@ -43,7 +47,7 @@ export function Header() {
 
         <div className="relative">
           <button
-            onClick={toggleMenu}
+            onClick={() => { toggleMenu(); if (!menuOpen) void refreshAccounts().catch(() => {}); }}
             onKeyDown={(event) => {
               if (event.key === "Escape" && menuOpen) closeMenu();
             }}
@@ -71,7 +75,14 @@ export function Header() {
               <div
                 className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-lg border border-border bg-bg-tint py-1 shadow-panel"
               >
+                {accountOptions.multiAccount && (
+                  <button onClick={() => openModal({ kind: "accounts" })} disabled={busy || phase !== "home"}
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-dim transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50">
+                    Аккаунты
+                  </button>
+                )}
                 <button
+                  disabled={busy || phase !== "home"}
                   onClick={() => void logout()}
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-dim transition-colors hover:bg-surface-2 hover:text-text"
                 >

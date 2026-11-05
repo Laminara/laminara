@@ -276,12 +276,12 @@ var schema = []Section{
 							{Key: "path", Label: "Файл списка", Kind: KindText, Hint: "JSON с ником и UUID допущенных."},
 						},
 						"http": {
-							{Key: "url", Label: "Адрес проверки", Kind: KindText, Hint: "Подставляются %username% и %uuid%."},
-							{Key: "mode", Label: "Как отвечает", Kind: KindChoice, Default: "ask", Options: func() []string { return []string{"ask", "list"} }, Hint: "ask — спрашиваем про игрока, list — забираем список целиком."},
+							{Key: "url", Label: "Адрес проверки", Kind: KindText, Hint: "Добавляем параметры build, а в режиме check также username, uuid и subject."},
+							{Key: "mode", Label: "Как отвечает", Kind: KindChoice, Default: "list", Options: func() []string { return []string{"check", "list"} }, Hint: "check — спрашиваем про игрока, list — забираем список целиком."},
 							{Key: "method", Label: "Метод запроса", Kind: KindChoice, Default: "GET", Options: func() []string { return []string{"GET", "POST"} }},
 							{Key: "headers", Label: "Заголовки запроса", Kind: KindPairs, Hint: "Через запятую: Authorization=Bearer …"},
-							{Key: "timeout", Label: "Ждать ответа", Kind: KindDuration, Default: "3s"},
-							{Key: "cacheTTL", Label: "Держать ответ в кэше", Kind: KindDuration, Default: "30s"},
+							{Key: "timeout", Label: "Ждать ответа", Kind: KindDuration, Default: "5s"},
+							{Key: "cacheTTL", Label: "Держать ответ в кэше", Kind: KindDuration, Default: "1m"},
 							{Key: "failOpen", Label: "Пускать, если сайт молчит", Kind: KindBool, Default: "false", Hint: "Иначе при недоступном сайте закрытые сборки закрыты для всех."},
 						},
 					}},
@@ -433,8 +433,10 @@ var schema = []Section{
 	{
 		Key:   "launcher",
 		Title: "Лаунчер игроков",
-		Hint:  "Папка с лаунчерами: подпапка на версию, внутри — файлы под каждую систему. Команда «launcher build» кладёт их туда сама.",
+		Hint:  "Аккаунты в клиенте, адреса сервера и публикация лаунчера. Настройки аккаунтов начинают действовать после перезапуска сервера.",
 		Fields: []Field{
+			{Key: "multiAccount", Label: "Несколько аккаунтов", Kind: KindBool, Default: "false", Hint: "Разрешить сохранение и переключение аккаунтов в лаунчере."},
+			{Key: "maxAccounts", Label: "Максимум аккаунтов", Kind: KindInt, Default: "5", Hint: "От 1 до 20 сохранённых аккаунтов на одну установку лаунчера. Действует при включении нескольких аккаунтов."},
 			{Key: "dir", Label: "Папка лаунчеров", Kind: KindText},
 			{Key: "endpoints", Label: "Адреса для игроков", Kind: KindList, Hint: "Куда лаунчер ходит на сервер, например https://launcher.example.com. Этот адрес запекается в лаунчер, менять его потом — только новой сборкой."},
 			{Key: "autoBake", Label: "Пересобирать при обновлении", Kind: KindBool, Default: "true", Hint: "После обновления сервера перепечь и выпустить лаунчер заново — но только если его уже выпускали."},

@@ -1,3 +1,4 @@
+mod accounts;
 mod auth;
 mod baked;
 mod commands;
@@ -89,7 +90,9 @@ fn sanitise_folder(raw: &str) -> String {
         .filter(|c| !c.is_control() && !r#"/\:*?"<>|"#.contains(*c))
         .take(48)
         .collect();
-    cleaned.trim_end_matches(|c| c == ' ' || c == '.').to_string()
+    cleaned
+        .trim_end_matches(|c| c == ' ' || c == '.')
+        .to_string()
 }
 
 fn adopt_legacy(parent: Option<PathBuf>, name: &str) -> Option<PathBuf> {
@@ -101,7 +104,9 @@ fn adopt_legacy(parent: Option<PathBuf>, name: &str) -> Option<PathBuf> {
     let legacy = parent.join(LEGACY_STORAGE_NAME);
     if legacy.is_dir() {
         match std::fs::rename(&legacy, &target) {
-            Ok(()) => tracing::info!(from = %legacy.display(), to = %target.display(), "папка лаунчера переехала под имя проекта"),
+            Ok(()) => {
+                tracing::info!(from = %legacy.display(), to = %target.display(), "папка лаунчера переехала под имя проекта")
+            }
             Err(error) => {
                 tracing::warn!(%error, "не вышло перенести старую папку лаунчера — начинаю с чистой");
                 return Some(target);
@@ -164,6 +169,7 @@ fn load_or_bootstrap(paths: &LaminaraPaths, data_dir: &Path) -> Result<ClientCon
         install_dir: data_dir.join("games"),
         game_dir: None,
         selected_account: None,
+        saved_accounts: Vec::new(),
         selected_profile: None,
         jvm_tuning: vec![],
         default_memory_mb: 4096,
@@ -253,7 +259,9 @@ fn wear_branding(app: &tauri::App) {
         if let Some(icon) = icon.clone() {
             match window.set_icon(icon) {
                 Ok(()) => tracing::info!(%label, "окно получило иконку проекта"),
-                Err(error) => tracing::warn!(%label, %error, "не вышло поставить окну иконку проекта"),
+                Err(error) => {
+                    tracing::warn!(%label, %error, "не вышло поставить окну иконку проекта")
+                }
             }
         }
         if let Some(title) = &title {
@@ -309,6 +317,9 @@ pub fn run() {
             commands::logout,
             commands::auth_status,
             commands::restore_session,
+            accounts::account_options,
+            accounts::switch_account,
+            accounts::remove_account,
             commands::list_builds,
             commands::sync_profile,
             commands::cancel_sync,
@@ -354,7 +365,15 @@ mod storage_tests {
 
     #[test]
     fn folder_name_drops_path_tricks() {
-        for raw in ["../../etc", "a/b", r"c\d", "имя:двоеточие", "звёзды*?", "кавычки\"", "труба|"] {
+        for raw in [
+            "../../etc",
+            "a/b",
+            r"c\d",
+            "имя:двоеточие",
+            "звёзды*?",
+            "кавычки\"",
+            "труба|",
+        ] {
             let cleaned = sanitise_folder(raw);
             assert!(
                 !cleaned.contains('/')
@@ -381,8 +400,14 @@ mod storage_tests {
         let moved = adopt_legacy(Some(parent.path().to_path_buf()), "МойПроект").unwrap();
 
         assert_eq!(moved, parent.path().join("МойПроект"));
-        assert!(moved.join("games").is_dir(), "сборки игрока потерялись при переезде");
-        assert!(moved.join("config.json").is_file(), "настройки потерялись при переезде");
+        assert!(
+            moved.join("games").is_dir(),
+            "сборки игрока потерялись при переезде"
+        );
+        assert!(
+            moved.join("config.json").is_file(),
+            "настройки потерялись при переезде"
+        );
         assert!(!legacy.exists(), "старая папка осталась дублировать данные");
     }
 
@@ -398,7 +423,10 @@ mod storage_tests {
         let chosen = adopt_legacy(Some(parent.path().to_path_buf()), "МойПроект").unwrap();
 
         assert_eq!(chosen, mine);
-        assert_eq!(std::fs::read_to_string(mine.join("config.json")).unwrap(), "{\"свой\":true}");
+        assert_eq!(
+            std::fs::read_to_string(mine.join("config.json")).unwrap(),
+            "{\"свой\":true}"
+        );
         assert!(legacy.exists(), "чужую папку трогать не нужно");
     }
 }

@@ -116,6 +116,9 @@ func New(cfg *Config) (*Controller, error) {
 	if cfg == nil {
 		return nil, nil
 	}
+	if err := ValidateRules(cfg); err != nil {
+		return nil, err
+	}
 	sources := make(map[string]Source, len(cfg.Sources))
 	for name, sc := range cfg.Sources {
 		source, err := buildSource(sc.Type, sc.Config)
@@ -125,18 +128,9 @@ func New(cfg *Config) (*Controller, error) {
 		sources[name] = source
 	}
 	controller := &Controller{sources: sources, publicObjects: cfg.PublicObjects}
-	for i, rc := range cfg.Rules {
-		source, ok := sources[rc.Source]
-		if !ok {
-			return nil, fmt.Errorf("правило доступа %d ссылается на источник «%s», которого нет", i, rc.Source)
-		}
-		if len(rc.Builds) == 0 {
-			return nil, fmt.Errorf("правило доступа %d не подходит ни к одной сборке", i)
-		}
+	for _, rc := range cfg.Rules {
+		source := sources[rc.Source]
 		visibility := strings.ToLower(rc.Visibility)
-		if visibility != "" && visibility != "listed" && visibility != "hidden" {
-			return nil, fmt.Errorf("у правила доступа %d непонятная видимость «%s» — нужно listed или hidden", i, rc.Visibility)
-		}
 		message := rc.Message
 		if message == "" {
 			message = defaultDeniedReason
@@ -150,6 +144,33 @@ func New(cfg *Config) (*Controller, error) {
 		})
 	}
 	return controller, nil
+}
+
+func ValidateRules(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for i, rule := range cfg.Rules {
+		if _, ok := cfg.Sources[rule.Source]; !ok {
+			return fmt.Errorf("правило доступа %d ссылается на источник «%s», которого нет", i, rule.Source)
+		}
+		if len(rule.Builds) == 0 {
+			return fmt.Errorf("правило доступа %d не подходит ни к одной сборке", i)
+		}
+		visibility := strings.ToLower(rule.Visibility)
+		if visibility != "" && visibility != "listed" && visibility != "hidden" {
+			return fmt.Errorf("у правила доступа %d непонятная видимость «%s» — нужно listed или hidden", i, rule.Visibility)
+		}
+		for _, pattern := range rule.Builds {
+			if strings.TrimSpace(pattern) == "" {
+				return fmt.Errorf("правило доступа %d содержит пустое имя сборки", i)
+			}
+			if _, err := path.Match(pattern, ""); err != nil {
+				return fmt.Errorf("правило доступа %d содержит неверный шаблон %q: %w", i, pattern, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Controller) Guarded() bool {

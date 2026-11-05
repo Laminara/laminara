@@ -31,6 +31,15 @@ pub struct EndpointPool {
 }
 
 impl EndpointPool {
+    pub async fn account_policy(&self) -> Result<crate::proto::api::v1::AccountPolicy, CoreError> {
+        self.call(|transport, base_url| async move {
+            LauncherClient::new(&transport, &base_url)
+                .account_policy()
+                .await
+        })
+        .await
+    }
+
     pub fn new(transport: Transport, endpoints: Vec<EndpointConfig>) -> Self {
         Self {
             transport,

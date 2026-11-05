@@ -251,7 +251,7 @@ const TOKEN_REFRESH_LEAD: i64 = 60_000_000_000;
 const FIRST_RETRY_PAUSE: Duration = Duration::from_secs(5);
 const LONGEST_RETRY_PAUSE: Duration = Duration::from_secs(120);
 
-fn spawn_token_keeper(app: AppHandle, generation: u64) {
+pub(crate) fn spawn_token_keeper(app: AppHandle, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let mut retry_pause = Duration::ZERO;
         let mut failures = 0u32;
@@ -273,6 +273,7 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
             }
 
             let state = app.state::<AppState>();
+            let _operation = state.auth.operation.lock().await;
             if state.auth.generation() != generation {
                 return;
             }
@@ -301,7 +302,9 @@ fn spawn_token_keeper(app: AppHandle, generation: u64) {
                         FIRST_RETRY_PAUSE,
                         LONGEST_RETRY_PAUSE,
                     );
-                    tracing::warn!("сервер не ответил на продление, повтор через {retry_pause:?}: {e}");
+                    tracing::warn!(
+                        "сервер не ответил на продление, повтор через {retry_pause:?}: {e}"
+                    );
                 }
                 Err(e) => {
                     tracing::warn!("token keeper stopping: {e}");
@@ -320,6 +323,20 @@ pub async fn login(
     password: String,
     code: String,
 ) -> Result<AccountDto, LoginError> {
+    let _operation = state.auth.operation.lock().await;
+    crate::accounts::require_idle(&state)
+        .await
+        .map_err(|message| LoginError::Failed { message })?;
+    let policy = crate::accounts::policy(&state)
+        .await
+        .map_err(|message| LoginError::Failed { message })?;
+    if !policy.multi_account && state.auth.status().signed_in {
+        return Err(LoginError::Failed {
+            message: "Сначала выйдите из текущего аккаунта".into(),
+        });
+    }
+    let change = crate::auth::CredentialChange::new(&state.core);
+    state.core.sign_out();
     let result = state
         .core
         .login(&username, &password, &code)
@@ -333,29 +350,38 @@ pub async fn login(
     let uuid = result.account.uuid.clone();
     let name = result.account.name.clone();
 
+    crate::accounts::check_capacity(&policy, &state.core.saved_accounts(), &uuid)
+        .map_err(|message| LoginError::Failed { message })?;
+
     state
         .auth
-        .keep_refresh(&endpoint_id, &uuid, &result.tokens.refresh)
-        .await;
+        .store_refresh(&endpoint_id, &uuid, &result.tokens.refresh)
+        .await
+        .map_err(|message| LoginError::Failed {
+            message: format!("Не удалось сохранить вход: {message}"),
+        })?;
     state
         .auth
-        .keep_game(
+        .store_game(
             &endpoint_id,
             &uuid,
             &result.session.access_token,
             &result.session.client_token,
         )
-        .await;
-    if let Err(e) = state.core.save_selection(
-        Some(laminara_core::config::SelectedAccount {
+        .await
+        .map_err(|message| LoginError::Failed {
+            message: format!("Не удалось сохранить вход в игру: {message}"),
+        })?;
+    state
+        .core
+        .remember_account(laminara_core::config::SelectedAccount {
             endpoint_id: endpoint_id.clone(),
             uuid: uuid.clone(),
             name: name.clone(),
-        }),
-        None,
-    ) {
-        tracing::warn!("selected account save failed: {e}");
-    }
+        })
+        .map_err(|error| LoginError::Failed {
+            message: player_error("remember account", error),
+        })?;
 
     let dto = AccountDto {
         uuid: uuid.clone(),
@@ -368,18 +394,23 @@ pub async fn login(
         access_expires_unix_nanos: result.tokens.access_expires_unix_nanos,
         game: result.session,
     });
+    change.commit();
+    *state.face.lock().await = None;
+    console::lock(&state.game_log).begin("");
     spawn_token_keeper(app, generation);
     Ok(dto)
 }
 
 #[tauri::command]
 pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some((endpoint_id, uuid, _)) = state.auth.identity() {
-        state.auth.clear_refresh(&endpoint_id, &uuid).await;
-        state.auth.clear_game(&endpoint_id, &uuid).await;
+    let _operation = state.auth.operation.lock().await;
+    crate::accounts::require_idle(&state).await?;
+    if let Some((_, uuid, _)) = state.auth.identity() {
+        crate::accounts::forget(&state, &uuid).await?;
     }
     state.auth.clear_session();
     state.core.sign_out();
+    console::lock(&state.game_log).begin("");
     Ok(())
 }
 
@@ -393,21 +424,33 @@ pub async fn restore_session(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<AuthStatus, String> {
+    let _operation = state.auth.operation.lock().await;
     if state.auth.status().signed_in {
         return Ok(state.auth.status());
     }
     let Some(account) = state.core.config().selected_account.clone() else {
         return Ok(state.auth.status());
     };
+    restore_account(app, &state, account, false).await
+}
+
+pub(crate) async fn restore_account(
+    app: AppHandle,
+    state: &AppState,
+    account: laminara_core::config::SelectedAccount,
+    strict: bool,
+) -> Result<AuthStatus, String> {
+    let change = crate::auth::CredentialChange::new(&state.core);
+    state.core.sign_out();
     let Some((access, client)) = state
         .auth
         .load_game(&account.endpoint_id, &account.uuid)
         .await
     else {
-        return Ok(state.auth.status());
+        return Err("Сохранённый вход недоступен. Введите логин и пароль заново.".into());
     };
     let Some(base) = state.core.base_url_for(&account.endpoint_id) else {
-        return Ok(state.auth.status());
+        return Err("Сервер сохранённого аккаунта больше не настроен".into());
     };
 
     let mut launcher_access = String::new();
@@ -421,35 +464,60 @@ pub async fn restore_session(
             Ok(tokens) => {
                 state
                     .auth
-                    .keep_refresh(&account.endpoint_id, &account.uuid, &tokens.refresh)
-                    .await;
+                    .store_refresh(&account.endpoint_id, &account.uuid, &tokens.refresh)
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!("restored refresh token save failed: {error}");
+                        "Не удалось сохранить продлённый вход в хранилище системы".to_string()
+                    })?;
                 launcher_access = tokens.access;
                 launcher_access_expires = tokens.access_expires_unix_nanos;
             }
-            Err(e) => tracing::warn!("launcher session refresh failed: {e}"),
+            Err(e) if !strict && e.server_unreachable() => {
+                tracing::warn!("launcher session refresh unavailable: {e}")
+            }
+            Err(e) => return Err(player_error("launcher session refresh", e)),
         }
+    }
+    if strict && launcher_access.is_empty() {
+        return Err("Сессия истекла. Введите логин и пароль заново.".into());
     }
 
     if let Err(e) = state.core.report_machine().await {
-        if !e.server_unreachable() {
+        if strict || !e.server_unreachable() {
             tracing::warn!("machine check failed during restore: {e:?}");
-            return Ok(state.auth.status());
+            return Err(player_error("restore machine", e));
         }
         tracing::warn!("сервер не ответил на проверку машины, вход сохраняю: {e}");
     }
 
     match state.core.refresh_session(&base, &access, &client).await {
         Ok(session) => {
+            if session.uuid != account.uuid {
+                return Err("Сервер вернул другой аккаунт. Войдите заново.".into());
+            }
             tracing::info!("session restored for {}", session.name);
             state
                 .auth
-                .keep_game(
+                .store_game(
                     &account.endpoint_id,
                     &session.uuid,
                     &session.access_token,
                     &session.client_token,
                 )
-                .await;
+                .await
+                .map_err(|error| {
+                    tracing::warn!("restored game token save failed: {error}");
+                    "Не удалось сохранить игровой вход в хранилище системы".to_string()
+                })?;
+            state
+                .core
+                .remember_account(laminara_core::config::SelectedAccount {
+                    endpoint_id: account.endpoint_id.clone(),
+                    uuid: session.uuid.clone(),
+                    name: session.name.clone(),
+                })
+                .map_err(|error| player_error("select account", error))?;
             let generation = state.auth.set_session(Session {
                 account: laminara_core::Account {
                     uuid: session.uuid.clone(),
@@ -462,7 +530,7 @@ pub async fn restore_session(
             });
             spawn_token_keeper(app, generation);
         }
-        Err(e) if e.server_unreachable() => {
+        Err(e) if !strict && e.server_unreachable() => {
             tracing::warn!("сервер не отвечает, вход восстановлен из сохранённого: {e}");
             let generation = state.auth.set_session(Session {
                 account: laminara_core::Account {
@@ -481,8 +549,11 @@ pub async fn restore_session(
             });
             spawn_token_keeper(app, generation);
         }
-        Err(e) => tracing::warn!("session restore failed: {e}"),
+        Err(e) => return Err(player_error("session restore", e)),
     }
+    change.commit();
+    *state.face.lock().await = None;
+    console::lock(&state.game_log).begin("");
     Ok(state.auth.status())
 }
 
@@ -574,6 +645,7 @@ fn open_in_system(target: Opened<'_>) -> std::io::Result<()> {
 
 #[tauri::command]
 pub async fn list_builds(state: State<'_, AppState>) -> Result<Vec<BuildDto>, String> {
+    let _operation = state.auth.operation.lock().await;
     let profiles = state
         .core
         .list_profiles()
@@ -643,8 +715,10 @@ pub async fn sync_profile(
     profile: String,
     on_event: Channel<SyncEvent>,
 ) -> Result<(), Failure> {
+    let operation = state.auth.operation.lock().await;
     let cancel = CancellationToken::new();
     let _slot = claim_sync(&state, &profile, &cancel)?;
+    drop(operation);
     tracing::info!("sync started for {profile}");
     let _ = on_event.send(SyncEvent::Started);
 
@@ -785,6 +859,7 @@ async fn run_sync(
 
 #[tauri::command]
 pub async fn repair_build(state: State<'_, AppState>, profile: String) -> Result<u64, String> {
+    let _operation = state.auth.operation.lock().await;
     refuse_while_syncing(&state)?;
     if state.game.lock().await.is_some() {
         return Err("Сначала закройте игру".into());
@@ -816,6 +891,7 @@ pub async fn launch(
     state: State<'_, AppState>,
     profile: String,
 ) -> Result<u64, Failure> {
+    let _operation = state.auth.operation.lock().await;
     let mut running = state.game.lock().await;
     if running.is_some() {
         return Err("Игра уже запущена".into());
@@ -887,6 +963,7 @@ pub fn game_log_tail(state: State<'_, AppState>, lines: usize) -> Vec<GameLine> 
 
 #[tauri::command]
 pub async fn player_face(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let _operation = state.auth.operation.lock().await;
     let Some(game) = state.auth.game_session() else {
         return Ok(None);
     };
@@ -1162,6 +1239,7 @@ pub async fn build_features(
     state: State<'_, AppState>,
     profile: String,
 ) -> Result<BuildFeaturesDto, String> {
+    let _operation = state.auth.operation.lock().await;
     let manifest = state
         .core
         .verified_manifest(&profile)
@@ -1210,11 +1288,13 @@ pub struct PlayerCounts {
 
 #[tauri::command]
 pub async fn player_counts(state: State<'_, AppState>) -> Result<Option<PlayerCounts>, String> {
+    let operation = state.auth.operation.lock().await;
     let profiles = state
         .core
         .list_profiles()
         .await
         .map_err(|e| player_error("list profiles", e))?;
+    drop(operation);
     let with_address: Vec<(String, String)> = profiles
         .into_iter()
         .filter(|p| !p.server_address.trim().is_empty())
@@ -1395,6 +1475,7 @@ pub async fn report_crash(
     exit_code: i32,
     session: u64,
 ) -> Result<String, String> {
+    let _operation = state.auth.operation.lock().await;
     let log = {
         let log = console::lock(&state.game_log);
         if log.session() != session {

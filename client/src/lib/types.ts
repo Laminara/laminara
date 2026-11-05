@@ -24,6 +24,12 @@ export interface AuthStatus {
   uuid?: string;
 }
 
+export interface AccountOptions {
+  multiAccount: boolean;
+  maxAccounts: number;
+  accounts: Account[];
+}
+
 export interface Build {
   name: string;
   minecraft?: string;
@@ -110,6 +116,7 @@ export interface NewsItem {
 }
 
 export type ActiveModal =
+  | { kind: "accounts" }
   | { kind: "general" }
   | { kind: "news" }
   | { kind: "build"; profile: string }

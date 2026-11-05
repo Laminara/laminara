@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import type { Account, ActiveModal, Build, EndpointStatus, GameExit, GameLine, LauncherUpdate, LogReport, LoginFailure, NewsItem, Phase, PlayerCounts, Problem, SyncEvent, SyncState } from "@/lib/types";
+import type { AccountOptions, Account, ActiveModal, Build, EndpointStatus, GameExit, GameLine, LauncherUpdate, LogReport, LoginFailure, NewsItem, Phase, PlayerCounts, Problem, SyncEvent, SyncState } from "@/lib/types";
 import { ipc } from "@/lib/ipc";
 import { buildBlock, isPlayable } from "@/lib/buildState";
 
 const NEWS_SEEN_KEY = "laminara.news.seen";
 const FACE_RECHECK_MS = 120_000;
+let accountOptionsRequest = 0;
 
 const quietly = async (task: () => Promise<void>) => {
   try {
@@ -26,6 +27,13 @@ export interface Crash {
 
 interface LauncherState {
   phase: Phase;
+  identityEpoch: number;
+  accountBusy: boolean;
+  accountOptions: AccountOptions;
+  refreshAccounts: () => Promise<void>;
+  switchAccount: (uuid: string) => Promise<void>;
+  removeAccount: (uuid: string) => Promise<void>;
+  resetAccountView: () => void;
   endpoint: EndpointStatus | null;
   account: Account | null;
   face: string | null;
@@ -91,6 +99,56 @@ interface LauncherState {
 
 export const useLauncher = create<LauncherState>((set, get) => ({
   phase: "connecting",
+  identityEpoch: 0,
+  accountBusy: false,
+  accountOptions: { multiAccount: false, maxAccounts: 1, accounts: [] },
+  refreshAccounts: async () => {
+    const request = ++accountOptionsRequest;
+    const accountOptions = await ipc.accountOptions();
+    if (request !== accountOptionsRequest) return;
+    set((state) => ({
+      accountOptions,
+      modal: !accountOptions.multiAccount && state.modal?.kind === "accounts" ? null : state.modal,
+    }));
+  },
+  resetAccountView: () => set({
+    identityEpoch: get().identityEpoch + 1,
+    account: null, builds: [], selected: null, face: null, faceCheckedAt: 0,
+    players: null, news: [], unreadNews: 0, error: null, twoFactor: false,
+    crash: null, crashSent: null, crashError: null, menuOpen: false,
+    staleBuilds: [], runningSession: null, lastExit: null,
+  }),
+  switchAccount: async (uuid) => {
+    if (get().accountBusy) return;
+    set({ accountBusy: true, error: null });
+    try {
+      await ipc.switchAccount(uuid);
+      get().resetAccountView();
+      set({ modal: null });
+      await get().continueStartup();
+      await get().refreshAccounts();
+    } catch (error) {
+      set({ error: problem(error) });
+    } finally {
+      set({ accountBusy: false });
+    }
+  },
+  removeAccount: async (uuid) => {
+    if (get().accountBusy) return;
+    set({ accountBusy: true, error: null });
+    try {
+      const status = await ipc.removeAccount(uuid);
+      if (!status.signedIn) {
+        get().resetAccountView();
+        set({ phase: "login" });
+      }
+      await get().refreshAccounts();
+    } catch (error) {
+      set({ error: problem(error) });
+    } finally {
+      set({ accountBusy: false });
+    }
+  },
   cancelRequested: false,
   syncRun: 0,
   runningSession: null,
@@ -144,9 +202,10 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       set({ crashSending: false });
     }
   },
-  dismissError: () => set({ error: null, logReport: { state: "idle" } }),
+  dismissError: () => set({ error: null, twoFactor: false, logReport: { state: "idle" } }),
   dismissUpdate: () => set({ updateDismissed: true }),
   openModal: (modal) => {
+    if (modal?.kind === "accounts" && !get().accountOptions.multiAccount) return;
     if (modal?.kind === "news") {
       const seen = get().news.map((item) => item.id);
       localStorage.setItem(NEWS_SEEN_KEY, JSON.stringify(seen));
@@ -164,13 +223,19 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       builds: state.builds.map((build) => (build.name === name && build.install === "installed" ? { ...build, install: "outdated" } : build)),
     })),
 
-  refreshPlayers: () => quietly(async () => set({ players: await ipc.playerCounts() })),
+  refreshPlayers: () => quietly(async () => {
+    const epoch = get().identityEpoch;
+    const players = await ipc.playerCounts();
+    if (epoch === get().identityEpoch) set({ players });
+  }),
 
   refreshBuilds: () =>
     quietly(async () => {
       const phase = get().phase;
       if (phase !== "home") return;
+      const epoch = get().identityEpoch;
       const fresh = await ipc.listBuilds();
+      if (epoch !== get().identityEpoch || get().accountBusy) return;
       const stale = get().staleBuilds;
       const builds = fresh.map((build) =>
         stale.includes(build.name) && build.install === "installed" ? { ...build, install: "outdated" as const } : build,
@@ -181,7 +246,9 @@ export const useLauncher = create<LauncherState>((set, get) => ({
 
   refreshNews: () =>
     quietly(async () => {
+      const epoch = get().identityEpoch;
       const news = await ipc.news();
+      if (epoch !== get().identityEpoch) return;
       const seen: string[] = JSON.parse(localStorage.getItem(NEWS_SEEN_KEY) ?? "[]");
       set({ news, unreadNews: news.filter((item) => !seen.includes(item.id)).length });
     }),
@@ -190,7 +257,11 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     if (!get().account) return Promise.resolve();
     if (!force && Date.now() - get().faceCheckedAt < FACE_RECHECK_MS) return Promise.resolve();
     set({ faceCheckedAt: Date.now() });
-    return quietly(async () => set({ face: await ipc.playerFace() }));
+    const epoch = get().identityEpoch;
+    return quietly(async () => {
+      const face = await ipc.playerFace();
+      if (epoch === get().identityEpoch) set({ face });
+    });
   },
 
   checkUpdate: () => quietly(async () => set({ update: await ipc.checkUpdate() })),
@@ -208,8 +279,11 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   },
 
   continueStartup: async () => {
+    const epoch = get().identityEpoch;
+    void quietly(get().refreshAccounts);
     try {
       const status = await ipc.restoreSession();
+      if (epoch !== get().identityEpoch) return;
       if (!status.signedIn) {
         set({ phase: "login" });
         return;
@@ -222,12 +296,13 @@ export const useLauncher = create<LauncherState>((set, get) => ({
       } catch (err) {
         trouble = String(err);
       }
+      if (epoch !== get().identityEpoch) return;
       set({ account, builds, selected: pickBuild(builds), phase: "home", error: trouble === null ? null : problem(trouble) });
       void get().refreshPlayers();
       void get().refreshNews();
       void get().refreshFace(true);
     } catch (err) {
-      set({ phase: "login", error: problem(err) });
+      if (epoch === get().identityEpoch) set({ phase: "login", error: problem(err) });
     }
   },
 
@@ -294,27 +369,38 @@ export const useLauncher = create<LauncherState>((set, get) => ({
   },
 
   login: async (username, password, code = "") => {
-    set({ error: null });
+    if (get().accountBusy) return;
+    set({ error: null, accountBusy: true });
     try {
-      const account = await ipc.login(username, password, code);
-      const builds = await ipc.listBuilds();
-      set({ account, builds, selected: pickBuild(builds), phase: "home", twoFactor: false });
-      void get().refreshPlayers();
-      void get().refreshNews();
-      void get().refreshFace(true);
+      await ipc.login(username, password, code);
+      get().resetAccountView();
+      set({ modal: null });
+      await get().continueStartup();
     } catch (err) {
       const failure = asLoginFailure(err);
       set({ error: problem(failure.message), twoFactor: failure.kind === "secondFactor" });
+    } finally {
+      set({ accountBusy: false });
     }
   },
 
   logout: async () => {
-    await ipc.logout();
-    set({ account: null, face: null, faceCheckedAt: 0, phase: "login", error: null, twoFactor: false });
+    if (get().accountBusy) return;
+    set({ accountBusy: true, error: null });
+    try {
+      await ipc.logout();
+      get().resetAccountView();
+      set({ phase: "login", modal: null });
+      await get().refreshAccounts();
+    } catch (error) {
+      set({ error: problem(error) });
+    } finally {
+      set({ accountBusy: false });
+    }
   },
 
   play: async () => {
-    if (get().phase !== "home") return;
+    if (get().phase !== "home" || get().accountBusy) return;
     const name = get().selected;
     if (!name) return;
     const block = buildBlock(get().builds.find((item) => item.name === name));
@@ -418,7 +504,7 @@ export const useLauncher = create<LauncherState>((set, get) => ({
     if (get().phase === "running") set({ phase: "home" });
     if (exit.code === 0 || exit.stopped) return;
     const tail = await ipc.gameLogTail(CRASH_LOG_LINES).catch(() => []);
-    if (get().phase !== "home") return;
+    if (get().phase !== "home" || get().accountBusy) return;
     const build = get().builds.find((item) => item.name === exit.build);
     set({
       crash: {

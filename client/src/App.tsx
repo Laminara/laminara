@@ -7,6 +7,7 @@ import { Header } from "@/components/launcher/Header";
 import { Hero } from "@/components/launcher/Hero";
 import { BuildStrip } from "@/components/launcher/BuildStrip";
 import { Login } from "@/components/launcher/Login";
+import { AccountsModal } from "@/components/launcher/AccountsModal";
 import { SyncOverlay } from "@/components/launcher/SyncOverlay";
 import { RunningBar } from "@/components/launcher/RunningBar";
 import { GeneralSettingsModal } from "@/components/launcher/GeneralSettingsModal";
@@ -97,6 +98,7 @@ export default function App() {
         {(active) => (
           <>
             {active.kind === "general" && <GeneralSettingsModal />}
+            {active.kind === "accounts" && <AccountsModal />}
             {active.kind === "build" && <BuildSettingsModal profile={active.profile} />}
             {active.kind === "features" && <FeaturesModal profile={active.profile} />}
             {active.kind === "library" && <LibraryModal />}
@@ -105,7 +107,7 @@ export default function App() {
         )}
       </ModalPresence>
       <ModalPresence value={crash}>{(shown) => <CrashModal crash={shown} />}</ModalPresence>
-      <ErrorToast />
+      {modal?.kind !== "accounts" && <ErrorToast />}
     </div>
   );
 }

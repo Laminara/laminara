@@ -64,6 +64,26 @@ pub struct Core {
 }
 
 impl Core {
+    pub async fn account_policy(&self) -> Result<crate::proto::api::v1::AccountPolicy, CoreError> {
+        match self.pool.account_policy().await {
+            Err(CoreError::App { code, .. }) if code == "unimplemented" => Ok(Default::default()),
+            result => result,
+        }
+    }
+
+    pub fn credentials(&self) -> (Option<String>, Option<String>) {
+        (
+            self.transport.access_token(),
+            self.transport.machine_ticket(),
+        )
+    }
+
+    pub fn restore_credentials(&self, credentials: (Option<String>, Option<String>)) {
+        self.transport.set_access_token(credentials.0);
+        self.transport.set_machine_ticket(credentials.1);
+        self.manifests.lock().unwrap().clear();
+    }
+
     pub fn new(paths: LaminaraPaths, config: ClientConfig) -> Result<Core, CoreError> {
         let verifying_keys = config.verifying_keys()?;
         let transport = Transport::default();
@@ -236,7 +256,43 @@ impl Core {
     }
 
     pub fn sign_out(&self) {
-        self.transport.set_access_token(None);
+        self.restore_credentials((None, None));
+    }
+
+    pub fn saved_accounts(&self) -> Vec<crate::config::SelectedAccount> {
+        self.config().accounts()
+    }
+
+    pub fn remember_account(
+        &self,
+        account: crate::config::SelectedAccount,
+    ) -> Result<(), CoreError> {
+        let mut next = ClientConfig::clone(&self.config.load());
+        next.saved_accounts = next.accounts();
+        next.saved_accounts
+            .retain(|saved| saved.uuid != account.uuid);
+        next.saved_accounts.push(account.clone());
+        next.selected_account = Some(account);
+        next.save(&self.paths.config_file())?;
+        self.config.store(Arc::new(next));
+        self.manifests.lock().unwrap().clear();
+        Ok(())
+    }
+
+    pub fn forget_account(&self, uuid: &str) -> Result<(), CoreError> {
+        let mut next = ClientConfig::clone(&self.config.load());
+        next.saved_accounts = next.accounts();
+        next.saved_accounts.retain(|saved| saved.uuid != uuid);
+        if next
+            .selected_account
+            .as_ref()
+            .is_some_and(|account| account.uuid == uuid)
+        {
+            next.selected_account = None;
+        }
+        next.save(&self.paths.config_file())?;
+        self.config.store(Arc::new(next));
+        Ok(())
     }
 
     pub fn base_url_for(&self, endpoint_id: &str) -> Option<String> {
@@ -780,6 +836,7 @@ mod tests {
                 install_dir: tmp.join("install"),
                 game_dir: None,
                 selected_account: None,
+                saved_accounts: Vec::new(),
                 selected_profile: None,
                 jvm_tuning: Vec::new(),
                 default_memory_mb: 4096,
@@ -800,6 +857,67 @@ mod tests {
             size: 0,
             algo: 0,
         }
+    }
+
+    #[test]
+    fn saved_accounts_survive_restart_and_forgetting_preserves_other_accounts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+        core.set_endpoints(vec![EndpointConfig {
+            id: "main".into(),
+            base_url: "http://127.0.0.1:8099".into(),
+        }])
+        .unwrap();
+        let account = |uuid: &str| crate::config::SelectedAccount {
+            endpoint_id: "main".into(),
+            uuid: uuid.into(),
+            name: uuid.into(),
+        };
+        core.remember_account(account("alice")).unwrap();
+        core.remember_account(account("bob")).unwrap();
+        core.remember_account(account("alice")).unwrap();
+        let saved = ClientConfig::load(&core.paths.config_file()).unwrap();
+        assert_eq!(saved.accounts().len(), 2);
+        assert_eq!(saved.selected_account.unwrap().uuid, "alice");
+        core.forget_account("bob").unwrap();
+        assert_eq!(
+            core.config().selected_account.as_ref().unwrap().uuid,
+            "alice"
+        );
+        core.remember_account(account("bob")).unwrap();
+        core.forget_account("bob").unwrap();
+        let saved = ClientConfig::load(&core.paths.config_file()).unwrap();
+        assert!(saved.selected_account.is_none());
+        assert_eq!(saved.accounts(), vec![account("alice")]);
+    }
+
+    #[test]
+    fn failed_account_save_does_not_replace_active_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+        std::fs::create_dir_all(core.paths.config_file()).unwrap();
+        let result = core.remember_account(crate::config::SelectedAccount {
+            endpoint_id: "main".into(),
+            uuid: "alice".into(),
+            name: "Alice".into(),
+        });
+        assert!(result.is_err());
+        assert!(core.config().selected_account.is_none());
+        assert!(core.saved_accounts().is_empty());
+    }
+
+    #[test]
+    fn credential_changes_can_restore_previous_transport_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+        let previous = (Some("alice-access".into()), Some("alice-machine".into()));
+        core.restore_credentials(previous.clone());
+        let snapshot = core.credentials();
+        core.restore_credentials((Some("bob-access".into()), Some("bob-machine".into())));
+        core.restore_credentials(snapshot);
+        assert_eq!(core.credentials(), previous);
+        core.sign_out();
+        assert_eq!(core.credentials(), (None, None));
     }
 
     fn write_ledger(profile: &Path, hashes: &[&str]) {
