@@ -1,0 +1,28 @@
+[Unit]
+Description=Pull Laminara static site
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=laminara-pull
+Group=laminara-pull
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/laminara-site-pull
+Environment=GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/sites/laminara/published
+ProtectHome=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=192M
+TasksMax=16
+TimeoutStartSec=120

@@ -10,22 +10,25 @@ on:
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: site-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Собрать и выложить
+  build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    env:
-      SITE_HOST: laminara-site@88.218.171.203
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           package_json_file: site/package.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
           cache: pnpm
@@ -35,21 +38,48 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm build
-      - name: Ключ доступа
+      - name: Подготовить статику
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SITE_SSH_KEY }}" > ~/.ssh/deploy
-          chmod 600 ~/.ssh/deploy
-          printf '%s\n' "${{ secrets.SITE_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-      - name: Выложить документацию
-        run: tar -czf - -C site/dist . | ssh -i ~/.ssh/deploy "$SITE_HOST" docs
-      - name: Выложить лендинг
-        run: tar -czf - -C web . | ssh -i ~/.ssh/deploy "$SITE_HOST" web
-      - name: Проверить, что сайт отвечает
+          mkdir "$RUNNER_TEMP/site"
+          cp -R web "$RUNNER_TEMP/site/web"
+          cp -R site/dist "$RUNNER_TEMP/site/docs"
+          cd "$RUNNER_TEMP/site"
+          test -z "$(find docs web ! -type f ! -type d -print -quit)"
+          test -s docs/index.html && test -s web/index.html
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: site
+          path: ${{ runner.temp }}/site
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: site
+          path: ${{ runner.temp }}/site
+      - name: Обновить ветку со статикой
+        working-directory: ${{ runner.temp }}/site
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          for url in https://laminara.dev/ https://docs.laminara.dev/ \
-            https://docs.laminara.dev/quickstart/ https://docs.laminara.dev/reference/config/; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url")
-            echo "$url -> $code"
-            [ "$code" = "200" ] || exit 1
-          done
+          test -s web/index.html && test -s docs/quickstart/index.html && test -s docs/reference/config/index.html
+          test -z "$(find . -mindepth 1 \( -name '.*' -o ! -type f ! -type d \) -print -quit)"
+          git init -q -b site-static
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --force -- docs web
+          git commit -qm "$GITHUB_SHA"
+          gh auth setup-git
+          upstream="https://github.com/$GITHUB_REPOSITORY.git"
+          latest=$(git ls-remote --exit-code "$upstream" refs/heads/main | cut -f1)
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest" > "$RUNNER_TEMP/changes.json"
+            jq -e '.status == "ahead" and (.files | length < 300) and all(.files[]; ([.filename, .previous_filename // ""] | all(test("^(docs/|site/|web/|\\.github/workflows/site\\.yml$)") | not)))' "$RUNNER_TEMP/changes.json" >/dev/null || { echo "В main есть более свежая сборка сайта"; exit 1; }
+          fi
+          git push --force "$upstream" HEAD:refs/heads/site-static

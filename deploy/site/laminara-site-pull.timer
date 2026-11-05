@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for new Laminara site content
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=laminara-site-pull.service
+
+[Install]
+WantedBy=timers.target
