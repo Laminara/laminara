@@ -3,12 +3,12 @@ package daemon
 import (
 	"bytes"
 	"context"
-	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	adminv1 "github.com/laminara/laminara/gen/go/laminara/admin/v1"
 	"github.com/laminara/laminara/server/internal/settings"
 )
 
@@ -56,7 +56,34 @@ func TestSettingsEntryPrintsOneBlockForALeafSetting(t *testing.T) {
 
 func TestSettingsEntryPrintsRowsForACollectionItem(t *testing.T) {
 	store := settingsStoreFor(t)
-	settingsRun(t, store, "add", "access.rules")
+	page, err := store.List("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := &adminv1.SettingsPatch{
+		Revision: page.Revision,
+		Changes: []*adminv1.SettingChange{
+			{Action: &adminv1.SettingChange_Add{Add: &adminv1.AddSettingEntryRequest{Collection: "access.sources", Name: "staff"}}},
+			settingChange("access.sources.staff.type", "file"),
+			settingChange("access.sources.staff.config.path", filepath.Join(t.TempDir(), "staff.json")),
+			{Action: &adminv1.SettingChange_Add{Add: &adminv1.AddSettingEntryRequest{Collection: "access.rules"}}},
+			settingChange("access.rules.0.builds", "TestServer"),
+			settingChange("access.rules.0.source", "staff"),
+		},
+	}
+	preview, err := store.Preview(&adminv1.PreviewSettingsRequest{Patch: patch, Entry: "access.rules.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ValidationError != "" || preview.AddedPath != "access.rules.0" {
+		t.Fatalf("completed access rule rejected: %+v", preview)
+	}
+	if readFile(t, store.path) != "{}" {
+		t.Fatal("preview persisted the access rule")
+	}
+	if _, err := store.Apply(patch); err != nil {
+		t.Fatal(err)
+	}
 
 	out := settingsRun(t, store, "access.rules.0")
 	if strings.Contains(out, "значение:") {
@@ -66,6 +93,19 @@ func TestSettingsEntryPrintsRowsForACollectionItem(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in %q", want, out)
 		}
+	}
+}
+
+func TestSettingsCannotSaveAnIncompleteAccessRule(t *testing.T) {
+	store := settingsStoreFor(t)
+	before := readFile(t, store.path)
+	var out bytes.Buffer
+	err := settingsCommand(store).Run(context.Background(), []string{"add", "access.rules"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "access.rules") {
+		t.Fatalf("incomplete rule must be rejected with its setting path, got %v", err)
+	}
+	if readFile(t, store.path) != before || store.pending || strings.Contains(out.String(), "Добавлено:") {
+		t.Fatal("rejected access rule was saved or reported as added")
 	}
 }
 
