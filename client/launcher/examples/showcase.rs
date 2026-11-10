@@ -415,6 +415,17 @@ fn hover(window: &slint::Window) {
     }
 }
 
+fn sized(window: &slint::Window) {
+    let size = std::env::var("LAMINARA_SHOWCASE_SIZE").ok();
+    let parsed = size.as_deref().and_then(|size| {
+        let (width, height) = size.split_once('x')?;
+        Some((width.parse::<f32>().ok()?, height.parse::<f32>().ok()?))
+    });
+    if let Some((width, height)) = parsed {
+        window.set_size(slint::LogicalSize::new(width, height));
+    }
+}
+
 fn console(output: Option<String>) -> Result<(), slint::PlatformError> {
     let window = ConsoleWindow::new()?;
     let store = window.global::<ConsoleStore>();
@@ -451,6 +462,7 @@ fn main() -> Result<(), slint::PlatformError> {
         return console(output);
     }
     let window = MainWindow::new()?;
+    sized(window.window());
     scene::bind_formatters(&window);
     let hero = laminara::media::hero("");
     let media = window.global::<Media>();
@@ -484,6 +496,7 @@ fn stage(window: &MainWindow, scene: &str) {
         "accounts" => open(window, ModalKind::Accounts),
         "general" => {
             store.set_general_ready(true);
+            store.set_build_ready(true);
             store.set_install_dir("~/.local/share/laminara/games".into());
             open(window, ModalKind::General);
         }

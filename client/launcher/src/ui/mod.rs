@@ -268,6 +268,7 @@ struct ModelState {
     dialog_trouble: Option<String>,
     build_loaded: bool,
     memory_ceiling: u32,
+    loaded_memory: Option<u32>,
     features: Option<FeatureEditor>,
     features_loaded: bool,
     library_query: String,
@@ -326,6 +327,7 @@ impl Default for ModelState {
             dialog_trouble: None,
             build_loaded: false,
             memory_ceiling: 16384,
+            loaded_memory: None,
             features: None,
             features_loaded: false,
             library_query: String::new(),
@@ -1069,6 +1071,7 @@ impl App {
             model.modal_ticket += 1;
             model.dialog_trouble = None;
             model.modal_profile = model.selected.clone().unwrap_or_default();
+            model.loaded_memory = None;
             model.modal_ticket
         };
         let store = self.store();
@@ -1083,22 +1086,17 @@ impl App {
                 let mut model = self.model.borrow_mut();
                 model.general_loaded = true;
                 model.cleaned = None;
+                let profile = model.modal_profile.clone();
                 drop(model);
                 store.set_install_dir(settings.install_dir.into());
                 store.set_game_console(settings.game_console);
+                if !profile.is_empty() {
+                    self.load_build_memory(profile);
+                }
             }
             ModalKind::Build => {
                 let profile = self.model.borrow().modal_profile.clone();
-                let settings = commands::build_settings(&self.state, profile);
-                let memory = settings
-                    .max_memory_mb
-                    .unwrap_or(settings.default_memory_mb)
-                    .min(settings.allowed_memory_mb);
-                let mut model = self.model.borrow_mut();
-                model.build_loaded = true;
-                model.memory_ceiling = settings.allowed_memory_mb;
-                drop(model);
-                store.set_memory(memory as i32);
+                self.load_build_memory(profile);
             }
             ModalKind::Features => {
                 {
@@ -1114,6 +1112,20 @@ impl App {
             ModalKind::News | ModalKind::None => {}
         }
         self.render();
+    }
+
+    fn load_build_memory(&self, profile: String) {
+        let settings = commands::build_settings(&self.state, profile);
+        let memory = settings
+            .max_memory_mb
+            .unwrap_or(settings.default_memory_mb)
+            .min(settings.allowed_memory_mb);
+        let mut model = self.model.borrow_mut();
+        model.build_loaded = true;
+        model.memory_ceiling = settings.allowed_memory_mb;
+        model.loaded_memory = Some(memory);
+        drop(model);
+        self.store().set_memory(memory as i32);
     }
 
     fn close_modal(&self) {
@@ -1216,6 +1228,14 @@ impl App {
         let install_dir = store.get_install_dir().to_string();
         let game_console = store.get_game_console();
         let current = commands::general_settings(&self.state);
+        let changed_memory = {
+            let model = self.model.borrow();
+            let memory = store.get_memory().max(0) as u32;
+            model
+                .loaded_memory
+                .filter(|loaded| model.build_loaded && *loaded != memory)
+                .map(|_| (model.modal_profile.clone(), memory))
+        };
         let state = self.state.clone();
         let result = on_core(async move {
             if !install_dir.is_empty() && install_dir != current.install_dir {
@@ -1223,6 +1243,9 @@ impl App {
             }
             if game_console != current.game_console {
                 commands::set_game_console(&state, game_console)?;
+            }
+            if let Some((profile, memory)) = changed_memory {
+                commands::set_build_memory(&state, profile, Some(memory)).await?;
             }
             Ok::<(), String>(())
         })
