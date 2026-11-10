@@ -1,0 +1,495 @@
+import { Theme } from "theme.slint";
+import { Label, Icon } from "atoms.slint";
+
+export enum ButtonKind { primary, secondary, ghost, danger }
+
+export global Tooltip {
+    out property <string> text;
+    out property <length> x;
+    out property <length> y;
+    out property <bool> shown;
+    public function show(text: string, x: length, y: length) {
+        root.text = text;
+        root.x = x;
+        root.y = y;
+        root.shown = true;
+    }
+    public function hide() {
+        root.shown = false;
+    }
+}
+
+component HintTimer {
+    in property <string> hint;
+    in property <bool> hovering;
+    in property <length> at-x;
+    in property <length> at-y;
+    width: 0;
+    height: 0;
+    changed hovering => {
+        if !root.hovering {
+            Tooltip.hide();
+        }
+    }
+    Timer {
+        interval: 600ms;
+        running: root.hovering && root.hint != "" && !Tooltip.shown;
+        triggered => {
+            Tooltip.show(root.hint, root.at-x, root.at-y);
+        }
+    }
+}
+
+export component HintArea inherits TouchArea {
+    in property <string> hint;
+    HintTimer {
+        hint: root.hint;
+        hovering: root.has-hover;
+        at-x: root.absolute-position.x + root.mouse-x;
+        at-y: root.absolute-position.y + root.mouse-y;
+    }
+}
+
+export component TooltipLayer inherits Rectangle {
+    property <length> below: 22px;
+    if Tooltip.shown: Rectangle {
+        x: clamp(Tooltip.x - root.absolute-position.x, 8px, root.width - self.width - 8px);
+        y: Tooltip.y - root.absolute-position.y + root.below + self.height > root.height - 8px
+            ? Tooltip.y - root.absolute-position.y - self.height - 8px
+            : Tooltip.y - root.absolute-position.y + root.below;
+        width: min(hint-text.preferred-width + 20px, 360px);
+        height: hint-text.preferred-height + 12px;
+        border-radius: Theme.radius-sm - 2px;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        background: Theme.panel-2;
+        hint-text := Text {
+            x: 10px;
+            y: 6px;
+            width: parent.width - 20px;
+            text: Tooltip.text;
+            font-family: Theme.sans;
+            font-size: 12px;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component Button inherits Rectangle {
+    in property <ButtonKind> kind: ButtonKind.primary;
+    in property <bool> small: false;
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <length> icon-size: 16px;
+    in property <color> icon-tint;
+    in property <bool> tinted: false;
+    in property <bool> enabled: true;
+    in property <length> pad-x: root.small ? 12px : 20px;
+    in property <length> fixed-height: root.small ? 36px : 44px;
+    in property <length> text-size: 14px;
+    in property <length> text-leading: 20px;
+    in property <int> text-weight: 600;
+    in property <float> text-tracking: 0.025;
+    in property <bool> stretch-label: false;
+    in property <length> radius: Theme.radius-md;
+    in property <string> hint;
+    out property <bool> hovered: touch.has-hover;
+    callback clicked();
+
+    property <color> base-fill: root.kind == ButtonKind.primary ? Theme.primary
+        : root.kind == ButtonKind.secondary ? Theme.surface-2
+        : root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.1)
+        : transparent;
+    property <color> hover-fill: root.kind == ButtonKind.primary ? Theme.primary-strong
+        : root.kind == ButtonKind.secondary ? Theme.surface-3
+        : root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.2)
+        : Theme.surface-2;
+    property <color> base-ink: root.kind == ButtonKind.primary ? Theme.primary-ink
+        : root.kind == ButtonKind.ghost ? Theme.dim
+        : root.kind == ButtonKind.danger ? Theme.danger
+        : Theme.text;
+    property <color> hover-ink: root.kind == ButtonKind.ghost ? Theme.text : root.base-ink;
+    property <color> ink: touch.has-hover ? root.hover-ink : root.base-ink;
+
+    min-height: root.fixed-height;
+    preferred-height: root.fixed-height;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    min-width: row.min-width;
+    preferred-width: row.preferred-width;
+    opacity: root.enabled ? 1 : 0.5;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        touch.clicked();
+    }
+
+    Rectangle {
+        y: (root.height - root.fixed-height) / 2;
+        height: root.fixed-height;
+        border-radius: root.radius;
+        border-width: root.kind == ButtonKind.secondary || root.kind == ButtonKind.danger ? 1px : 0px;
+        border-color: root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.4) : Theme.border;
+        background: touch.pressed && root.kind == ButtonKind.primary && root.enabled ? root.hover-fill.darker(0.05)
+            : touch.has-hover ? root.hover-fill : root.base-fill;
+        animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+        touch := TouchArea {
+            mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+            clicked => {
+                if root.enabled {
+                    root.clicked();
+                }
+            }
+        }
+        HintTimer {
+            hint: root.hint;
+            hovering: touch.has-hover;
+            at-x: touch.absolute-position.x + touch.mouse-x;
+            at-y: touch.absolute-position.y + touch.mouse-y;
+        }
+
+        row := HorizontalLayout {
+            padding-left: root.pad-x + parent.border-width;
+            padding-right: root.pad-x + parent.border-width;
+            spacing: 8px;
+            alignment: center;
+            if root.has-icon: Icon {
+                size: root.icon-size;
+                source: root.icon;
+                colorize: root.tinted ? root.icon-tint : root.ink;
+                animate colorize { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+            }
+            if root.text != "": Label {
+                text: root.text;
+                font-size: root.text-size;
+                leading: root.text-leading;
+                font-weight: root.text-weight;
+                tracking: root.text-tracking;
+                color: root.ink;
+                horizontal-stretch: root.stretch-label ? 1 : 0;
+                accessible-role: none;
+                animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+            }
+        }
+    }
+}
+
+export component HoverSurface inherits Rectangle {
+    in property <brush> rest;
+    in property <brush> hover;
+    in property <bool> enabled: true;
+    in property <MouseCursor> cursor: MouseCursor.pointer;
+    in property <string> hint;
+    out property <bool> hovered: area.has-hover;
+    callback clicked();
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        area.clicked();
+    }
+    background: area.has-hover ? root.hover : root.rest;
+    animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    area := TouchArea {
+        mouse-cursor: root.enabled ? root.cursor : MouseCursor.default;
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+    }
+    HintTimer {
+        hint: root.hint;
+        hovering: area.has-hover;
+        at-x: area.absolute-position.x + area.mouse-x;
+        at-y: area.absolute-position.y + area.mouse-y;
+    }
+    @children
+}
+
+export component IconTap inherits Rectangle {
+    in property <image> icon;
+    in property <length> icon-size: 18px;
+    in property <brush> rest-fill: transparent;
+    in property <brush> hover-fill: Theme.surface-2;
+    in property <color> rest-ink: Theme.dim;
+    in property <color> hover-ink: Theme.text;
+    in property <bool> enabled: true;
+    in property <float> disabled-opacity: 0.5;
+    callback clicked();
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        area.clicked();
+    }
+    background: area.has-hover ? root.hover-fill : root.rest-fill;
+    opacity: root.enabled ? 1 : root.disabled-opacity;
+    animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    area := TouchArea {
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+    }
+    Icon {
+        size: root.icon-size;
+        source: root.icon;
+        colorize: area.has-hover ? root.hover-ink : root.rest-ink;
+        animate colorize { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    }
+}
+
+export component TextField inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <InputType> input-type: InputType.text;
+    in property <bool> enabled: true;
+    in property <length> pad-x: 16px;
+    in property <length> field-height: 44px;
+    out property <bool> focused: input.has-focus;
+    callback edited(string);
+    callback accepted();
+    callback escape() -> bool;
+    public function take-focus() {
+        input.focus();
+    }
+    public function select-everything() {
+        input.select-all();
+    }
+    height: root.field-height;
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-placeholder-text: root.placeholder;
+    accessible-value: root.input-type == InputType.password ? "" : input.text;
+    accessible-action-set-value(value) => {
+        input.text = value;
+        root.edited(value);
+    }
+    border-radius: Theme.radius-md;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-strong : Theme.border;
+    background: Theme.surface-2;
+    animate border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => {
+            input.focus();
+        }
+    }
+    if input.text == "" && input.preedit-text == "": Label {
+        x: root.pad-x + 1px;
+        width: root.width - 2 * root.pad-x - 2px;
+        text: root.placeholder;
+        color: Theme.mute;
+        leading: 20px;
+        overflow: elide;
+        accessible-role: none;
+    }
+    input := TextInput {
+        x: root.pad-x + 1px;
+        width: root.width - 2 * root.pad-x - 2px;
+        height: root.height;
+        vertical-alignment: center;
+        font-family: Theme.sans;
+        font-size: 14px;
+        color: root.enabled ? Theme.text : Theme.text.with-alpha(0.6);
+        selection-background-color: Theme.primary.with-alpha(0.32);
+        selection-foreground-color: Theme.text;
+        input-type: root.input-type;
+        enabled: root.enabled;
+        single-line: true;
+        accessible-role: none;
+        edited => {
+            root.edited(self.text);
+        }
+        accepted => {
+            root.accepted();
+        }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                return root.escape() ? EventResult.accept : EventResult.reject;
+            }
+            EventResult.reject
+        }
+    }
+}
+
+export component Switch inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled(bool);
+    accessible-role: switch;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => {
+        area.clicked();
+    }
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.checked ? Theme.primary : Theme.border-strong;
+    background: root.checked ? Theme.primary : area.has-hover ? Theme.surface-3 : Theme.surface-2;
+    animate background, border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    area := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+    Rectangle {
+        x: root.checked ? 22px : 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: root.checked ? Theme.primary-ink : Theme.dim;
+        animate x { duration: 200ms; easing: ease-out; }
+    }
+}
+
+export component RangeSlider inherits Rectangle {
+    in-out property <int> value;
+    in property <int> minimum;
+    in property <int> maximum;
+    in property <int> step: 512;
+    callback changed(int);
+    property <float> span: max(1, root.maximum - root.minimum);
+    property <float> ratio: clamp((root.value - root.minimum) / root.span, 0, 1);
+    height: 24px;
+    accessible-role: slider;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-set-value(value) => {
+        root.settle(value.to-float());
+    }
+    accessible-action-increment => {
+        root.settle(root.value + root.step);
+    }
+    accessible-action-decrement => {
+        root.settle(root.value - root.step);
+    }
+    function settle(raw: float) {
+        let stepped = root.minimum + round((raw - root.minimum) / root.step) * root.step;
+        let next = clamp(stepped, root.minimum, root.maximum);
+        if next != root.value {
+            root.value = next;
+            root.changed(next);
+        }
+    }
+    function pick(at: length) {
+        root.settle(root.minimum + clamp((at - 8px) / max(1px, root.width - 16px), 0, 1) * root.span);
+    }
+    Rectangle {
+        x: 8px;
+        width: root.width - 16px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.surface-3;
+        Rectangle {
+            x: 0;
+            width: parent.width * root.ratio;
+            border-radius: 2px;
+            background: Theme.primary;
+        }
+    }
+    Rectangle {
+        x: 8px + (root.width - 16px) * root.ratio - 8px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.primary;
+    }
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.pick(self.mouse-x);
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.pick(self.mouse-x);
+            }
+        }
+    }
+}
+
+export component ScrollArea inherits Rectangle {
+    in property <length> content-height;
+    in-out property <length> offset <=> flick.content-y;
+    out property <length> visible-height: root.height;
+    out property <bool> scrollable: root.content-height > root.height + 0.5px;
+    out property <bool> at-bottom: -flick.content-y + root.height >= root.content-height - 1px;
+    public function scroll-to-end() {
+        flick.content-y = min(0px, root.height - root.content-height);
+    }
+    clip: true;
+    flick := Flickable {
+        content-height: max(root.content-height, root.height);
+        content-width: root.width;
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+    if root.scrollable: Rectangle {
+        property <length> track: root.height;
+        property <length> thumb: max(24px, self.track * root.height / root.content-height);
+        property <length> travel: self.track - self.thumb;
+        property <float> progress: -flick.content-y / max(1px, root.content-height - root.height);
+        x: root.width - 10px;
+        width: 10px;
+        height: root.height;
+        Rectangle {
+            y: parent.travel * clamp(parent.progress, 0, 1);
+            height: parent.thumb;
+            border-radius: 5px;
+            background: Theme.surface-2;
+        }
+        TouchArea {
+            property <length> grab-offset;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    self.grab-offset = flick.content-y;
+                }
+            }
+            moved => {
+                if self.pressed {
+                    let delta = (self.mouse-y - self.pressed-y) * (root.content-height - root.height) / max(1px, parent.travel);
+                    flick.content-y = clamp(self.grab-offset - delta, root.height - root.content-height, 0px);
+                }
+            }
+        }
+    }
+}
+
+export component WindowButton inherits Rectangle {
+    in property <image> icon;
+    in property <length> icon-size: 15px;
+    in property <bool> closer: false;
+    callback clicked();
+    accessible-role: button;
+    accessible-action-default => {
+        area.clicked();
+    }
+    width: 48px;
+    height: 36px;
+    background: area.has-hover ? (root.closer ? Theme.danger : Theme.surface-2) : transparent;
+    animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    area := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+    Icon {
+        size: root.icon-size;
+        source: root.icon;
+        colorize: area.has-hover ? (root.closer ? #ffffff : Theme.text) : Theme.dim;
+        animate colorize { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    }
+}

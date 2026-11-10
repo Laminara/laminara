@@ -7,7 +7,6 @@ coverage.*
 
 target/
 /client/dist-launcher/
-/client/src-tauri/gen/schemas/
 
 node_modules/
 dist/

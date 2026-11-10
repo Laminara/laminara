@@ -86,7 +86,6 @@ pub struct GameLog {
     status: GameStatus,
     lines: VecDeque<GameLine>,
     next_seq: u64,
-    sent_seq: u64,
     dropped: u64,
     text_bytes: usize,
     carried: [Option<Level>; 2],
@@ -135,15 +134,20 @@ impl GameLog {
         }
     }
 
-    pub fn unsent(&mut self) -> Vec<GameLine> {
-        let first = self.next_seq - self.lines.len() as u64;
-        let from = self.sent_seq.max(first);
-        self.sent_seq = self.next_seq;
-        self.lines
-            .iter()
-            .skip((from - first) as usize)
-            .cloned()
-            .collect()
+    pub fn lines(&self) -> &VecDeque<GameLine> {
+        &self.lines
+    }
+
+    pub fn status(&self) -> GameStatus {
+        self.status
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
     }
 
     pub fn finish(&mut self, session: u64, code: i32, stopped: bool) -> bool {
@@ -529,20 +533,6 @@ mod tests {
         let cut = &whole[..whole.len() - 1];
         let decoded = decode(cut);
         assert!(decoded.starts_with("Журнал JourneyMap: карта ми"));
-    }
-
-    #[test]
-    fn unsent_hands_out_each_line_once() {
-        let mut log = GameLog::default();
-        log.begin("batch");
-        log.record(Stream::Out, "a".into());
-        log.record(Stream::Err, "b".into());
-        let first: Vec<_> = log.unsent().into_iter().map(|line| line.text).collect();
-        assert_eq!(first, ["a", "b"]);
-        assert!(log.unsent().is_empty());
-        log.record(Stream::Out, "c".into());
-        let second: Vec<_> = log.unsent().into_iter().map(|line| line.seq).collect();
-        assert_eq!(second, [2]);
     }
 
     #[test]

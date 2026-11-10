@@ -1,0 +1,204 @@
+export enum Phase { connecting, updating, login, home, syncing, running }
+
+export enum ModalKind { none, accounts, general, news, build, features, library }
+
+export enum Install { installed, outdated, missing }
+
+export enum Report { idle, sending, sent, failed }
+
+export struct BuildItem {
+    name: string,
+    kind: string,
+    minecraft: string,
+    size: string,
+    install: Install,
+    has-features: bool,
+    blocked: bool,
+    badge: string,
+    reason: string,
+    has-players: bool,
+    online: string,
+    max: string,
+}
+
+export struct LibraryRow {
+    items: [BuildItem],
+}
+
+export struct NewsItem {
+    title: string,
+    body: string,
+    date: string,
+    tag: string,
+    caption: string,
+    link: string,
+    has-banner: bool,
+    banner: image,
+}
+
+export struct NewsPair {
+    left: NewsItem,
+    right: NewsItem,
+    has-right: bool,
+}
+
+export struct AccountItem {
+    uuid: string,
+    name: string,
+    initial: string,
+    current: bool,
+}
+
+export struct FeatureRow {
+    header: bool,
+    depth: int,
+    gap: length,
+    group: string,
+    option: string,
+    title: string,
+    description: string,
+    badge: string,
+    active: bool,
+    single: bool,
+    blocked: string,
+    none: bool,
+    opens: bool,
+}
+
+export struct LogRow {
+    text: string,
+    level: int,
+}
+
+export global Store {
+    in property <Phase> phase: Phase.connecting;
+    in property <bool> busy;
+
+    in property <bool> has-total;
+    in property <string> total-online;
+    in property <string> total-max;
+    in property <string> account-name: "Гость";
+    in property <string> account-initial: "?";
+    in property <bool> has-face;
+    in property <image> face;
+    in property <bool> menu-open;
+    in property <bool> multi-account;
+    in property <int> max-accounts: 1;
+
+    in property <[BuildItem]> builds;
+    in property <string> selected;
+    in property <bool> has-build;
+    in property <BuildItem> build;
+    in property <string> action-label;
+
+    in property <[NewsItem]> news;
+    in property <[NewsItem]> news-rest;
+    in property <[NewsPair]> news-pairs;
+    in property <int> unread;
+
+    in property <string> running-build;
+
+    in property <string> sync-stage;
+    in property <string> sync-build;
+    in property <float> sync-fraction;
+    in property <string> sync-amount;
+    in property <string> sync-files;
+    in property <string> sync-speed;
+    in property <string> sync-left;
+    in property <string> sync-path;
+    in property <bool> sync-cancellable;
+    in property <bool> cancelling;
+
+    in property <bool> update-banner;
+    in property <string> update-version;
+    in property <bool> update-mandatory;
+    in property <string> update-detail;
+    in property <float> update-fraction;
+    in property <string> update-progress;
+
+    in property <bool> error-shown;
+    in property <string> error-message;
+    in property <bool> error-retry;
+    in property <Report> report: Report.idle;
+    in property <string> report-message;
+
+    in property <bool> two-factor;
+    in property <string> login-error;
+
+    in property <bool> modal-open;
+    in property <ModalKind> modal: ModalKind.none;
+    in property <string> modal-profile;
+
+    in property <[AccountItem]> accounts;
+    in property <bool> accounts-loading;
+    in property <string> accounts-error;
+    in-out property <bool> accounts-adding;
+    in-out property <string> accounts-confirm;
+    in-out property <string> prefill-username;
+
+    in property <bool> general-ready;
+    in-out property <string> install-dir;
+    in-out property <bool> game-console;
+    in property <string> version;
+    in property <string> cleaned;
+    in property <string> dialog-trouble;
+
+    in property <bool> build-ready;
+    in-out property <int> memory: 4096;
+    in property <int> memory-ceiling: 16384;
+
+    in property <bool> features-ready;
+    in property <bool> features-empty;
+    in property <[FeatureRow]> feature-rows;
+
+    in property <[LibraryRow]> library;
+    in property <bool> library-empty;
+    in property <int> build-count;
+    in property <string> library-caption;
+    in property <string> news-caption;
+
+    in property <bool> crash-open;
+    in property <string> crash-code;
+    in property <[LogRow]> crash-log;
+    in property <bool> crash-sending;
+    in property <string> crash-sent;
+    in property <string> crash-trouble;
+
+    pure callback memory-label(int) -> string;
+    callback login(string, string, string);
+    callback login-edited();
+    callback logout();
+    callback toggle-menu();
+    callback close-menu();
+    callback open-modal(ModalKind);
+    callback close-modal();
+    callback select(string);
+    callback play();
+    callback cancel-sync();
+    callback stop-game();
+    callback open-console();
+    callback send-launcher-log();
+    callback open-launcher-logs();
+    callback dismiss-error();
+    callback retry();
+    callback dismiss-update();
+    callback dismiss-crash();
+    callback send-crash();
+    callback copy-crash();
+    callback open-link(string);
+    callback reload-accounts();
+    callback switch-account(string);
+    callback remove-account(string);
+    callback pick-folder();
+    callback collect-garbage();
+    callback save-general();
+    callback save-build();
+    callback repair-build();
+    callback feature-pick(string, string, bool, bool);
+    callback feature-none(string);
+    callback features-reset();
+    callback features-save();
+    callback library-search(string);
+    callback quit();
+    pure callback only-digits(string) -> string;
+}

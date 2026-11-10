@@ -1,0 +1,49 @@
+export global Theme {
+    out property <color> night: #0d0a09;
+    in-out property <color> bg: root.night;
+    in-out property <color> primary: #ecc275;
+    in-out property <color> primary-strong: #f4d089;
+    in-out property <color> primary-ink: #241705;
+    in-out property <color> login-surface: #1c1a19;
+    out property <color> primary-soft: primary.with-alpha(0.16);
+    out property <color> bg-tint: #17110d;
+    out property <color> surface: #ffffff0d;
+    out property <color> surface-2: #ffffff14;
+    out property <color> surface-3: #ffffff1f;
+    out property <color> panel: root.night.with-alpha(0.74);
+    out property <color> panel-2: root.night.with-alpha(0.86);
+    out property <color> border: #ffffff14;
+    out property <color> border-strong: #ffffff29;
+    out property <color> text: #f4f0ea;
+    out property <color> dim: #9c9186;
+    out property <color> mute: #897e75;
+    out property <color> online: #67d391;
+    out property <color> warn: #e6b450;
+    out property <color> danger: #e5836f;
+    out property <color> scrim: root.night;
+
+    out property <length> radius: 4px;
+    out property <length> radius-sm: 10px;
+    out property <length> radius-md: 14px;
+    out property <length> radius-lg: 20px;
+
+    out property <string> sans: "Inter Variable";
+    out property <string> mono: "JetBrains Mono";
+    out property <string> tabular: "Inter Tabular";
+    out property <float> sans-natural: 1.2099609375;
+    out property <float> mono-natural: 1.32;
+    out property <length> log-line: 18px;
+    out property <duration> modal-exit: 150ms;
+}
+
+export global Media {
+    in property <image> hero;
+    in property <image> hero-blurred;
+    in property <image> backdrop;
+    in property <image> logo;
+    in property <image> logo-mark;
+    in property <bool> has-logo;
+    in property <string> name: "LAMINARA";
+    in property <string> tagline;
+    in property <string> title: "Laminara";
+}

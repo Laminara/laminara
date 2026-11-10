@@ -1,0 +1,89 @@
+import { Theme } from "theme.slint";
+
+export global LogPick {
+    in-out property <int> anchor: -1;
+    in-out property <int> focus: -1;
+    in-out property <bool> dragging;
+    in-out property <length> drag-y;
+    callback copy();
+    public function clear() {
+        root.anchor = -1;
+        root.focus = -1;
+        root.dragging = false;
+    }
+    public function shift(by: int) {
+        if root.anchor >= 0 {
+            root.anchor = root.anchor - by;
+            root.focus = root.focus - by;
+            if max(root.anchor, root.focus) < 0 {
+                root.clear();
+            } else {
+                root.anchor = max(root.anchor, 0);
+                root.focus = max(root.focus, 0);
+            }
+        }
+    }
+    public pure function holds(index: int) -> bool {
+        return root.anchor >= 0 && index >= min(root.anchor, root.focus) && index <= max(root.anchor, root.focus);
+    }
+}
+
+export component LogLine inherits Rectangle {
+    in property <int> index;
+    in property <string> text;
+    in property <styled-text> rich;
+    in property <bool> hit;
+    in property <int> level;
+    property <color> ink: root.level == 0 ? Theme.dim : root.level == 1 ? Theme.text.with-alpha(0.85) : root.level == 2 ? Theme.warn : Theme.danger;
+    property <bool> under: LogPick.dragging && LogPick.drag-y >= self.absolute-position.y && LogPick.drag-y < self.absolute-position.y + self.height;
+    changed under => {
+        if self.under {
+            LogPick.focus = root.index;
+        }
+    }
+    background: LogPick.holds(root.index) ? Theme.primary.with-alpha(0.18) : root.level == 3 ? Theme.danger.with-alpha(0.07) : transparent;
+    if root.level == 3: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.danger;
+    }
+    pick := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                if !(event.modifiers.shift && LogPick.anchor >= 0) {
+                    LogPick.anchor = root.index;
+                }
+                LogPick.focus = root.index;
+                LogPick.drag-y = self.absolute-position.y + self.mouse-y;
+                LogPick.dragging = true;
+            }
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                LogPick.dragging = false;
+            }
+        }
+        moved => {
+            if self.pressed {
+                LogPick.drag-y = self.absolute-position.y + self.mouse-y;
+            }
+        }
+    }
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        if !root.hit: Text {
+            text: root.text;
+            font-family: Theme.mono;
+            font-size: 12px;
+            line-height-factor: Theme.log-line / (12px * Theme.mono-natural);
+            wrap: word-wrap;
+            color: root.ink;
+        }
+        if root.hit: StyledText {
+            text: root.rich;
+            default-font-family: Theme.mono;
+            default-font-size: 12px;
+            default-color: root.ink;
+        }
+    }
+}

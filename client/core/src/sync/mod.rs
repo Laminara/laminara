@@ -244,7 +244,7 @@ impl Meter<'_> {
     fn lost(&self, bytes: u64) {
         let _ = self
             .bytes_done
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |done| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |done| {
                 Some(done.saturating_sub(bytes))
             });
     }

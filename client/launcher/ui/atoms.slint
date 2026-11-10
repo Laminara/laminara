@@ -1,0 +1,357 @@
+import { Theme, Media } from "theme.slint";
+
+export global Viewport {
+    in-out property <length> width;
+    in-out property <length> height;
+}
+
+export component Para inherits Text {
+    in property <length> leading: 0px;
+    in property <float> tracking: 0;
+    font-family: Theme.sans;
+    font-size: 14px;
+    color: Theme.text;
+    wrap: word-wrap;
+    line-height-factor: (root.leading > 0px ? root.leading : root.font-size * 1.5) / (root.font-size * Theme.sans-natural);
+    letter-spacing: root.font-size * root.tracking;
+}
+
+export component Label inherits Text {
+    in property <length> leading: 0px;
+    in property <float> tracking: 0;
+    property <length> line: root.leading > 0px ? root.leading : root.font-size * 1.5;
+    font-family: Theme.sans;
+    font-size: 14px;
+    color: Theme.text;
+    vertical-alignment: center;
+    line-height-factor: root.line / (root.font-size * Theme.sans-natural);
+    letter-spacing: root.font-size * root.tracking;
+    min-height: root.line;
+    preferred-height: root.line;
+    vertical-stretch: 0;
+}
+
+export component Icon inherits Rectangle {
+    in property <image> source;
+    in property <length> size: 16px;
+    in property <brush> colorize: Theme.dim;
+    width: root.size;
+    min-height: root.size;
+    preferred-height: root.size;
+    Image {
+        y: (parent.height - self.height) / 2;
+        width: root.size;
+        height: root.size;
+        source: root.source;
+        colorize: root.colorize;
+        image-fit: contain;
+    }
+}
+
+component Glow inherits Rectangle {
+    in property <color> tone;
+    width: 36px;
+    height: 36px;
+    background: @radial-gradient(circle, root.tone.with-alpha(0.6) 0%, root.tone.with-alpha(0.5) 15.7%, root.tone.with-alpha(0.34) 23.5%, root.tone.with-alpha(0.16) 35%, root.tone.with-alpha(0.055) 47%, root.tone.with-alpha(0.023) 55%, root.tone.with-alpha(0) 63%);
+}
+
+export component Dot inherits Rectangle {
+    in property <length> size: 4px;
+    in property <brush> fill: Theme.mute;
+    in property <bool> glow: false;
+    width: root.size;
+    min-height: root.size;
+    preferred-height: root.size;
+    if root.glow: Glow {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        tone: Theme.online;
+    }
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: root.size;
+        height: root.size;
+        border-radius: root.size / 2;
+        background: root.fill;
+    }
+}
+
+export component StatusDot inherits Dot {
+    size: 8px;
+}
+
+export component OnlineDot inherits Dot {
+    size: 8px;
+    fill: Theme.online;
+    glow: true;
+}
+
+export component PingDot inherits Rectangle {
+    in property <length> size: 10px;
+    in property <float> start-opacity: 0.7;
+    in property <bool> glow: true;
+    in property <color> tone: Theme.online;
+    property <float> phase: mod(animation-tick() / 1ms, 1000) / 750;
+    property <float> eased: root.phase >= 1 ? 1 : 1 - pow(1 - root.phase, 3);
+    property <length> ring: root.size * (1 + root.eased);
+    width: root.size;
+    min-height: root.size;
+    preferred-height: root.size;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.ring;
+        height: root.ring;
+        border-radius: root.ring / 2;
+        background: root.tone;
+        opacity: root.start-opacity * (1 - root.eased);
+    }
+    if root.glow: Glow {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        tone: root.tone;
+    }
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: root.size;
+        height: root.size;
+        border-radius: root.size / 2;
+        background: root.tone;
+    }
+}
+
+export component Scrims inherits Rectangle {
+    Rectangle {
+        background: @linear-gradient(90deg, Theme.bg 0%, Theme.scrim.with-alpha(0.82) 34%, Theme.scrim.with-alpha(0.28) 62%, Theme.scrim.with-alpha(0.35) 100%);
+    }
+    Rectangle {
+        background: @linear-gradient(180deg, Theme.scrim.with-alpha(0.7) 0%, Theme.scrim.with-alpha(0) 24%, Theme.scrim.with-alpha(0) 52%, Theme.bg 96%);
+    }
+}
+
+export component HeroMedia inherits Rectangle {
+    clip: true;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: Media.hero;
+        image-fit: cover;
+    }
+    Scrims { }
+}
+
+component FrozenScene inherits Rectangle {
+    in property <Point> origin;
+    x: -root.origin.x;
+    y: -root.origin.y;
+    width: Viewport.width;
+    height: Viewport.height;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: Media.hero-blurred;
+        image-fit: cover;
+    }
+    Scrims { }
+}
+
+component Arc inherits Rectangle {
+    in property <float> radius;
+    in property <int> line;
+    in property <bool> bottom;
+    in property <length> span-width;
+    in property <length> span-height;
+    property <float> offset: root.radius - root.line - 0.5;
+    property <length> inset: (root.radius - sqrt(max(0, root.radius * root.radius - root.offset * root.offset))) * 1px;
+    x: root.inset;
+    y: root.bottom ? root.span-height - (root.line + 1) * 1px : root.line * 1px;
+    width: root.span-width - 2 * root.inset;
+    height: 1px;
+    clip: true;
+}
+
+export component Backdrop inherits Rectangle {
+    in property <length> radius;
+    property <float> arc: floor(min(root.radius, root.width / 2, root.height / 2) / 1px);
+    Rectangle {
+        y: root.arc * 1px;
+        height: max(0px, root.height - 2 * root.arc * 1px);
+        clip: true;
+        middle := FrozenScene {
+            origin: parent.absolute-position;
+        }
+    }
+    for row in root.arc: top := Arc {
+        radius: root.arc;
+        line: row;
+        span-width: root.width;
+        span-height: root.height;
+        FrozenScene {
+            origin: top.absolute-position;
+        }
+    }
+    for row in root.arc: bottom := Arc {
+        radius: root.arc;
+        line: row;
+        span-width: root.width;
+        span-height: root.height;
+        bottom: true;
+        FrozenScene {
+            origin: bottom.absolute-position;
+        }
+    }
+}
+
+export component TopRoundedImage inherits Rectangle {
+    in property <image> source;
+    in property <length> radius;
+    property <float> arc: floor(min(root.radius, root.width / 2, root.height) / 1px);
+    Rectangle {
+        y: root.arc * 1px;
+        height: root.height - root.arc * 1px;
+        clip: true;
+        Image {
+            y: -root.arc * 1px;
+            width: root.width;
+            height: root.height;
+            source: root.source;
+            image-fit: cover;
+        }
+    }
+    for row in root.arc: strip := Arc {
+        radius: root.arc;
+        line: row;
+        span-width: root.width;
+        span-height: root.height;
+        Image {
+            x: -strip.x;
+            y: -strip.y;
+            width: root.width;
+            height: root.height;
+            source: root.source;
+            image-fit: cover;
+        }
+    }
+}
+
+export component Shadow inherits Rectangle {
+    in property <length> box-width;
+    in property <length> box-height;
+    property <float> strength: clamp((root.box-height - 60px) / 70px, 0, 1) * clamp((root.box-width - 60px) / 70px, 0, 1);
+    property <length> side: max(0px, root.box-height - 60px);
+    visible: root.strength > 0;
+    Rectangle {
+        x: 30px;
+        y: root.box-height;
+        width: max(0px, root.box-width - 60px);
+        height: 70px;
+        background: @linear-gradient(180deg, Colors.black.with-alpha(0.4 * root.strength) 0%, Colors.black.with-alpha(0.247 * root.strength) 25%, Colors.black.with-alpha(0.127 * root.strength) 50%, Colors.black.with-alpha(0.053 * root.strength) 75%, Colors.black.with-alpha(0) 100%);
+    }
+    Rectangle {
+        x: -40px;
+        y: root.box-height;
+        width: 70px;
+        height: 70px;
+        clip: true;
+        Rectangle {
+            x: 0;
+            y: -70px;
+            width: 140px;
+            height: 140px;
+            background: @radial-gradient(circle, Colors.black.with-alpha(0.2 * root.strength) 0%, Colors.black.with-alpha(0.064 * root.strength) 50%, Colors.black.with-alpha(0) 100%);
+        }
+    }
+    Rectangle {
+        x: root.box-width - 30px;
+        y: root.box-height;
+        width: 70px;
+        height: 70px;
+        clip: true;
+        Rectangle {
+            x: -70px;
+            y: -70px;
+            width: 140px;
+            height: 140px;
+            background: @radial-gradient(circle, Colors.black.with-alpha(0.2 * root.strength) 0%, Colors.black.with-alpha(0.064 * root.strength) 50%, Colors.black.with-alpha(0) 100%);
+        }
+    }
+    Rectangle {
+        x: -40px;
+        y: 60px;
+        width: 40px;
+        height: root.side;
+        background: @linear-gradient(90deg, Colors.black.with-alpha(0) 0%, Colors.black.with-alpha(0.061 * root.strength) 50%, Colors.black.with-alpha(0.157 * root.strength) 100%);
+    }
+    Rectangle {
+        x: root.box-width;
+        y: 60px;
+        width: 40px;
+        height: root.side;
+        background: @linear-gradient(270deg, Colors.black.with-alpha(0) 0%, Colors.black.with-alpha(0.061 * root.strength) 50%, Colors.black.with-alpha(0.157 * root.strength) 100%);
+    }
+}
+
+export component Panel inherits Rectangle {
+    in property <brush> fill;
+    in property <brush> stroke: Theme.border;
+    in property <length> radius: Theme.radius-lg;
+    in property <bool> shadow: true;
+    in property <bool> blur-behind: false;
+    if root.shadow: Shadow {
+        box-width: root.width;
+        box-height: root.height;
+    }
+    if root.blur-behind: Backdrop {
+        radius: root.radius;
+    }
+    Rectangle {
+        background: root.fill;
+        border-radius: root.radius;
+        border-width: 1px;
+        border-color: root.stroke;
+        VerticalLayout {
+            padding: 1px;
+            @children
+        }
+    }
+}
+
+export component ProgressBar inherits Rectangle {
+    in property <float> value;
+    in property <length> thickness: 4px;
+    height: root.thickness;
+    border-radius: root.thickness / 2;
+    background: Theme.surface-2;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.value, 0, 1);
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: Theme.primary;
+        animate width { duration: 300ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    }
+}
+
+export component Spinner inherits Rectangle {
+    in property <length> size: 20px;
+    property <[image]> frames: [
+        @image-url("../assets/icons/spinner-0.svg"),
+        @image-url("../assets/icons/spinner-1.svg"),
+        @image-url("../assets/icons/spinner-2.svg"),
+        @image-url("../assets/icons/spinner-3.svg"),
+        @image-url("../assets/icons/spinner-4.svg"),
+        @image-url("../assets/icons/spinner-5.svg"),
+    ];
+    property <int> frame: mod(floor(animation-tick() / 1ms / (500 / 6)), 6);
+    width: root.size;
+    min-height: root.size;
+    preferred-height: root.size;
+    Image {
+        y: (parent.height - self.height) / 2;
+        width: root.size;
+        height: root.size;
+        colorize: Theme.primary;
+        image-fit: contain;
+        source: root.frames[root.frame];
+    }
+}

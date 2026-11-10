@@ -1,0 +1,160 @@
+import { Theme, Media } from "theme.slint";
+import { Label, Icon, Shadow } from "atoms.slint";
+import { IconTap, ScrollArea } from "controls.slint";
+
+export component Modal inherits Rectangle {
+    in property <bool> open;
+    in property <bool> compact: true;
+    callback close();
+
+    property <length> inner-width: root.width - 64px;
+    property <length> inner-height: root.height - 64px;
+    property <length> frame-width: root.compact ? min(560px, root.inner-width) : root.inner-width * 0.84;
+    property <length> frame-height: root.compact ? min(root.inner-height * 0.85, stack.preferred-height) : root.inner-height * 0.88;
+    property <float> shown: root.open ? 1 : 0;
+
+    visible: root.shown > 0.001;
+    opacity: root.shown;
+    animate shown {
+        duration: root.open ? 200ms : Theme.modal-exit;
+        easing: root.open ? cubic-bezier(0.2, 0, 0, 1) : ease-in;
+    }
+
+    Rectangle {
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: Media.backdrop;
+            image-fit: fill;
+        }
+
+        TouchArea {
+            clicked => {
+                if root.open {
+                    root.close();
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: (root.width - root.frame-width) / 2;
+        y: (root.height - root.frame-height) / 2 + 6px * (1 - root.shown);
+        width: root.frame-width;
+        height: root.frame-height;
+        Shadow {
+            box-width: parent.width;
+            box-height: parent.height;
+        }
+        Rectangle {
+            border-radius: Theme.radius-lg;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.bg-tint;
+            TouchArea { }
+            stack := VerticalLayout {
+                padding: 1px;
+                @children
+            }
+        }
+    }
+}
+
+export component ModalHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    callback close();
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 18px;
+        padding-top: 20px;
+        padding-bottom: 21px;
+        spacing: 16px;
+        VerticalLayout {
+            alignment: start;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Label {
+                text: root.title;
+                font-size: 18px;
+                leading: 28px;
+                font-weight: 700;
+                overflow: elide;
+            }
+            if root.subtitle != "": Label {
+                text: root.subtitle;
+                leading: 20px;
+                color: Theme.dim;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: start;
+            IconTap {
+                width: 36px;
+                accessible-label: "Закрыть";
+                height: 36px;
+                border-radius: Theme.radius-md;
+                icon: @image-url("../assets/icons/x-regular.svg");
+                icon-size: 18px;
+                clicked => {
+                    root.close();
+                }
+            }
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+export component ModalBody inherits Rectangle {
+    in property <length> pad-x: 28px;
+    in property <length> pad-y: 24px;
+    vertical-stretch: 1;
+    preferred-height: content.preferred-height;
+    min-height: 0px;
+
+    ScrollArea {
+        content-height: content.preferred-height;
+        content := VerticalLayout {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: self.preferred-height;
+            padding-left: root.pad-x;
+            padding-right: root.pad-x;
+            padding-top: root.pad-y;
+            padding-bottom: root.pad-y;
+            @children
+        }
+    }
+}
+
+export component ModalFooter inherits Rectangle {
+    in property <string> note;
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.border;
+    }
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 28px;
+        padding-top: 17px;
+        padding-bottom: 16px;
+        spacing: 8px;
+        if root.note != "": Label {
+            text: root.note;
+            font-size: 12px;
+            leading: 16px;
+            color: Theme.mute;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        @children
+    }
+}
