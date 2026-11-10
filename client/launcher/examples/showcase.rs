@@ -319,7 +319,7 @@ fn home(window: &MainWindow) {
     store.set_library(ModelRc::from(grid));
     store.set_builds(ModelRc::new(VecModel::from(items)));
     store.set_running_build("Anarchy Universe".into());
-    store.set_version("1.16.0".into());
+    store.set_version(env!("LAMINARA_VERSION").into());
     store.set_accounts(ModelRc::new(VecModel::from(vec![
         AccountItem {
             uuid: "a".into(),
