@@ -1,7 +1,7 @@
-import { Theme, Media } from "theme.slint";
+import { Theme, Media, Store, BuildItem, NewsItem, Install, ModalKind, Phase } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { Label, Para, Icon, Dot, StatusDot, OnlineDot, PingDot, Panel, Viewport, TopRoundedImage } from "atoms.slint";
 import { Button, ButtonKind, HoverSurface, IconTap } from "controls.slint";
-import { Store, BuildItem, NewsItem, Install, ModalKind, Phase } from "store.slint";
 
 export component BrandMark inherits HorizontalLayout {
     spacing: 12px;
@@ -19,11 +19,11 @@ export component BrandMark inherits HorizontalLayout {
     if !Media.has-logo: Rectangle {
         width: 36px;
         height: 36px;
-        border-radius: Theme.radius-md;
+        border-radius: Look.radius-md;
         background: Theme.primary;
         Icon {
             size: 20px;
-            source: @image-url("../assets/icons/brand-mark.svg");
+            source: @image-url("assets/icons/brand-mark.svg");
             colorize: Theme.primary-ink;
         }
     }
@@ -58,7 +58,7 @@ export component Header inherits Rectangle {
             horizontal-stretch: 0;
             if Store.has-total: Panel {
                 height: 40px;
-                fill: Theme.panel;
+                fill: Look.panel;
                 radius: 20px;
                 shadow: false;
                 blur-behind: true;
@@ -71,23 +71,23 @@ export component Header inherits Rectangle {
                     HorizontalLayout {
                         Label {
                             text: Store.total-online;
-                            font-family: Theme.tabular;
+                            font-family: Look.tabular;
                             font-weight: 600;
                             leading: 20px;
                         }
                         Label {
                             text: " / " + Store.total-max;
-                            font-family: Theme.tabular;
+                            font-family: Look.tabular;
                             font-weight: 600;
                             leading: 20px;
-                            color: Theme.dim;
+                            color: Look.dim;
                         }
                     }
                     Label {
                         text: "ИГРАЮТ";
                         font-size: 11px;
                         tracking: 0.05;
-                        color: Theme.dim;
+                        color: Look.dim;
                     }
                 }
             }
@@ -97,9 +97,9 @@ export component Header inherits Rectangle {
                 height: 40px;
                 border-radius: 20px;
                 border-width: 1px;
-                border-color: Theme.border;
-                rest-fill: Theme.surface;
-                icon: @image-url("../assets/icons/gear-regular.svg");
+                border-color: Look.border;
+                rest-fill: Look.surface;
+                icon: @image-url("assets/icons/gear-regular.svg");
                 icon-size: 18px;
                 clicked => {
                     Store.open-modal(ModalKind.general);
@@ -109,9 +109,9 @@ export component Header inherits Rectangle {
                 height: 40px;
                 border-radius: 20px;
                 border-width: 1px;
-                border-color: Theme.border;
-                rest: Theme.surface;
-                hover: Theme.surface-2;
+                border-color: Look.border;
+                rest: Look.surface;
+                hover: Look.surface-2;
                 clicked => {
                     Store.toggle-menu();
                 }
@@ -126,7 +126,7 @@ export component Header inherits Rectangle {
                             width: 32px;
                             height: 32px;
                             border-radius: 16px;
-                            background: Theme.surface-2;
+                            background: Look.surface-2;
                             Image {
                                 width: parent.width;
                                 height: parent.height;
@@ -159,7 +159,7 @@ export component Header inherits Rectangle {
                     }
                     Icon {
                         size: 14px;
-                        source: Store.menu-open ? @image-url("../assets/icons/caret-up-regular.svg") : @image-url("../assets/icons/caret-down-regular.svg");
+                        source: Store.menu-open ? @image-url("assets/icons/caret-up-regular.svg") : @image-url("assets/icons/caret-down-regular.svg");
                     }
                 }
             }
@@ -174,7 +174,7 @@ component MenuEntry inherits HoverSurface {
     accessible-label: root.label;
     height: 40px;
     rest: transparent;
-    hover: Theme.surface-2;
+    hover: Look.surface-2;
     opacity: self.enabled ? 1 : 0.5;
     HorizontalLayout {
         padding-left: 16px;
@@ -183,12 +183,12 @@ component MenuEntry inherits HoverSurface {
         if root.has-icon: Icon {
             size: 16px;
             source: root.icon;
-            colorize: root.hovered ? Theme.text : Theme.dim;
+            colorize: root.hovered ? Look.text : Look.dim;
         }
         Label {
             text: root.label;
             leading: 20px;
-            color: root.hovered ? Theme.text : Theme.dim;
+            color: root.hovered ? Look.text : Look.dim;
             horizontal-stretch: 1;
             animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
         }
@@ -208,7 +208,7 @@ export component AccountMenu inherits Rectangle {
         y: root.anchor-top + 8px;
         width: 176px;
         height: self.preferred-height;
-        fill: Theme.bg-tint;
+        fill: Look.bg-tint;
         VerticalLayout {
             padding-top: 4px;
             padding-bottom: 4px;
@@ -222,7 +222,7 @@ export component AccountMenu inherits Rectangle {
             MenuEntry {
                 label: "Выход";
                 has-icon: true;
-                icon: @image-url("../assets/icons/sign-out-regular.svg");
+                icon: @image-url("assets/icons/sign-out-regular.svg");
                 enabled: !Store.busy && Store.phase == Phase.home;
                 opacity: 1;
                 clicked => {
@@ -237,7 +237,7 @@ export component Meta inherits Label {
     font-size: 11px;
     font-weight: 600;
     tracking: 0.24;
-    color: Theme.dim;
+    color: Look.dim;
 }
 
 component EmptyHero inherits VerticalLayout {
@@ -255,7 +255,7 @@ component EmptyHero inherits VerticalLayout {
             Para {
                 text: "Для вашего аккаунта сборки ещё не открыты. Напишите администратору проекта — он выдаёт доступ вручную.";
                 leading: 20px;
-                color: Theme.dim;
+                color: Look.dim;
             }
         }
     }
@@ -300,22 +300,22 @@ component BuildHero inherits VerticalLayout {
         HorizontalLayout {
             Label {
                 text: Store.build.online;
-                font-family: Theme.tabular;
+                font-family: Look.tabular;
                 font-weight: 600;
                 leading: 20px;
             }
             Label {
                 text: " / " + Store.build.max;
-                font-family: Theme.tabular;
+                font-family: Look.tabular;
                 font-weight: 600;
                 leading: 20px;
-                color: Theme.dim;
+                color: Look.dim;
             }
         }
         Label {
             text: "играют";
             leading: 20px;
-            color: Theme.dim;
+            color: Look.dim;
         }
     }
     HorizontalLayout {
@@ -330,7 +330,7 @@ component BuildHero inherits VerticalLayout {
             text-leading: 21px;
             text: Store.build.blocked ? Store.build.badge.to-uppercase() : Store.action-label;
             has-icon: true;
-            icon: @image-url("../assets/icons/play-fill.svg");
+            icon: @image-url("assets/icons/play-fill.svg");
             enabled: !Store.build.blocked;
             clicked => {
                 Store.play();
@@ -340,12 +340,12 @@ component BuildHero inherits VerticalLayout {
             width: 52px;
             accessible-label: "Настройки сборки";
             height: 52px;
-            border-radius: Theme.radius-md;
+            border-radius: Look.radius-md;
             border-width: 1px;
-            border-color: Theme.border;
-            rest-fill: Theme.surface-2;
-            hover-fill: Theme.surface-3;
-            icon: @image-url("../assets/icons/gear-regular.svg");
+            border-color: Look.border;
+            rest-fill: Look.surface-2;
+            hover-fill: Look.surface-3;
+            icon: @image-url("assets/icons/gear-regular.svg");
             icon-size: 20px;
             clicked => {
                 Store.open-modal(ModalKind.build);
@@ -353,11 +353,11 @@ component BuildHero inherits VerticalLayout {
         }
         if Store.build.has-features: mods := HoverSurface {
             height: 52px;
-            border-radius: Theme.radius-md;
+            border-radius: Look.radius-md;
             border-width: 1px;
-            border-color: Theme.border;
-            rest: Theme.surface-2;
-            hover: Theme.surface-3;
+            border-color: Look.border;
+            rest: Look.surface-2;
+            hover: Look.surface-3;
             clicked => {
                 Store.open-modal(ModalKind.features);
             }
@@ -367,14 +367,14 @@ component BuildHero inherits VerticalLayout {
                 spacing: 8px;
                 Icon {
                     size: 18px;
-                    source: @image-url("../assets/icons/sliders-horizontal-regular.svg");
-                    colorize: mods.hovered ? Theme.text : Theme.dim;
+                    source: @image-url("assets/icons/sliders-horizontal-regular.svg");
+                    colorize: mods.hovered ? Look.text : Look.dim;
                 }
                 Label {
                     text: "Моды";
                     font-weight: 500;
                     leading: 20px;
-                    color: mods.hovered ? Theme.text : Theme.dim;
+                    color: mods.hovered ? Look.text : Look.dim;
                     animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
                 }
             }
@@ -392,11 +392,11 @@ component CardSurface inherits HoverSurface {
     in property <bool> selected;
     accessible-label: root.item.name;
     hint: root.item.name;
-    rest: root.selected ? Theme.primary-soft : Theme.surface;
-    hover: root.selected ? Theme.primary-soft : Theme.surface-2;
-    border-radius: Theme.radius-lg;
+    rest: root.selected ? Look.primary-soft : Look.surface;
+    hover: root.selected ? Look.primary-soft : Look.surface-2;
+    border-radius: Look.radius-lg;
     border-width: 1px;
-    border-color: root.selected ? Theme.primary.with-alpha(0.5) : Theme.border;
+    border-color: root.selected ? Theme.primary.with-alpha(0.5) : Look.border;
     opacity: root.item.blocked ? 0.5 : 1;
 }
 
@@ -406,12 +406,12 @@ component OnlineMark inherits VerticalLayout {
         width: 6px;
         height: 6px;
         border-radius: 3px;
-        background: Theme.online;
+        background: Look.online;
     }
 }
 
 export component StripCard inherits CardSurface {
-    property <color> faint: root.selected ? Theme.dim : Theme.mute;
+    property <color> faint: root.selected ? Look.dim : Look.mute;
     VerticalLayout {
         padding: 17px;
         spacing: 12px;
@@ -434,7 +434,7 @@ export component StripCard inherits CardSurface {
                     font-size: 10px;
                     font-weight: 600;
                     tracking: 0.2;
-                    color: Theme.dim;
+                    color: Look.dim;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
@@ -442,8 +442,8 @@ export component StripCard inherits CardSurface {
             if root.item.blocked: VerticalLayout {
                 alignment: center;
                 Rectangle {
-                    border-radius: Theme.radius-md;
-                    background: Theme.surface-2;
+                    border-radius: Look.radius-md;
+                    background: Look.surface-2;
                     HorizontalLayout {
                         padding-left: 8px;
                         padding-right: 8px;
@@ -454,7 +454,7 @@ export component StripCard inherits CardSurface {
                             font-size: 9px;
                             font-weight: 700;
                             tracking: 0.05;
-                            color: Theme.mute;
+                            color: Look.mute;
                         }
                     }
                 }
@@ -464,11 +464,11 @@ export component StripCard inherits CardSurface {
                 Rectangle {
                     width: 23px;
                     height: 15px;
-                    border-radius: Theme.radius-md;
+                    border-radius: Look.radius-md;
                     background: Theme.primary;
                     Icon {
                         size: 11px;
-                        source: @image-url("../assets/icons/check-bold.svg");
+                        source: @image-url("assets/icons/check-bold.svg");
                         colorize: Theme.primary-ink;
                     }
                 }
@@ -476,8 +476,8 @@ export component StripCard inherits CardSurface {
             if !root.item.blocked && !root.selected: VerticalLayout {
                 alignment: center;
                 StatusDot {
-                    fill: root.item.install == Install.installed ? Theme.online
-                        : root.item.install == Install.missing ? Theme.mute : Theme.primary;
+                    fill: root.item.install == Install.installed ? Look.online
+                        : root.item.install == Install.missing ? Look.mute : Theme.primary;
                 }
             }
         }
@@ -494,14 +494,14 @@ export component StripCard inherits CardSurface {
             if root.item.has-players: OnlineMark { }
             if root.item.has-players: Label {
                 text: root.item.online;
-                font-family: Theme.tabular;
+                font-family: Look.tabular;
                 font-size: 12px;
                 leading: 16px;
-                color: Theme.dim;
+                color: Look.dim;
             }
             if root.item.has-players: Label {
                 text: "/ " + root.item.max;
-                font-family: Theme.tabular;
+                font-family: Look.tabular;
                 font-size: 12px;
                 leading: 16px;
                 color: root.faint;
@@ -521,7 +521,7 @@ export component LibraryCard inherits CardSurface {
                 font-size: 10px;
                 font-weight: 600;
                 tracking: 0.18;
-                color: Theme.mute;
+                color: Look.mute;
                 horizontal-stretch: 1;
             }
             if root.item.blocked: Label {
@@ -529,7 +529,7 @@ export component LibraryCard inherits CardSurface {
                 font-size: 10px;
                 font-weight: 700;
                 tracking: 0.05;
-                color: Theme.mute;
+                color: Look.mute;
             }
             if !root.item.blocked && root.item.has-players: HorizontalLayout {
                 spacing: 4px;
@@ -537,7 +537,7 @@ export component LibraryCard inherits CardSurface {
                 Label {
                     text: root.item.online + " / " + root.item.max;
                     font-size: 11px;
-                    color: Theme.dim;
+                    color: Look.dim;
                 }
             }
         }
@@ -551,7 +551,7 @@ export component LibraryCard inherits CardSurface {
             text: root.item.blocked ? root.item.reason : root.item.size;
             font-size: 12px;
             leading: 16px;
-            color: Theme.dim;
+            color: Look.dim;
         }
     }
 }
@@ -590,7 +590,7 @@ export component BuildStrip inherits VerticalLayout {
                 text: "ВСЕ СБОРКИ (" + Store.build-count + ")";
                 font-size: 11px;
                 tracking: 0.05;
-                color: all.hovered ? Theme.text : Theme.mute;
+                color: all.hovered ? Look.text : Look.mute;
                 animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
             }
         }
@@ -620,7 +620,7 @@ export component RunningBar inherits HorizontalLayout {
     alignment: center;
     Panel {
         radius: 27px;
-        fill: Theme.panel-2;
+        fill: Look.panel-2;
         stroke: Theme.primary.with-alpha(0.4);
         blur-behind: true;
         HorizontalLayout {
@@ -654,7 +654,7 @@ export component RunningBar inherits HorizontalLayout {
                     text: "Консоль";
                     text-tracking: 0;
                     has-icon: true;
-                    icon: @image-url("../assets/icons/terminal-window-regular.svg");
+                    icon: @image-url("assets/icons/terminal-window-regular.svg");
                     icon-size: 15px;
                     clicked => {
                         Store.open-console();
@@ -678,7 +678,7 @@ export component RunningBar inherits HorizontalLayout {
                         spacing: 8px;
                         Icon {
                             size: 13px;
-                            source: @image-url("../assets/icons/square-fill.svg");
+                            source: @image-url("assets/icons/square-fill.svg");
                             colorize: Theme.primary-ink;
                         }
                         Label {
@@ -697,7 +697,7 @@ export component RunningBar inherits HorizontalLayout {
 export component NewsCard inherits Panel {
     in property <NewsItem> item;
     in property <bool> compact: true;
-    fill: Theme.panel;
+    fill: Look.panel;
     shadow: false;
     blur-behind: root.compact;
     VerticalLayout {
@@ -711,7 +711,7 @@ export component NewsCard inherits Panel {
             Rectangle {
                 y: parent.height - 1px;
                 height: 1px;
-                background: Theme.border;
+                background: Look.border;
             }
         }
         VerticalLayout {
@@ -721,8 +721,8 @@ export component NewsCard inherits Panel {
                 spacing: 8px;
                 alignment: start;
                 if root.item.tag != "": Rectangle {
-                    border-radius: Theme.radius;
-                    background: Theme.surface-2;
+                    border-radius: Look.radius;
+                    background: Look.surface-2;
                     HorizontalLayout {
                         padding-left: 6px;
                         padding-right: 6px;
@@ -742,7 +742,7 @@ export component NewsCard inherits Panel {
                     font-size: 10px;
                     font-weight: 600;
                     tracking: 0.18;
-                    color: Theme.mute;
+                    color: Look.mute;
                 }
             }
             Para {
@@ -755,7 +755,7 @@ export component NewsCard inherits Panel {
                 text: root.item.body;
                 font-size: root.compact ? 12px : 14px;
                 leading: root.compact ? 19.5px : 22.75px;
-                color: Theme.dim;
+                color: Look.dim;
                 max-lines: root.compact ? 3 : 0;
                 overflow: elide;
             }
@@ -779,7 +779,7 @@ export component NewsCard inherits Panel {
                         }
                         Icon {
                             size: 12px;
-                            source: @image-url("../assets/icons/arrow-up-right-bold.svg");
+                            source: @image-url("assets/icons/arrow-up-right-bold.svg");
                             colorize: Theme.primary;
                         }
                     }
@@ -794,12 +794,12 @@ component NewsRow inherits HoverSurface {
     accessible-label: root.item.title;
     rest: transparent;
     hover: transparent;
-    border-radius: Theme.radius-lg;
+    border-radius: Look.radius-lg;
     clicked => {
         Store.open-modal(ModalKind.news);
     }
     Panel {
-        fill: root.hovered ? Theme.panel-2 : Theme.panel;
+        fill: root.hovered ? Look.panel-2 : Look.panel;
         shadow: false;
         blur-behind: true;
         HorizontalLayout {
@@ -821,13 +821,13 @@ component NewsRow inherits HoverSurface {
                     text: root.item.caption.to-uppercase();
                     font-size: 10px;
                     tracking: 0.14;
-                    color: Theme.mute;
+                    color: Look.mute;
                 }
             }
             Icon {
                 size: 12px;
-                source: @image-url("../assets/icons/caret-right-bold.svg");
-                colorize: Theme.mute;
+                source: @image-url("assets/icons/caret-right-bold.svg");
+                colorize: Look.mute;
             }
         }
     }
@@ -852,12 +852,12 @@ export component NewsPanel inherits VerticalLayout {
                 alignment: start;
                 Icon {
                     size: 14px;
-                    source: @image-url("../assets/icons/newspaper-bold.svg");
-                    colorize: head.hovered ? Theme.text : Theme.dim;
+                    source: @image-url("assets/icons/newspaper-bold.svg");
+                    colorize: head.hovered ? Look.text : Look.dim;
                 }
                 Meta {
                     text: "НОВОСТИ";
-                    color: head.hovered ? Theme.text : Theme.dim;
+                    color: head.hovered ? Look.text : Look.dim;
                     animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
                 }
                 if Store.unread > 0: VerticalLayout {
@@ -874,7 +874,7 @@ export component NewsPanel inherits VerticalLayout {
                 text: "ВСЕ (" + Store.news.length + ")";
                 font-size: 11px;
                 font-weight: 600;
-                color: Theme.mute;
+                color: Look.mute;
             }
         }
     }

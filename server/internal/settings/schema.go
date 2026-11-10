@@ -440,6 +440,8 @@ var schema = []Section{
 			{Key: "dir", Label: "Папка лаунчеров", Kind: KindText},
 			{Key: "endpoints", Label: "Адреса для игроков", Kind: KindList, Hint: "Куда лаунчер ходит на сервер, например https://launcher.example.com. Этот адрес запекается в лаунчер, менять его потом — только новой сборкой."},
 			{Key: "autoBake", Label: "Пересобирать при обновлении", Kind: KindBool, Default: "true", Hint: "После обновления сервера перепечь и выпустить лаунчер заново — но только если его уже выпускали."},
+			{Key: "templates.repo", Label: "Репозиторий шаблонов", Kind: KindText, Hint: "Откуда брать готовый лаунчер, например Laminara/launcher-myproject для своего дизайна. Пусто — общий лаунчер Laminara."},
+			{Key: "templates.token", Label: "Токен репозитория", Kind: KindSecret, Hint: "GitHub-токен только на чтение, если репозиторий шаблонов закрытый."},
 		},
 	},
 	{

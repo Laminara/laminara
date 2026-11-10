@@ -30,26 +30,52 @@ import (
 )
 
 func fakeReleases(t *testing.T, tag string, templates map[string][]byte) *httptest.Server {
+	return fakeReleasesOf(t, "owner/repo", "", tag, templates)
+}
+
+func fakeReleasesOf(t *testing.T, repo, token, tag string, templates map[string][]byte) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
+	allowed := func(r *http.Request) bool {
+		return token == "" || r.Header.Get("Authorization") == "Bearer "+token
+	}
+	files := map[string][]byte{}
 	var checksums strings.Builder
 	for name, body := range templates {
 		digest := sha256.Sum256(body)
 		fmt.Fprintf(&checksums, "%s  %s\n", hex.EncodeToString(digest[:]), name)
+		files[name] = body
+	}
+	files["checksums.txt"] = []byte(checksums.String())
+	assets := []map[string]string{}
+	for name, body := range files {
 		mux.HandleFunc("/assets/"+name, func(w http.ResponseWriter, _ *http.Request) {
+			if token != "" {
+				http.NotFound(w, nil)
+				return
+			}
 			w.Write(body)
 		})
+		mux.HandleFunc("/repos/"+repo+"/releases/assets/"+name, func(w http.ResponseWriter, r *http.Request) {
+			if !allowed(r) || r.Header.Get("Accept") != "application/octet-stream" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write(body)
+		})
+		assets = append(assets, map[string]string{
+			"name":                 name,
+			"browser_download_url": server.URL + "/assets/" + name,
+			"url":                  server.URL + "/repos/" + repo + "/releases/assets/" + name,
+		})
 	}
-	mux.HandleFunc("/assets/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(checksums.String()))
-	})
-	mux.HandleFunc("/repos/owner/repo/releases/tags/"+tag, func(w http.ResponseWriter, _ *http.Request) {
-		assets := []map[string]string{{"name": "checksums.txt", "browser_download_url": server.URL + "/assets/checksums.txt"}}
-		for name := range templates {
-			assets = append(assets, map[string]string{"name": name, "browser_download_url": server.URL + "/assets/" + name})
+	mux.HandleFunc("/repos/"+repo+"/releases/tags/"+tag, func(w http.ResponseWriter, r *http.Request) {
+		if !allowed(r) {
+			http.NotFound(w, r)
+			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"tag_name": tag, "assets": assets})
 	})
@@ -253,18 +279,20 @@ func TestBuildCachesTheTemplateItAlreadyDownloaded(t *testing.T) {
 
 	document := demoDocument()
 	document.Endpoints[0].BaseURL = "https://second.example"
-	service.SetBakery(&Bakery{
+	bakery := &Bakery{
 		Repo:     "owner/repo",
 		Version:  "1.2.4",
 		API:      releases.URL,
 		HTTP:     releases.Client(),
 		Document: func() (clientconfig.Document, error) { return document, nil },
-	})
-	if err := os.MkdirAll(filepath.Join(dir, templatesDir, "1.2.4"), 0o755); err != nil {
+	}
+	service.SetBakery(bakery)
+	cache := bakery.templateDir(dir, "1.2.4")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for name, body := range templates {
-		if err := os.WriteFile(filepath.Join(dir, templatesDir, "1.2.4", name), body, 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(cache, name), body, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -377,5 +405,42 @@ func TestOperatorVersionDoesNotChooseTheTemplateRelease(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "9.9.9")); err != nil {
 		t.Fatalf("версия оператора не собралась: %v", err)
+	}
+}
+
+func TestBuildTakesTheTemplateFromAPrivateRepository(t *testing.T) {
+	templates := map[string][]byte{
+		linuxTemplate:   []byte("custom design linux template"),
+		windowsTemplate: []byte("custom design windows template"),
+	}
+	releases := fakeReleasesOf(t, "studio/launcher-skin", "read-only", "v1.2.3", templates)
+	service, dir := bakingService(t, releases, demoDocument())
+	service.SetBakery(&Bakery{
+		Repo:     "studio/launcher-skin",
+		Token:    "read-only",
+		Version:  "1.2.3",
+		API:      releases.URL,
+		HTTP:     releases.Client(),
+		Document: func() (clientconfig.Document, error) { return demoDocument(), nil },
+	})
+
+	var out bytes.Buffer
+	if err := service.build(context.Background(), nil, &out); err != nil {
+		t.Fatalf("a private template must download with the token: %v\n%s", err, out.String())
+	}
+	image, err := os.ReadFile(filepath.Join(dir, "1.2.3", "Пример"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(image, templates[linuxTemplate]) {
+		t.Fatal("the launcher must be baked from the private template")
+	}
+}
+
+func TestTemplatesOfDifferentRepositoriesDoNotShareTheCache(t *testing.T) {
+	shared := &Bakery{Repo: "Laminara/laminara"}
+	custom := &Bakery{Repo: "studio/launcher-skin"}
+	if shared.templateDir("root", "2.0.0") == custom.templateDir("root", "2.0.0") {
+		t.Fatal("a custom design must never be served from the shared template cache")
 	}
 }

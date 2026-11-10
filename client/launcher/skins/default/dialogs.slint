@@ -1,26 +1,26 @@
-import { Theme } from "theme.slint";
+import { Theme, Store, Report, FeatureRow, BuildItem, NewsPair, AccountItem } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { Label, Para, Icon, Panel, Viewport } from "atoms.slint";
 import { Button, ButtonKind, HoverSurface, HintArea, Switch, TextField, RangeSlider, ScrollArea } from "controls.slint";
 import { LogLine } from "log.slint";
 import { ModalHeader, ModalBody, ModalFooter } from "modal.slint";
-import { Store, Report, FeatureRow, BuildItem, NewsPair, AccountItem } from "store.slint";
 import { LibraryCard, NewsCard } from "home.slint";
 import { CredentialsForm } from "overlays.slint";
 
 component Small inherits Para {
     font-size: 12px;
     leading: 16px;
-    color: Theme.dim;
+    color: Look.dim;
 }
 
 component Note inherits Label {
     leading: 20px;
-    color: Theme.dim;
+    color: Look.dim;
 }
 
 component Divider inherits Rectangle {
     height: 1px;
-    background: Theme.border;
+    background: Look.border;
 }
 
 component SectionTitle inherits Label {
@@ -32,8 +32,8 @@ component Trouble inherits VerticalLayout {
     in property <string> text;
     padding-bottom: 16px;
     Rectangle {
-        border-radius: Theme.radius-lg;
-        background: Theme.danger.with-alpha(0.15);
+        border-radius: Look.radius-lg;
+        background: Look.danger.with-alpha(0.15);
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 12px;
@@ -42,7 +42,7 @@ component Trouble inherits VerticalLayout {
             Para {
                 text: root.text;
                 leading: 20px;
-                color: Theme.danger;
+                color: Look.danger;
             }
         }
     }
@@ -51,16 +51,16 @@ component Trouble inherits VerticalLayout {
 component Notice inherits Rectangle {
     in property <string> text;
     in property <bool> fault;
-    border-radius: Theme.radius-md;
+    border-radius: Look.radius-md;
     border-width: root.fault ? 0px : 1px;
-    border-color: Theme.border;
-    background: root.fault ? Theme.danger.with-alpha(0.15) : Theme.surface-2;
+    border-color: Look.border;
+    background: root.fault ? Look.danger.with-alpha(0.15) : Look.surface-2;
     HorizontalLayout {
         padding: root.fault ? 12px : 13px;
         Para {
             text: root.text;
             leading: 20px;
-            color: root.fault ? Theme.danger : Theme.dim;
+            color: root.fault ? Look.danger : Look.dim;
         }
     }
 }
@@ -71,7 +71,7 @@ component SmallNote inherits VerticalLayout {
     padding-top: 8px;
     Small {
         text: root.text;
-        color: root.fault ? Theme.danger : Theme.dim;
+        color: root.fault ? Look.danger : Look.dim;
     }
 }
 
@@ -81,7 +81,7 @@ component AccountsError inherits VerticalLayout {
     Para {
         text: Store.accounts-error;
         leading: 20px;
-        color: Theme.danger;
+        color: Look.danger;
     }
     HorizontalLayout {
         alignment: start;
@@ -133,7 +133,7 @@ component RemovalConfirm inherits VerticalLayout {
 component AccountCard inherits Panel {
     in property <AccountItem> account;
     in property <bool> blocked;
-    fill: Theme.surface;
+    fill: Look.surface;
     shadow: false;
     VerticalLayout {
         padding: 16px;
@@ -144,7 +144,7 @@ component AccountCard inherits Panel {
                 width: 40px;
                 height: 40px;
                 border-radius: 20px;
-                background: Theme.surface-2;
+                background: Look.surface-2;
                 Label {
                     text: root.account.initial;
                     font-weight: 600;
@@ -167,12 +167,12 @@ component AccountCard inherits Panel {
                     text: root.account.current ? "Текущий аккаунт" : "Вход сохранён";
                     font-size: 12px;
                     leading: 16px;
-                    color: Theme.dim;
+                    color: Look.dim;
                 }
             }
             if root.account.current: Icon {
                 size: 18px;
-                source: @image-url("../assets/icons/check-regular.svg");
+                source: @image-url("assets/icons/check-regular.svg");
                 colorize: Theme.primary;
             }
         }
@@ -204,7 +204,7 @@ component AccountCard inherits Panel {
                 small: true;
                 text: "Удалить";
                 has-icon: true;
-                icon: @image-url("../assets/icons/trash-regular.svg");
+                icon: @image-url("assets/icons/trash-regular.svg");
                 enabled: !Store.busy;
                 clicked => {
                     Store.accounts-confirm = root.account.uuid;
@@ -228,7 +228,7 @@ component AccountsList inherits VerticalLayout {
     if root.settled: Para {
         text: Store.multi-account ? "Сохранено " + Store.accounts.length + " из " + Store.max-accounts + "." : "Проект отключил несколько аккаунтов. Сохранённые входы можно удалить.";
         leading: 20px;
-        color: Theme.dim;
+        color: Look.dim;
     }
     for account in Store.accounts: AccountCard {
         account: account;
@@ -241,12 +241,12 @@ component AccountsList inherits VerticalLayout {
     if Store.error-shown: Para {
         text: Store.error-message;
         leading: 20px;
-        color: Theme.danger;
+        color: Look.danger;
     }
     if !Store.accounts-loading && Store.multi-account && Store.accounts.length >= Store.max-accounts: Para {
         text: "Чтобы добавить новый аккаунт, удалите один из сохранённых.";
         leading: 20px;
-        color: Theme.dim;
+        color: Look.dim;
     }
 }
 
@@ -278,7 +278,7 @@ export component AccountsDialog inherits VerticalLayout {
         if !Store.accounts-adding: Button {
             text: "Добавить аккаунт";
             has-icon: true;
-            icon: @image-url("../assets/icons/plus-regular.svg");
+            icon: @image-url("assets/icons/plus-regular.svg");
             enabled: !root.blocked && Store.multi-account && Store.accounts.length < Store.max-accounts;
             clicked => {
                 Store.dismiss-error();
@@ -302,10 +302,10 @@ component GeneralFields inherits VerticalLayout {
                 height: 36px;
                 horizontal-stretch: 1;
                 min-width: 0px;
-                border-radius: Theme.radius-md;
+                border-radius: Look.radius-md;
                 border-width: 1px;
-                border-color: Theme.border;
-                background: Theme.surface-2;
+                border-color: Look.border;
+                background: Look.surface-2;
                 Label {
                     x: 13px;
                     width: parent.width - 26px;
@@ -319,7 +319,7 @@ component GeneralFields inherits VerticalLayout {
                 small: true;
                 text: "Выбрать";
                 has-icon: true;
-                icon: @image-url("../assets/icons/folder-open-regular.svg");
+                icon: @image-url("assets/icons/folder-open-regular.svg");
                 clicked => {
                     Store.pick-folder();
                 }
@@ -346,7 +346,7 @@ component GeneralFields inherits VerticalLayout {
                 text: "Удалено объектов: " + Store.cleaned;
                 font-size: 12px;
                 leading: 16px;
-                color: Theme.mute;
+                color: Look.mute;
             }
         }
     }
@@ -398,7 +398,7 @@ component GeneralFields inherits VerticalLayout {
                 small: true;
                 text: "Открыть папку";
                 has-icon: true;
-                icon: @image-url("../assets/icons/folder-open-regular.svg");
+                icon: @image-url("assets/icons/folder-open-regular.svg");
                 clicked => {
                     Store.open-launcher-logs();
                 }
@@ -408,7 +408,7 @@ component GeneralFields inherits VerticalLayout {
                 small: true;
                 text: Store.report == Report.sending ? "Отправляю" : "Отправить разработчикам";
                 has-icon: true;
-                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                icon: @image-url("assets/icons/paper-plane-tilt-regular.svg");
                 enabled: Store.report != Report.sending && Store.report != Report.sent;
                 clicked => {
                     Store.send-launcher-log();
@@ -465,7 +465,7 @@ component BuildFields inherits VerticalLayout {
             }
             Label {
                 text: Store.memory-label(Store.memory);
-                font-family: Theme.tabular;
+                font-family: Look.tabular;
                 leading: 20px;
                 font-weight: 600;
             }
@@ -484,13 +484,13 @@ component BuildFields inherits VerticalLayout {
             Label {
                 text: Store.memory-label(1024);
                 font-size: 11px;
-                color: Theme.mute;
+                color: Look.mute;
                 horizontal-stretch: 1;
             }
             Label {
                 text: Store.memory-label(max(1024, Store.memory-ceiling)) + " — это 80% памяти компьютера";
                 font-size: 11px;
-                color: Theme.mute;
+                color: Look.mute;
             }
         }
     }
@@ -515,7 +515,7 @@ component BuildFields inherits VerticalLayout {
                     small: true;
                     text: "Проверить";
                     has-icon: true;
-                    icon: @image-url("../assets/icons/shield-check-regular.svg");
+                    icon: @image-url("assets/icons/shield-check-regular.svg");
                     clicked => {
                         Store.repair-build();
                     }
@@ -589,7 +589,7 @@ component FeatureHeader inherits HorizontalLayout {
         text: root.entry.description;
         font-size: 12px;
         leading: 16px;
-        color: Theme.mute;
+        color: Look.mute;
         vertical-alignment: bottom;
         height: 18px;
     }
@@ -599,11 +599,11 @@ component FeatureOption inherits HoverSurface {
     in property <FeatureRow> entry;
     accessible-label: root.entry.title;
     property <bool> blocked: root.entry.blocked != "";
-    border-radius: Theme.radius-md;
+    border-radius: Look.radius-md;
     border-width: 1px;
-    border-color: root.entry.active ? Theme.primary.with-alpha(0.5) : Theme.border;
-    rest: root.entry.active ? Theme.primary-soft : Theme.surface;
-    hover: root.entry.active ? Theme.primary-soft : root.blocked ? Theme.surface : Theme.surface-2;
+    border-color: root.entry.active ? Theme.primary.with-alpha(0.5) : Look.border;
+    rest: root.entry.active ? Look.primary-soft : Look.surface;
+    hover: root.entry.active ? Look.primary-soft : root.blocked ? Look.surface : Look.surface-2;
     enabled: !root.blocked;
     cursor: root.blocked ? MouseCursor.not-allowed : MouseCursor.pointer;
     opacity: root.blocked ? 0.45 : 1;
@@ -622,10 +622,10 @@ component FeatureOption inherits HoverSurface {
         spacing: 12px;
         Icon {
             size: 18px;
-            colorize: root.entry.active ? Theme.primary : Theme.mute;
+            colorize: root.entry.active ? Theme.primary : Look.mute;
             source: root.entry.single
-                ? (root.entry.active ? @image-url("../assets/icons/radio-button-fill.svg") : @image-url("../assets/icons/circle-regular.svg"))
-                : (root.entry.active ? @image-url("../assets/icons/check-square-fill.svg") : @image-url("../assets/icons/square-regular.svg"));
+                ? (root.entry.active ? @image-url("assets/icons/radio-button-fill.svg") : @image-url("assets/icons/circle-regular.svg"))
+                : (root.entry.active ? @image-url("assets/icons/check-square-fill.svg") : @image-url("assets/icons/square-regular.svg"));
         }
         VerticalLayout {
             horizontal-stretch: 1;
@@ -642,7 +642,7 @@ component FeatureOption inherits HoverSurface {
                     alignment: center;
                     Chip {
                         text: root.entry.badge;
-                        fill: Theme.primary-soft;
+                        fill: Look.primary-soft;
                         ink: Theme.primary;
                         weight: 600;
                     }
@@ -651,13 +651,13 @@ component FeatureOption inherits HoverSurface {
                     alignment: center;
                     Chip {
                         text: root.entry.blocked;
-                        fill: Theme.surface-2;
-                        ink: Theme.mute;
+                        fill: Look.surface-2;
+                        ink: Look.mute;
                     }
                 }
             }
             if root.entry.description != "": Small {
-                color: Theme.mute;
+                color: Look.mute;
                 text: root.entry.description;
             }
         }
@@ -681,7 +681,7 @@ component FeatureLine inherits Rectangle {
         y: level == root.entry.depth - 1 && root.entry.opens ? root.entry.gap : 0px;
         width: 1px;
         height: root.height - self.y;
-        background: Theme.border;
+        background: Look.border;
     }
 }
 
@@ -709,7 +709,7 @@ export component FeaturesDialog inherits VerticalLayout {
         if Store.features-ready && Store.features-empty: Label {
             text: "У этой сборки нет опциональных модов.";
             leading: 20px;
-            color: Theme.mute;
+            color: Look.mute;
         }
         if Store.features-ready: FeatureList { }
     }
@@ -767,7 +767,7 @@ component LibraryGrid inherits VerticalLayout {
             height: 100px;
             text: "Ничего не найдено";
             leading: 20px;
-            color: Theme.mute;
+            color: Look.mute;
             horizontal-alignment: center;
         }
     }
@@ -839,7 +839,7 @@ export component NewsDialog inherits VerticalLayout {
             height: (Viewport.height - 64px) * 0.88 - 92px - 48px;
             text: "Пока новостей нет";
             leading: 20px;
-            color: Theme.mute;
+            color: Look.mute;
             horizontal-alignment: center;
         }
         if Store.news.length > 0 && root.paired: NewsPairs { }
@@ -853,9 +853,9 @@ component CrashLog inherits VerticalLayout {
     if Store.crash-log.length == 0: Label {
         x: 16px;
         text: "Журнал пуст.";
-        font-family: Theme.mono;
+        font-family: Look.mono;
         font-size: 12px;
-        color: Theme.dim;
+        color: Look.dim;
     }
     for line[index] in Store.crash-log: LogLine {
         index: index;
@@ -880,10 +880,10 @@ export component CrashDialog inherits VerticalLayout {
         padding-bottom: 24px;
         spacing: 16px;
         Rectangle {
-            border-radius: Theme.radius-md;
+            border-radius: Look.radius-md;
             border-width: 1px;
-            border-color: Theme.border;
-            background: Theme.surface-2;
+            border-color: Look.border;
+            background: Look.surface-2;
             HorizontalLayout {
                 padding: 13px;
                 spacing: 12px;
@@ -892,24 +892,24 @@ export component CrashDialog inherits VerticalLayout {
                     padding-top: 2px;
                     Icon {
                         size: 18px;
-                        source: @image-url("../assets/icons/warning-regular.svg");
+                        source: @image-url("assets/icons/warning-regular.svg");
                         colorize: Theme.primary;
                     }
                 }
                 Para {
                     text: "Последние строки журнала игры. Весь журнал с поиском по ошибкам — в консоли.";
                     leading: 20px;
-                    color: Theme.dim;
+                    color: Look.dim;
                     horizontal-stretch: 1;
                 }
             }
         }
         Rectangle {
             vertical-stretch: 1;
-            border-radius: Theme.radius-md;
+            border-radius: Look.radius-md;
             border-width: 1px;
-            border-color: Theme.border;
-            background: Theme.surface;
+            border-color: Look.border;
+            background: Look.surface;
             clip: true;
             ScrollArea {
                 content-height: log.preferred-height;
@@ -936,7 +936,7 @@ export component CrashDialog inherits VerticalLayout {
                 small: true;
                 text: "Весь журнал";
                 has-icon: true;
-                icon: @image-url("../assets/icons/terminal-window-regular.svg");
+                icon: @image-url("assets/icons/terminal-window-regular.svg");
                 clicked => {
                     Store.open-console();
                 }
@@ -954,7 +954,7 @@ export component CrashDialog inherits VerticalLayout {
                 small: true;
                 text: Store.crash-sending ? "Отправляю" : "Отправить разработчикам";
                 has-icon: true;
-                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                icon: @image-url("assets/icons/paper-plane-tilt-regular.svg");
                 enabled: !Store.crash-sending && Store.crash-sent == "";
                 clicked => {
                     Store.send-crash();

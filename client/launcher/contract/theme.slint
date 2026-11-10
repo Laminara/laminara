@@ -1,0 +1,21 @@
+export global Theme {
+    out property <color> default-bg: #0d0a09;
+    in-out property <color> bg: root.default-bg;
+    in-out property <color> primary: #ecc275;
+    in-out property <color> primary-strong: #f4d089;
+    in-out property <color> primary-ink: #241705;
+    in-out property <color> login-surface: #1c1a19;
+    in-out property <duration> modal-exit: 150ms;
+}
+
+export global Media {
+    in property <image> hero;
+    in property <image> hero-blurred;
+    in property <image> backdrop;
+    in property <image> logo;
+    in property <image> logo-mark;
+    in property <bool> has-logo;
+    in property <string> name: "LAMINARA";
+    in property <string> tagline;
+    in property <string> title: "Laminara";
+}

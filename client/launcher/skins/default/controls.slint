@@ -1,4 +1,5 @@
-import { Theme } from "theme.slint";
+import { Theme } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { Label, Icon } from "atoms.slint";
 
 export enum ButtonKind { primary, secondary, ghost, danger }
@@ -59,18 +60,18 @@ export component TooltipLayer inherits Rectangle {
             : Tooltip.y - root.absolute-position.y + root.below;
         width: min(hint-text.preferred-width + 20px, 360px);
         height: hint-text.preferred-height + 12px;
-        border-radius: Theme.radius-sm - 2px;
+        border-radius: Look.radius-sm - 2px;
         border-width: 1px;
-        border-color: Theme.border-strong;
-        background: Theme.panel-2;
+        border-color: Look.border-strong;
+        background: Look.panel-2;
         hint-text := Text {
             x: 10px;
             y: 6px;
             width: parent.width - 20px;
             text: Tooltip.text;
-            font-family: Theme.sans;
+            font-family: Look.sans;
             font-size: 12px;
-            color: Theme.text;
+            color: Look.text;
             wrap: word-wrap;
         }
     }
@@ -93,24 +94,24 @@ export component Button inherits Rectangle {
     in property <int> text-weight: 600;
     in property <float> text-tracking: 0.025;
     in property <bool> stretch-label: false;
-    in property <length> radius: Theme.radius-md;
+    in property <length> radius: Look.radius-md;
     in property <string> hint;
     out property <bool> hovered: touch.has-hover;
     callback clicked();
 
     property <color> base-fill: root.kind == ButtonKind.primary ? Theme.primary
-        : root.kind == ButtonKind.secondary ? Theme.surface-2
-        : root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.1)
+        : root.kind == ButtonKind.secondary ? Look.surface-2
+        : root.kind == ButtonKind.danger ? Look.danger.with-alpha(0.1)
         : transparent;
     property <color> hover-fill: root.kind == ButtonKind.primary ? Theme.primary-strong
-        : root.kind == ButtonKind.secondary ? Theme.surface-3
-        : root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.2)
-        : Theme.surface-2;
+        : root.kind == ButtonKind.secondary ? Look.surface-3
+        : root.kind == ButtonKind.danger ? Look.danger.with-alpha(0.2)
+        : Look.surface-2;
     property <color> base-ink: root.kind == ButtonKind.primary ? Theme.primary-ink
-        : root.kind == ButtonKind.ghost ? Theme.dim
-        : root.kind == ButtonKind.danger ? Theme.danger
-        : Theme.text;
-    property <color> hover-ink: root.kind == ButtonKind.ghost ? Theme.text : root.base-ink;
+        : root.kind == ButtonKind.ghost ? Look.dim
+        : root.kind == ButtonKind.danger ? Look.danger
+        : Look.text;
+    property <color> hover-ink: root.kind == ButtonKind.ghost ? Look.text : root.base-ink;
     property <color> ink: touch.has-hover ? root.hover-ink : root.base-ink;
 
     min-height: root.fixed-height;
@@ -132,7 +133,7 @@ export component Button inherits Rectangle {
         height: root.fixed-height;
         border-radius: root.radius;
         border-width: root.kind == ButtonKind.secondary || root.kind == ButtonKind.danger ? 1px : 0px;
-        border-color: root.kind == ButtonKind.danger ? Theme.danger.with-alpha(0.4) : Theme.border;
+        border-color: root.kind == ButtonKind.danger ? Look.danger.with-alpha(0.4) : Look.border;
         background: touch.pressed && root.kind == ButtonKind.primary && root.enabled ? root.hover-fill.darker(0.05)
             : touch.has-hover ? root.hover-fill : root.base-fill;
         animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
@@ -214,9 +215,9 @@ export component IconTap inherits Rectangle {
     in property <image> icon;
     in property <length> icon-size: 18px;
     in property <brush> rest-fill: transparent;
-    in property <brush> hover-fill: Theme.surface-2;
-    in property <color> rest-ink: Theme.dim;
-    in property <color> hover-ink: Theme.text;
+    in property <brush> hover-fill: Look.surface-2;
+    in property <color> rest-ink: Look.dim;
+    in property <color> hover-ink: Look.text;
     in property <bool> enabled: true;
     in property <float> disabled-opacity: 0.5;
     callback clicked();
@@ -270,10 +271,10 @@ export component TextField inherits Rectangle {
         input.text = value;
         root.edited(value);
     }
-    border-radius: Theme.radius-md;
+    border-radius: Look.radius-md;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.border-strong : Theme.border;
-    background: Theme.surface-2;
+    border-color: input.has-focus ? Look.border-strong : Look.border;
+    background: Look.surface-2;
     animate border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     TouchArea {
         mouse-cursor: MouseCursor.text;
@@ -285,7 +286,7 @@ export component TextField inherits Rectangle {
         x: root.pad-x + 1px;
         width: root.width - 2 * root.pad-x - 2px;
         text: root.placeholder;
-        color: Theme.mute;
+        color: Look.mute;
         leading: 20px;
         overflow: elide;
         accessible-role: none;
@@ -295,11 +296,11 @@ export component TextField inherits Rectangle {
         width: root.width - 2 * root.pad-x - 2px;
         height: root.height;
         vertical-alignment: center;
-        font-family: Theme.sans;
+        font-family: Look.sans;
         font-size: 14px;
-        color: root.enabled ? Theme.text : Theme.text.with-alpha(0.6);
+        color: root.enabled ? Look.text : Look.text.with-alpha(0.6);
         selection-background-color: Theme.primary.with-alpha(0.32);
-        selection-foreground-color: Theme.text;
+        selection-foreground-color: Look.text;
         input-type: root.input-type;
         enabled: root.enabled;
         single-line: true;
@@ -332,8 +333,8 @@ export component Switch inherits Rectangle {
     height: 24px;
     border-radius: 12px;
     border-width: 1px;
-    border-color: root.checked ? Theme.primary : Theme.border-strong;
-    background: root.checked ? Theme.primary : area.has-hover ? Theme.surface-3 : Theme.surface-2;
+    border-color: root.checked ? Theme.primary : Look.border-strong;
+    background: root.checked ? Theme.primary : area.has-hover ? Look.surface-3 : Look.surface-2;
     animate background, border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     area := TouchArea {
         mouse-cursor: MouseCursor.pointer;
@@ -347,7 +348,7 @@ export component Switch inherits Rectangle {
         width: 18px;
         height: 18px;
         border-radius: 9px;
-        background: root.checked ? Theme.primary-ink : Theme.dim;
+        background: root.checked ? Theme.primary-ink : Look.dim;
         animate x { duration: 200ms; easing: ease-out; }
     }
 }
@@ -391,7 +392,7 @@ export component RangeSlider inherits Rectangle {
         width: root.width - 16px;
         height: 4px;
         border-radius: 2px;
-        background: Theme.surface-3;
+        background: Look.surface-3;
         Rectangle {
             x: 0;
             width: parent.width * root.ratio;
@@ -449,7 +450,7 @@ export component ScrollArea inherits Rectangle {
             y: parent.travel * clamp(parent.progress, 0, 1);
             height: parent.thumb;
             border-radius: 5px;
-            background: Theme.surface-2;
+            background: Look.surface-2;
         }
         TouchArea {
             property <length> grab-offset;
@@ -479,7 +480,7 @@ export component WindowButton inherits Rectangle {
     }
     width: 48px;
     height: 36px;
-    background: area.has-hover ? (root.closer ? Theme.danger : Theme.surface-2) : transparent;
+    background: area.has-hover ? (root.closer ? Look.danger : Look.surface-2) : transparent;
     animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     area := TouchArea {
         clicked => {
@@ -489,7 +490,7 @@ export component WindowButton inherits Rectangle {
     Icon {
         size: root.icon-size;
         source: root.icon;
-        colorize: area.has-hover ? (root.closer ? #ffffff : Theme.text) : Theme.dim;
+        colorize: area.has-hover ? (root.closer ? #ffffff : Look.text) : Look.dim;
         animate colorize { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     }
 }

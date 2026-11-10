@@ -1,4 +1,5 @@
-import { Theme, Media } from "theme.slint";
+import { Theme, Media } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 
 export global Viewport {
     in-out property <length> width;
@@ -8,11 +9,11 @@ export global Viewport {
 export component Para inherits Text {
     in property <length> leading: 0px;
     in property <float> tracking: 0;
-    font-family: Theme.sans;
+    font-family: Look.sans;
     font-size: 14px;
-    color: Theme.text;
+    color: Look.text;
     wrap: word-wrap;
-    line-height-factor: (root.leading > 0px ? root.leading : root.font-size * 1.5) / (root.font-size * Theme.sans-natural);
+    line-height-factor: (root.leading > 0px ? root.leading : root.font-size * 1.5) / (root.font-size * Look.sans-natural);
     letter-spacing: root.font-size * root.tracking;
 }
 
@@ -20,11 +21,11 @@ export component Label inherits Text {
     in property <length> leading: 0px;
     in property <float> tracking: 0;
     property <length> line: root.leading > 0px ? root.leading : root.font-size * 1.5;
-    font-family: Theme.sans;
+    font-family: Look.sans;
     font-size: 14px;
-    color: Theme.text;
+    color: Look.text;
     vertical-alignment: center;
-    line-height-factor: root.line / (root.font-size * Theme.sans-natural);
+    line-height-factor: root.line / (root.font-size * Look.sans-natural);
     letter-spacing: root.font-size * root.tracking;
     min-height: root.line;
     preferred-height: root.line;
@@ -34,7 +35,7 @@ export component Label inherits Text {
 export component Icon inherits Rectangle {
     in property <image> source;
     in property <length> size: 16px;
-    in property <brush> colorize: Theme.dim;
+    in property <brush> colorize: Look.dim;
     width: root.size;
     min-height: root.size;
     preferred-height: root.size;
@@ -57,7 +58,7 @@ component Glow inherits Rectangle {
 
 export component Dot inherits Rectangle {
     in property <length> size: 4px;
-    in property <brush> fill: Theme.mute;
+    in property <brush> fill: Look.mute;
     in property <bool> glow: false;
     width: root.size;
     min-height: root.size;
@@ -65,7 +66,7 @@ export component Dot inherits Rectangle {
     if root.glow: Glow {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        tone: Theme.online;
+        tone: Look.online;
     }
     Rectangle {
         y: (parent.height - self.height) / 2;
@@ -82,7 +83,7 @@ export component StatusDot inherits Dot {
 
 export component OnlineDot inherits Dot {
     size: 8px;
-    fill: Theme.online;
+    fill: Look.online;
     glow: true;
 }
 
@@ -90,7 +91,7 @@ export component PingDot inherits Rectangle {
     in property <length> size: 10px;
     in property <float> start-opacity: 0.7;
     in property <bool> glow: true;
-    in property <color> tone: Theme.online;
+    in property <color> tone: Look.online;
     property <float> phase: mod(animation-tick() / 1ms, 1000) / 750;
     property <float> eased: root.phase >= 1 ? 1 : 1 - pow(1 - root.phase, 3);
     property <length> ring: root.size * (1 + root.eased);
@@ -122,10 +123,10 @@ export component PingDot inherits Rectangle {
 
 export component Scrims inherits Rectangle {
     Rectangle {
-        background: @linear-gradient(90deg, Theme.bg 0%, Theme.scrim.with-alpha(0.82) 34%, Theme.scrim.with-alpha(0.28) 62%, Theme.scrim.with-alpha(0.35) 100%);
+        background: @linear-gradient(90deg, Theme.bg 0%, Look.scrim.with-alpha(0.82) 34%, Look.scrim.with-alpha(0.28) 62%, Look.scrim.with-alpha(0.35) 100%);
     }
     Rectangle {
-        background: @linear-gradient(180deg, Theme.scrim.with-alpha(0.7) 0%, Theme.scrim.with-alpha(0) 24%, Theme.scrim.with-alpha(0) 52%, Theme.bg 96%);
+        background: @linear-gradient(180deg, Look.scrim.with-alpha(0.7) 0%, Look.scrim.with-alpha(0) 24%, Look.scrim.with-alpha(0) 52%, Theme.bg 96%);
     }
 }
 
@@ -293,8 +294,8 @@ export component Shadow inherits Rectangle {
 
 export component Panel inherits Rectangle {
     in property <brush> fill;
-    in property <brush> stroke: Theme.border;
-    in property <length> radius: Theme.radius-lg;
+    in property <brush> stroke: Look.border;
+    in property <length> radius: Look.radius-lg;
     in property <bool> shadow: true;
     in property <bool> blur-behind: false;
     if root.shadow: Shadow {
@@ -321,7 +322,7 @@ export component ProgressBar inherits Rectangle {
     in property <length> thickness: 4px;
     height: root.thickness;
     border-radius: root.thickness / 2;
-    background: Theme.surface-2;
+    background: Look.surface-2;
     Rectangle {
         x: 0;
         width: parent.width * clamp(root.value, 0, 1);
@@ -335,12 +336,12 @@ export component ProgressBar inherits Rectangle {
 export component Spinner inherits Rectangle {
     in property <length> size: 20px;
     property <[image]> frames: [
-        @image-url("../assets/icons/spinner-0.svg"),
-        @image-url("../assets/icons/spinner-1.svg"),
-        @image-url("../assets/icons/spinner-2.svg"),
-        @image-url("../assets/icons/spinner-3.svg"),
-        @image-url("../assets/icons/spinner-4.svg"),
-        @image-url("../assets/icons/spinner-5.svg"),
+        @image-url("assets/icons/spinner-0.svg"),
+        @image-url("assets/icons/spinner-1.svg"),
+        @image-url("assets/icons/spinner-2.svg"),
+        @image-url("assets/icons/spinner-3.svg"),
+        @image-url("assets/icons/spinner-4.svg"),
+        @image-url("assets/icons/spinner-5.svg"),
     ];
     property <int> frame: mod(floor(animation-tick() / 1ms / (500 / 6)), 6);
     width: root.size;

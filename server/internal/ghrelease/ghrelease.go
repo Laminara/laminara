@@ -24,9 +24,10 @@ const (
 )
 
 type Client struct {
-	Repo string
-	API  string
-	HTTP *http.Client
+	Repo  string
+	Token string
+	API   string
+	HTTP  *http.Client
 }
 
 type Release struct {
@@ -37,8 +38,9 @@ type Release struct {
 	PublishedAt time.Time
 	Prerelease  bool
 
-	assets  map[string]string
-	digests map[string]string
+	assets    map[string]string
+	endpoints map[string]string
+	digests   map[string]string
 }
 
 func (r *Release) Asset(name string) (string, bool) {
@@ -80,9 +82,10 @@ type releasePayload struct {
 	Prerelease  bool      `json:"prerelease"`
 	Draft       bool      `json:"draft"`
 	Assets      []struct {
-		Name   string `json:"name"`
-		URL    string `json:"browser_download_url"`
-		Digest string `json:"digest"`
+		Name     string `json:"name"`
+		URL      string `json:"browser_download_url"`
+		Endpoint string `json:"url"`
+		Digest   string `json:"digest"`
 	} `json:"assets"`
 }
 
@@ -95,10 +98,12 @@ func (p releasePayload) release() *Release {
 		PublishedAt: p.PublishedAt,
 		Prerelease:  p.Prerelease,
 		assets:      make(map[string]string, len(p.Assets)),
+		endpoints:   make(map[string]string, len(p.Assets)),
 		digests:     make(map[string]string, len(p.Assets)),
 	}
 	for _, asset := range p.Assets {
 		release.assets[asset.Name] = asset.URL
+		release.endpoints[asset.Name] = asset.Endpoint
 		if digest, ok := strings.CutPrefix(asset.Digest, "sha256:"); ok {
 			release.digests[asset.Name] = strings.ToLower(digest)
 		}
@@ -150,9 +155,7 @@ func (c *Client) ask(ctx context.Context, url string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	if token := os.Getenv("LAMINARA_GITHUB_TOKEN"); token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.authorize(request)
 
 	response, err := c.client().Do(request)
 	if err != nil {
@@ -174,7 +177,7 @@ func (c *Client) ask(ctx context.Context, url string) (io.ReadCloser, error) {
 }
 
 func (c *Client) Download(ctx context.Context, release *Release, asset, dest string) error {
-	url, ok := release.Asset(asset)
+	url, ok := c.assetURL(release, asset)
 	if !ok {
 		return fmt.Errorf("в релизе %s нет файла %s", release.Tag, asset)
 	}
@@ -212,7 +215,7 @@ func (c *Client) Download(ctx context.Context, release *Release, asset, dest str
 }
 
 func (c *Client) checksum(ctx context.Context, release *Release, asset string) (string, error) {
-	url, ok := release.Asset(ChecksumsAsset)
+	url, ok := c.assetURL(release, ChecksumsAsset)
 	if !ok {
 		return "", fmt.Errorf("в релизе %s нет файла %s — без него скачанное не проверить", release.Tag, ChecksumsAsset)
 	}
@@ -234,6 +237,10 @@ func (c *Client) Fetch(ctx context.Context, url string, into io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if strings.HasPrefix(url, c.api()+"/") {
+		request.Header.Set("Accept", "application/octet-stream")
+		c.authorize(request)
+	}
 	response, err := c.downloadClient().Do(request)
 	if err != nil {
 		return err
@@ -244,6 +251,28 @@ func (c *Client) Fetch(ctx context.Context, url string, into io.Writer) error {
 	}
 	_, err = io.Copy(into, io.LimitReader(response.Body, maxAsset))
 	return err
+}
+
+func (c *Client) assetURL(release *Release, name string) (string, bool) {
+	if c.token() != "" {
+		if endpoint := release.endpoints[name]; endpoint != "" {
+			return endpoint, true
+		}
+	}
+	return release.Asset(name)
+}
+
+func (c *Client) token() string {
+	if c.Token != "" {
+		return c.Token
+	}
+	return os.Getenv("LAMINARA_GITHUB_TOKEN")
+}
+
+func (c *Client) authorize(request *http.Request) {
+	if token := c.token(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
 }
 
 func (c *Client) api() string {

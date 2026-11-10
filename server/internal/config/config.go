@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/laminara/laminara/server/internal/access"
@@ -99,11 +100,31 @@ func (u *UpdateConfig) IntervalOr(fallback time.Duration) time.Duration {
 }
 
 type LauncherConfig struct {
-	MultiAccount bool     `json:"multiAccount"`
-	MaxAccounts  int      `json:"maxAccounts"`
-	Dir          string   `json:"dir"`
-	Endpoints    []string `json:"endpoints"`
-	AutoBake     *bool    `json:"autoBake"`
+	MultiAccount bool                    `json:"multiAccount"`
+	MaxAccounts  int                     `json:"maxAccounts"`
+	Dir          string                  `json:"dir"`
+	Endpoints    []string                `json:"endpoints"`
+	AutoBake     *bool                   `json:"autoBake"`
+	Templates    *LauncherTemplateSource `json:"templates"`
+}
+
+type LauncherTemplateSource struct {
+	Repo  string `json:"repo"`
+	Token string `json:"token"`
+}
+
+func (l *LauncherConfig) TemplateRepoOr(fallback string) string {
+	if l == nil || l.Templates == nil || strings.TrimSpace(l.Templates.Repo) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(l.Templates.Repo)
+}
+
+func (l *LauncherConfig) TemplateToken() string {
+	if l == nil || l.Templates == nil {
+		return ""
+	}
+	return strings.TrimSpace(l.Templates.Token)
 }
 
 func (l *LauncherConfig) AccountLimit() int {

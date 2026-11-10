@@ -1,0 +1,94 @@
+name: Лаунчер
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+    - cron: "41 3 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Тег релиза Laminara; пусто — последний
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Что собирать
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.plan.outputs.ref }}
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASKED: ${{ inputs.tag }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          if [ "$CRON" = "41 3 * * *" ]; then
+            echo "Ночная проверка скина на свежем main Laminara"
+            { echo "ref=main"; echo "build=true"; echo "publish=false"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag="$ASKED"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view --repo Laminara/laminara --json tagName --jq .tagName)
+          fi
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Шаблоны для $tag уже выпущены"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            if [ -n "$CRON" ]; then
+              echo "build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "build=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "Собираю шаблоны для $tag"
+            { echo "build=true"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+          fi
+
+  launcher:
+    name: Сборка
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: Laminara/laminara/.github/workflows/launcher.yml@main
+    with:
+      laminara-ref: ${{ needs.plan.outputs.ref }}
+      skin-repository: ${{ github.repository }}
+      skin-ref: ${{ github.sha }}
+
+  publish:
+    name: Публикация
+    needs: [plan, launcher]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Посчитать контрольные суммы
+        run: cd release && sha256sum laminara-* > checksums.txt && cat checksums.txt
+
+      - name: Выпустить шаблоны
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.ref }}
+        run: |
+          gh release create "$TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Лаунчер $TAG" \
+            --notes "Шаблоны лаунчера со своим дизайном, собранные на Laminara $TAG."

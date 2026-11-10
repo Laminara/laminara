@@ -101,7 +101,8 @@ func Build(cfg *config.Config) (*Wired, error) {
 				launcherBus.Publish(events.Event{Topic: topic, Data: data})
 			})
 			wired.Launcher.SetBakery(&launchersvc.Bakery{
-				Repo:    cfg.Update.RepoOr(selfupdate.DefaultRepo),
+				Repo:    cfg.Launcher.TemplateRepoOr(cfg.Update.RepoOr(selfupdate.DefaultRepo)),
+				Token:   cfg.Launcher.TemplateToken(),
 				Version: version.Current,
 				Auto:    cfg.Launcher.Bakes(),
 				Document: func() (clientconfig.Document, error) {
