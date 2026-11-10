@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laminara — свой лаунчер Minecraft без ручной сборки клиента</title>
+<meta name="description" content="Сервер сам качает Minecraft, Java и загрузчик, собирает клиент и подписывает его. Игрок скачивает один файл и играет.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/styles.css">
+<meta property="og:title" content="Laminara">
+<meta property="og:description" content="Сервер собирает клиент любой версии, лаунчер проверяет файлы по подписи, аккаунты остаются в вашей базе.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://laminara.dev/">
+</head>
+<body>
+
+<div class="progress-line" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="top-inner">
+    <a class="mark" href="/">
+      <img src="/logo.svg" alt="Laminara" width="132" height="24">
+    </a>
+    <nav>
+      <a href="https://docs.laminara.dev/">Документация</a>
+      <a href="https://docs.laminara.dev/quickstart/">Быстрый старт</a>
+      <a class="ghost" href="https://github.com/Laminara/laminara">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="scene-bg" aria-hidden="true">
+  <canvas id="scene"></canvas>
+</div>
+
+<section class="hero" data-chapter="cube:1;exploded:0;clusters:0;ribbon:0;camZ:8;x:2.6;y:0;dim:1;spin:1">
+  <p class="eyebrow" data-reveal>Платформа лаунчера Minecraft</p>
+  <h1 data-reveal style="--d:60ms">Свой лаунчер Minecraft <em>без ручной сборки клиента</em></h1>
+  <p class="lede" data-reveal style="--d:120ms">
+    Сервер сам качает Minecraft, Java и загрузчик, собирает клиент и подписывает его. Игрок
+    скачивает один файл, входит под аккаунтом с вашего сайта и играет. Вам остаётся выбрать версию
+    и опубликовать сборку.
+  </p>
+
+  <div class="cta-row hero-cta" data-reveal style="--d:180ms">
+    <a class="button primary" href="https://docs.laminara.dev/quickstart/">Собрать первую сборку</a>
+    <a class="button" href="https://docs.laminara.dev/architecture/">Как это устроено</a>
+  </div>
+
+  <div class="terminal" data-reveal style="--d:240ms" aria-label="Установка сервера">
+    <div class="terminal-bar"><span></span><span></span><span></span><b>сервер, Linux</b></div>
+    <pre><code><span class="prompt">$</span> <span id="typed" data-type="curl -fsSL https://raw.githubusercontent.com/Laminara/laminara/main/install.sh | bash"></span>
+<span class="prompt">$</span> laminara-server status<span class="caret"></span></code></pre>
+  </div>
+
+  <p class="under" data-reveal style="--d:300ms">
+    Установщик расспросит про хранилище, аккаунты и домен, поставит nginx с сертификатом и соберёт
+    конфиг сам.
+  </p>
+
+  <ul class="facts" data-reveal style="--d:360ms">
+    <li><b><span data-count="16">16</span> МБ</b> — весь лаунчер под Windows</li>
+    <li><b><span data-count="34">34</span> МБ</b> — памяти серверу в простое</li>
+    <li><b>1.7.10 — свежие</b> версии сборок</li>
+    <li><b>Go + Rust</b>, открытый код</li>
+  </ul>
+</section>
+
+<section class="steps" id="how" data-chapter="cube:0;exploded:1;clusters:0;ribbon:0;camZ:9.5;x:0;y:0;dim:1;spin:1.3">
+  <article class="step" data-reveal data-num="01">
+    <span class="num">01</span>
+    <h3>Поставьте сервер</h3>
+    <p>Одна команда установщика: бинарник, хранилище, nginx с сертификатом. Linux — всё, что нужно.</p>
+  </article>
+  <article class="step" data-reveal data-num="02" style="--d:90ms">
+    <span class="num">02</span>
+    <h3>Опубликуйте сборку</h3>
+    <p>Команды install и publish сами качают Minecraft, Java и загрузчик и подписывают манифест своим ключом.</p>
+  </article>
+  <article class="step" data-reveal data-num="03" style="--d:180ms">
+    <span class="num">03</span>
+    <h3>Игрок качает один файл</h3>
+    <p>Адрес сервера и ключи запечены в лаунчере. Игрок вводит логин с вашего сайта — и играет.</p>
+  </article>
+</section>
+
+<section class="shot" data-reveal data-chapter="cube:0;exploded:0.7;clusters:0;ribbon:0;camZ:10;x:-1.5;y:0.8;dim:0.55;spin:0.8">
+  <div class="shot-frame">
+    <img src="/screens/launcher-main.png" alt="Главный экран лаунчера: список сборок, новости, кнопка «Играть»" width="1120" height="753" loading="lazy">
+  </div>
+</section>
+
+<section class="grid" id="what" data-chapter="cube:0;exploded:0;clusters:1;ribbon:0;camZ:9;x:0;y:0;dim:0.9;spin:0.6">
+  <div class="section-head" data-reveal>
+    <h2>Что берёт на себя</h2>
+  </div>
+  <div class="cards">
+
+    <article data-reveal>
+      <h3>Сборку собирает сервер</h3>
+      <p>Не нужно качать Forge руками и прогонять установщик с графикой. Vanilla, Fabric, Quilt,
+      Forge, NeoForge — от 1.7.10 до свежих версий, всё одной командой.</p>
+    </article>
+
+    <article data-reveal style="--d:70ms">
+      <h3>Игрок скачивает один файл</h3>
+      <p>Ни Java рядом, ни отдельного лаунчера. Адрес сервера, ключи и оформление запечены внутрь:
+      игрок вводит только логин.</p>
+    </article>
+
+    <article data-reveal style="--d:140ms">
+      <h3>Подменённый файл не доедет</h3>
+      <p>Манифест подписан, и лаунчер сверяет подпись, а не адрес. Поэтому раздавать байты можно
+      с любого зеркала, не боясь, что по дороге подложат чужой мод.</p>
+    </article>
+
+    <article data-reveal>
+      <h3>Аккаунты остаются у вас</h3>
+      <p>Своей таблицы игроков у Laminara нет: она спрашивает вашу базу и держит только сессии.
+      Вход в игре — свой Yggdrasil для authlib-injector.</p>
+    </article>
+
+    <article data-reveal style="--d:70ms">
+      <h3>Сборки не забивают диск</h3>
+      <p>Десять сборок на одной версии делят одну Java и одни библиотеки: файлы лежат по
+      содержимому и раскладываются жёсткими ссылками.</p>
+    </article>
+
+    <article data-reveal style="--d:140ms">
+      <h3>Бан не обходится сменой ника</h3>
+      <p>Лаунчер узнаёт компьютер по солёным отпечаткам: банится аккаунт, машина или группа
+      связанных машин. Серийники железа с машины игрока не уходят.</p>
+    </article>
+
+  </div>
+</section>
+
+<section class="split" data-chapter="cube:0;exploded:0;clusters:0;ribbon:1;camZ:8.5;x:0;y:2.1;dim:1;spin:1">
+  <div class="split-text" data-reveal>
+    <p class="eyebrow">Консоль проекта</p>
+    <h2>Не нужно лезть в конфиги по SSH</h2>
+    <p>
+      <code>laminara-server console</code> — живые логи, мастера сборок, список игроков и настройки
+      в одном окне. То же самое делают команды: <code>install</code>, <code>publish</code>,
+      <code>ban</code>, <code>settings</code> — и они же доступны скриптам через <code>exec</code>.
+    </p>
+    <p>
+      Сервер проверяет себя командой <code>doctor</code>, складывает ключи и базу компьютеров
+      в один архив командой <code>backup</code> и обновляется командой <code>update</code>.
+    </p>
+    <a class="button" href="https://docs.laminara.dev/console/">Посмотреть консоль</a>
+  </div>
+  <div class="split-shot" data-reveal style="--d:100ms">
+    <img src="/screens/server-console.png" alt="Консоль сервера: логи и сводка" width="1184" height="574" loading="lazy">
+  </div>
+</section>
+
+<section class="compare" id="compare" data-chapter="cube:0;exploded:0.25;clusters:0.2;ribbon:0;camZ:11.5;x:0;y:0;dim:0.35;spin:0.5">
+  <div class="section-head" data-reveal>
+    <h2>Чем отличается от GravitLauncher и GML</h2>
+    <p class="note">Собрано по коду GravitLauncher 5.7.12 (май 2026), GML 2026.1-beta1 (сентябрь 2026)
+    и замерам на одной машине — как мерили, написано под таблицей.</p>
+  </div>
+  <div class="table-wrap" data-reveal>
+    <table>
+      <thead>
+        <tr><th></th><th>Laminara</th><th>GravitLauncher</th><th>GML</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Что скачивает игрок</th>
+          <td>Один файл: 18 МБ под Windows, 27 МБ под Linux. Ставить рядом нечего</td>
+          <td><code>Launcher.jar</code> 5 МБ, но на машине нужна Java с JavaFX. Нативный
+          <code>.exe</code> собирает отдельный модуль, и Java он всё равно докачивает</td>
+          <td>Один файл около 170 МБ под Windows со встроенным .NET: панель собирает его из
+          исходников. Под macOS получается бинарник без <code>.app</code></td>
+        </tr>
+        <tr>
+          <th>Подготовка сборки</th>
+          <td>Команда <code>install</code>: сама качает Minecraft, Java и установщик загрузчика
+          и прогоняет его без графики — включая 1.7.10. Она же поднимает 1.7.10 и 1.12.2
+          на современную Java</td>
+          <td>Модуль MirrorHelper поверх UnsafeCommandsPack. Установщик Forge и NeoForge качает
+          команда, Fabric и Quilt кладутся в папку руками. Для 1.10 и старше установщик Forge
+          открывает окно и ждёт человека</td>
+          <td>Библиотека CmlLib: качает Minecraft и Java и прогоняет Forge и NeoForge без графики,
+          с 1.7.10. На новую Java старые версии не поднимает</td>
+        </tr>
+        <tr>
+          <th>Вход в игре</th>
+          <td>authlib-injector — один агент на все версии</td>
+          <td>Патч authlib: девять разных <code>.jar</code> кладутся в папку руками</td>
+          <td>authlib-injector, свой форк</td>
+        </tr>
+        <tr>
+          <th>Доверие к файлам</th>
+          <td>Манифест подписан Ed25519 — раздавать можно с любого зеркала</td>
+          <td>Список файлов приходит по соединению без подписи</td>
+          <td>Список файлов приходит от API без подписи, ассеты сверяются только по размеру</td>
+        </tr>
+        <tr>
+          <th>Сервер в простое</th>
+          <td>34 МБ памяти</td>
+          <td>199 МБ памяти, после сборки лаунчера — 296 МБ</td>
+          <td>Не мерили. Это четыре контейнера, и вики GML просит от 2 ГБ памяти, для сборки
+          лаунчера — от 4 ГБ</td>
+        </tr>
+        <tr>
+          <th>Место на диске у игрока</th>
+          <td>Общий склад и жёсткие ссылки между сборками</td>
+          <td>Свой каталог на каждый профиль</td>
+          <td>Своя папка на каждую сборку, общие только ассеты и Java</td>
+        </tr>
+        <tr>
+          <th>Отпечаток компьютера</th>
+          <td>Солёные хеши, серийники не уходят с машины</td>
+          <td>Серийник диска, плата и видеокарта уходят как есть</td>
+          <td>Процессор и серийники платы и дисков уходят как есть</td>
+        </tr>
+        <tr>
+          <th>Управление</th>
+          <td>Консоль в терминале, она же в браузере</td>
+          <td>Консоль LaunchServer</td>
+          <td>Веб-панель с правами для нескольких администраторов</td>
+        </tr>
+        <tr>
+          <th>Моды из каталогов</th>
+          <td>Нет: моды кладутся в сборку файлами</td>
+          <td>Есть: Modrinth без ключа, CurseForge — по ключу API</td>
+          <td>Есть: Modrinth и CurseForge прямо из панели</td>
+        </tr>
+        <tr>
+          <th>Стек</th>
+          <td>Go на сервере, Rust и Slint в лаунчере</td>
+          <td>Java на сервере, Java и JavaFX в лаунчере</td>
+          <td>C# и .NET на сервере, Avalonia в лаунчере, панель на Next.js</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note under-table" data-reveal>Память мерили одинаково: свежий запуск, ни одного игрока, <code>VmRSS</code>
+  через полторы минуты. У Laminara на сервере лежали четыре сборки, у GravitLauncher — ни одной.
+  Вес лаунчера — готовые файлы: наш собран под обе системы, <code>Launcher.jar</code> — командой
+  <code>build</code> на чистой установке 5.7.12, лаунчер GML — той же командой <code>dotnet publish</code>,
+  которой его собирает панель, из кода 2026.1-beta1 под Windows x64. Оформление проекта записывается
+  в файл лаунчера при сборке, поэтому с тяжёлыми картинками файл будет больше.</p>
+</section>
+
+<section class="cta" data-chapter="cube:1;exploded:0;clusters:0;ribbon:0;camZ:7.6;x:0;y:1.3;dim:1;spin:1.5">
+  <h2>Собрать свой лаунчер</h2>
+  <p>Сервер работает на Linux. Лаунчер собирается под Windows, macOS и Linux с той же машины.</p>
+  <div class="cta-row">
+    <a class="button primary" href="https://docs.laminara.dev/server/install/">Поставить сервер</a>
+    <a class="button" href="https://docs.laminara.dev/">Читать документацию</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>© 2026 MrLeonardos · <a href="https://github.com/Laminara/laminara/blob/main/LICENSE">AGPL-3.0</a></p>
+  <p>Minecraft — торговая марка Mojang Studios. Проект с ними не связан.</p>
+</footer>
+
+<script type="module" src="/assets/scene.js"></script>
+<script src="/assets/site.js" defer></script>
+
+</body>
+</html>
