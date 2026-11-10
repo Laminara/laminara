@@ -128,6 +128,14 @@ pub fn resolve_extras(model: &Option<FeatureModel>, selection: &FeatureSelection
     extras
 }
 
+pub fn option_addr(group_addr: &str, option_id: &str) -> String {
+    format!("{group_addr}#{option_id}")
+}
+
+pub fn nested_group_addr(option_addr: &str, group_id: &str) -> String {
+    format!("{option_addr}/{group_id}")
+}
+
 fn walk(
     group: &FeatureGroup,
     group_addr: String,
@@ -138,7 +146,7 @@ fn walk(
     let chosen = effective(group, &group_addr, selection);
     for option in &group.options {
         if chosen.iter().any(|id| id == &option.id) {
-            let option_addr = format!("{group_addr}#{}", option.id);
+            let option_addr = option_addr(&group_addr, &option.id);
             let meta = option.meta.as_ref();
             active.insert(
                 option_addr.clone(),
@@ -158,7 +166,7 @@ fn walk(
             for sub in &option.groups {
                 walk(
                     sub,
-                    format!("{option_addr}/{}", sub.id),
+                    nested_group_addr(&option_addr, &sub.id),
                     selection,
                     active,
                     order,
@@ -204,11 +212,11 @@ fn first_violation(active: &BTreeMap<String, ActiveOption>) -> Option<String> {
 }
 
 fn drop_with_descendants(active: &mut BTreeMap<String, ActiveOption>, addr: &str) {
-    let prefix = format!("{addr}/");
+    let prefix = nested_group_addr(addr, "");
     active.retain(|key, _| key != addr && !key.starts_with(&prefix));
 }
 
-fn effective(group: &FeatureGroup, addr: &str, selection: &FeatureSelection) -> Vec<String> {
+pub fn effective(group: &FeatureGroup, addr: &str, selection: &FeatureSelection) -> Vec<String> {
     match selection.selected.get(addr) {
         Some(saved) => {
             let mut ids: Vec<String> = group

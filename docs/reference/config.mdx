@@ -106,7 +106,7 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="primaryInk" type="string">Цвет текста на акцентном фоне.</ParamField>
 <ParamField path="backgroundColor" type="string">Фон приложения.</ParamField>
 <ParamField path="logoPath" type="string">Файл логотипа (`.svg`/`.png`). Встраивается в конфиг лаунчера как data-URI.</ParamField>
-<ParamField path="heroMediaPath" type="string">Фон главного экрана: картинка (`.jpg`, `.png`, `.webp`) или видео (`.mp4`, `.webm`). Картинка показывается везде одинаково, видео на Linux зависит от кодеков в системе игрока — если их нет, фон останется пустым. Пусто — фон по умолчанию.</ParamField>
+<ParamField path="heroMediaPath" type="string">Фон главного экрана: картинка (`.jpg`, `.png`, `.webp`) или анимация (`.gif`, анимированные `.webp` и `.png`). Анимация проигрывается, пока фон виден, и встаёт на паузу, когда окно свёрнуто, открыто окно настроек, идёт загрузка или запущена игра. Окно лаунчера рисует процессор, поэтому анимация нагружает его заметнее картинки, а файл анимации держится в памяти целиком — лучше не больше нескольких мегабайт. Видео лаунчер не показывает — вместо него будет фон по умолчанию. Пусто — фон по умолчанию.</ParamField>
 <ParamField path="siteUrl" type="string">Ссылка на сайт проекта.</ParamField>
 <ParamField path="folderName" type="string">Имя папки, в которой лаунчер хранит сборки и настройки на компьютере игрока. По умолчанию берётся из `name`, а если его нет — из `windowTitle`. Задавайте, только если название проекта не годится для имени папки.</ParamField>
 

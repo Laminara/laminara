@@ -32,29 +32,18 @@ jobs:
       - name: Сквозной прогон флоу
         run: LAMINARA_FLOWS=1 go test ./server/internal/e2e/... -count=1 -timeout 600s
 
-  frontend:
-    name: Фронтенд
+  webconsole:
+    name: Веб-консоль
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: client
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
-        with:
-          package_json_file: client/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm tsc --noEmit -p tsconfig.json
-      - run: pnpm test
-      - run: node --test ../server/internal/webconsole/app.test.mjs
+      - run: node --test server/internal/webconsole/app.test.mjs
 
   core:
-    name: Ядро (${{ matrix.os }})
+    name: Лаунчер (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -69,4 +58,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: client
-      - run: cargo test -p laminara-launcher-core
+      - name: Системные библиотеки окна
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - run: cargo test -p laminara-launcher-core -p laminara

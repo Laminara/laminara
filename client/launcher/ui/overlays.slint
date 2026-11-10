@@ -1,0 +1,488 @@
+import { Theme, Media } from "theme.slint";
+import { Label, Para, Icon, Panel, ProgressBar, Spinner } from "atoms.slint";
+import { Button, ButtonKind, IconTap, TextField } from "controls.slint";
+import { Store, Report, ModalKind } from "store.slint";
+import { BrandMark } from "home.slint";
+
+component FieldLabel inherits Label {
+    leading: 20px;
+}
+
+component SpacedPara inherits VerticalLayout {
+    in property <string> text;
+    in property <color> tone: Theme.dim;
+    in property <length> above;
+    in property <length> below;
+    in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
+    padding-top: root.above;
+    padding-bottom: root.below;
+    Para {
+        text: root.text;
+        leading: 20px;
+        color: root.tone;
+        horizontal-alignment: root.align;
+    }
+}
+
+export component CredentialsForm inherits VerticalLayout {
+    in property <string> initial-username;
+    property <string> username: root.initial-username;
+    property <string> password;
+    property <string> code;
+    property <bool> ready: !Store.busy && root.username != "" && root.password != "" && (!Store.two-factor || root.code.character-count == 6);
+    function submit() {
+        if root.ready {
+            Store.login(root.username, root.password, root.code);
+        }
+    }
+    init => {
+        user-field.take-focus();
+    }
+    VerticalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            spacing: 8px;
+            FieldLabel {
+                text: "Имя пользователя";
+            }
+            user-field := TextField {
+                accessible-label: "Имя пользователя";
+                text: root.username;
+                enabled: !Store.busy;
+                edited(text) => {
+                    root.username = text;
+                    if Store.two-factor {
+                        Store.login-edited();
+                    }
+                }
+                accepted => {
+                    root.submit();
+                }
+            }
+        }
+        VerticalLayout {
+            spacing: 8px;
+            FieldLabel {
+                text: "Пароль";
+            }
+            TextField {
+                input-type: InputType.password;
+                accessible-label: "Пароль";
+                enabled: !Store.busy;
+                edited(text) => {
+                    root.password = text;
+                }
+                accepted => {
+                    root.submit();
+                }
+            }
+        }
+        if Store.two-factor: VerticalLayout {
+            spacing: 8px;
+            FieldLabel {
+                text: "Код из приложения";
+            }
+            code-field := TextField {
+                accessible-label: "Код из приложения";
+                text: root.code;
+                enabled: !Store.busy;
+                init => {
+                    self.take-focus();
+                }
+                edited(text) => {
+                    root.code = Store.only-digits(text);
+                    self.text = root.code;
+                }
+                accepted => {
+                    root.submit();
+                }
+            }
+        }
+    }
+    if Store.login-error != "": SpacedPara {
+        text: Store.login-error;
+        tone: Theme.danger;
+        above: 12px;
+    }
+    VerticalLayout {
+        padding-top: 24px;
+        Button {
+            text: Store.busy ? "Входим…" : "Войти";
+            has-icon: true;
+            icon: @image-url("../assets/icons/arrow-right-bold.svg");
+            enabled: root.ready;
+            clicked => {
+                root.submit();
+            }
+        }
+    }
+}
+
+export component LoginScreen inherits Rectangle {
+    WindowMoveArea { }
+    Panel {
+        width: 380px;
+        height: self.preferred-height;
+        fill: Theme.login-surface;
+        card := VerticalLayout {
+            padding: 32px;
+            HorizontalLayout {
+                alignment: center;
+                padding-bottom: 28px;
+                BrandMark { }
+            }
+            VerticalLayout {
+                padding-bottom: Media.tagline != "" ? 4px : 24px;
+                Label {
+                    text: "Вход в лаунчер";
+                    font-size: 20px;
+                    leading: 28px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+            }
+            if Media.tagline != "": SpacedPara {
+                text: Media.tagline;
+                below: 24px;
+                align: TextHorizontalAlignment.center;
+            }
+            CredentialsForm { }
+            if Store.multi-account && Store.accounts.length > 0: VerticalLayout {
+                padding-top: 12px;
+                Button {
+                    kind: ButtonKind.ghost;
+                    text: "Сохранённые аккаунты";
+                    clicked => {
+                        Store.open-modal(ModalKind.accounts);
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ConnectingScreen inherits Rectangle {
+    WindowMoveArea { }
+    Label {
+        text: "Подключение…";
+        font-size: 16px;
+        leading: 24px;
+        color: Theme.dim;
+    }
+}
+
+export component SyncOverlay inherits Rectangle {
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: Media.backdrop;
+        image-fit: fill;
+    }
+    TouchArea { }
+    VerticalLayout {
+        padding: 40px;
+        alignment: end;
+        HorizontalLayout {
+            alignment: center;
+            Panel {
+                width: min(672px, root.width - 80px);
+                fill: Theme.surface;
+                shadow: false;
+                VerticalLayout {
+                    padding: 24px;
+                    HorizontalLayout {
+                        padding-bottom: 16px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: start;
+                            Label {
+                                text: Store.cancelling ? "ОТМЕНЯЮ ЗАГРУЗКУ" : Store.sync-stage.to-uppercase();
+                                font-size: 11px;
+                                font-weight: 600;
+                                tracking: 0.22;
+                                color: Theme.dim;
+                            }
+                            Label {
+                                text: Store.sync-build;
+                                font-size: 18px;
+                                leading: 28px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                        }
+                        if Store.sync-cancellable: VerticalLayout {
+                            alignment: start;
+                            IconTap {
+                                accessible-label: "Отменить загрузку";
+                                width: 34px;
+                                height: 34px;
+                                border-radius: Theme.radius-md;
+                                icon: @image-url("../assets/icons/x-regular.svg");
+                                icon-size: 18px;
+                                enabled: !Store.cancelling;
+                                disabled-opacity: 0.4;
+                                clicked => {
+                                    Store.cancel-sync();
+                                }
+                            }
+                        }
+                    }
+                    ProgressBar {
+                        value: Store.sync-fraction;
+                        thickness: 6px;
+                    }
+                    HorizontalLayout {
+                        padding-top: 12px;
+                        Label {
+                            text: Store.sync-amount;
+                            font-family: Theme.tabular;
+                            leading: 20px;
+                            color: Theme.dim;
+                            horizontal-stretch: 1;
+                        }
+                        Label {
+                            text: Store.sync-files;
+                            font-family: Theme.tabular;
+                            leading: 20px;
+                            color: Theme.dim;
+                        }
+                    }
+                    if Store.sync-speed != "" || Store.sync-left != "": HorizontalLayout {
+                        padding-top: 4px;
+                        spacing: 8px;
+                        alignment: start;
+                        if Store.sync-speed != "": Label {
+                            text: Store.sync-speed;
+                            font-family: Theme.tabular;
+                            font-size: 12px;
+                            leading: 16px;
+                            color: Theme.mute;
+                        }
+                        if Store.sync-speed != "" && Store.sync-left != "": Label {
+                            text: "·";
+                            font-size: 12px;
+                            leading: 16px;
+                            color: Theme.mute;
+                        }
+                        if Store.sync-left != "": Label {
+                            text: "осталось " + Store.sync-left;
+                            font-size: 12px;
+                            leading: 16px;
+                            color: Theme.mute;
+                        }
+                    }
+                    if Store.sync-path != "": VerticalLayout {
+                        padding-top: 8px;
+                        Label {
+                            text: Store.sync-path;
+                            font-size: 12px;
+                            leading: 16px;
+                            color: Theme.mute;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component UpdateBanner inherits HorizontalLayout {
+    padding-left: 36px;
+    padding-right: 36px;
+    padding-top: 80px;
+    alignment: center;
+    Panel {
+        width: min(672px, root.width - 72px);
+        fill: Theme.bg-tint;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 16px;
+            Icon {
+                size: 20px;
+                source: @image-url("../assets/icons/arrows-clockwise-regular.svg");
+                colorize: Theme.primary;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Label {
+                        text: "Доступно обновление лаунчера " + Store.update-version;
+                        font-weight: 600;
+                        leading: 20px;
+                    }
+                    if Store.update-mandatory: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            border-radius: 9px;
+                            background: Theme.primary-soft;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 2px;
+                                padding-bottom: 2px;
+                                Label {
+                                    text: "ОБЯЗАТЕЛЬНОЕ";
+                                    font-size: 10px;
+                                    leading: 14.3px;
+                                    tracking: 0.025;
+                                    color: Theme.primary;
+                                }
+                            }
+                        }
+                    }
+                }
+                Para {
+                    text: Store.update-detail;
+                    font-size: 12px;
+                    leading: 16px;
+                    color: Theme.dim;
+                }
+            }
+            if !Store.update-mandatory: VerticalLayout {
+                alignment: center;
+                IconTap {
+                    accessible-label: "Позже";
+                    width: 28px;
+                    height: 28px;
+                    border-radius: Theme.radius-md;
+                    icon: @image-url("../assets/icons/x-regular.svg");
+                    icon-size: 16px;
+                    clicked => {
+                        Store.dismiss-update();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component UpdateScreen inherits Rectangle {
+    WindowMoveArea { }
+    Panel {
+        width: min(448px, root.width);
+        height: self.preferred-height;
+        fill: Theme.bg-tint;
+        card := VerticalLayout {
+            padding: 32px;
+            BrandMark { }
+            HorizontalLayout {
+                padding-top: 24px;
+                spacing: 12px;
+                alignment: start;
+                Spinner { }
+                VerticalLayout {
+                    Label {
+                        text: "Обновление лаунчера";
+                        font-weight: 600;
+                        leading: 20px;
+                    }
+                    Label {
+                        text: "Версия " + Store.update-version + " · запустится автоматически";
+                        font-size: 12px;
+                        leading: 16px;
+                        color: Theme.dim;
+                    }
+                }
+            }
+            VerticalLayout {
+                padding-top: 20px;
+                ProgressBar {
+                    value: Store.update-fraction;
+                    thickness: 6px;
+                }
+            }
+            if Store.update-progress != "": VerticalLayout {
+                padding-top: 8px;
+                Label {
+                    text: Store.update-progress;
+                    font-family: Theme.tabular;
+                    font-size: 12px;
+                    leading: 16px;
+                    color: Theme.dim;
+                }
+            }
+        }
+    }
+}
+
+export component ErrorToast inherits HorizontalLayout {
+    padding-left: 32px;
+    padding-right: 32px;
+    alignment: center;
+    Panel {
+        max-width: 768px;
+        fill: Theme.panel-2;
+        blur-behind: true;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 12px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 12px;
+            Icon {
+                size: 20px;
+                source: @image-url("../assets/icons/warning-circle-regular.svg");
+                colorize: Theme.primary;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Para {
+                    text: Store.error-message;
+                    leading: 20px;
+                    color: Theme.dim;
+                }
+                if Store.report == Report.failed: Para {
+                    text: "Журнал не ушёл: " + Store.report-message;
+                    font-size: 12px;
+                    leading: 16px;
+                    color: Theme.danger;
+                }
+            }
+            if Store.error-retry: Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: "Повторить";
+                has-icon: true;
+                icon: @image-url("../assets/icons/arrow-clockwise-regular.svg");
+                clicked => {
+                    Store.retry();
+                }
+            }
+            Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: Store.report == Report.sending ? "Отправляю" : Store.report == Report.sent ? "Журнал отправлен" : "Отправить журнал";
+                has-icon: true;
+                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                enabled: Store.report != Report.sending && Store.report != Report.sent;
+                clicked => {
+                    Store.send-launcher-log();
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconTap {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: Theme.radius-sm;
+                    icon: @image-url("../assets/icons/x-regular.svg");
+                    accessible-label: "Закрыть";
+                    icon-size: 16px;
+                    rest-ink: Theme.mute;
+                    clicked => {
+                        Store.dismiss-error();
+                    }
+                }
+            }
+        }
+    }
+}

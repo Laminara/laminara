@@ -428,7 +428,7 @@ EOF
   say "Первая сборка:      ${bold}$server console${reset}  →  install <имя> <версия> loader=neoforge"
   say "Лаунчер для игроков:"
   say "  ${bold}$server console${reset}  →  launcher build"
-  note "  соберёт .exe и файл для Linux из готового шаблона — ни Rust, ни pnpm не нужны"
+  note "  соберёт .exe и файл для Linux из готового шаблона — ни Rust, ни компилятор не нужны"
 }
 
 redis_answer() { # redis_answer host port [password] — печатает ответ Redis на PING

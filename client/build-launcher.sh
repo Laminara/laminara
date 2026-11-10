@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Builds one operator's launcher from the JSON their server emits with
-# `laminara-server client-config`. Everything the launcher needs — address,
-# signing keys, hwid salt, branding — is baked in here, so a build belongs to
-# exactly one server.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -102,33 +98,28 @@ macos)
 	;;
 esac
 
-product="$(node -e '
-const branding = (JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).branding) || {};
-const chosen = branding.windowTitle || branding.name || "Laminara";
-process.stdout.write(chosen.replace(/[\/\\:*?"<>|]/g, "").trim() || "Laminara");
-' "$config")"
+{
+	read -r product
+	read -r publisher
+} < <(python3 - "$config" <<'PY'
+import json, re, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+branding = json.load(open(sys.argv[1], encoding="utf-8")).get("branding") or {}
+chosen = branding.get("windowTitle") or branding.get("name") or "Laminara"
+product = re.sub(r'[/\\:*?"<>|\r\n]', "", chosen).strip() or "Laminara"
+print(product)
+print(" ".join((branding.get("name") or "").split()) or product)
+PY
+)
 [ -n "$name" ] || name="$product"
 
-echo "==> фронтенд"
-pnpm build
-
 echo "==> $target"
-args=(--release --features custom-protocol --manifest-path src-tauri/Cargo.toml)
+args=(--release --manifest-path launcher/Cargo.toml)
 [ -n "$rust_target" ] && args+=(--target "$rust_target")
 version="$(tr -d '[:space:]' < ../VERSION 2>/dev/null || echo 0.0.0)"
-# The operator named their launcher once, in the server config. Patching it in
-# here keeps that the only place: the window title, the file and the properties
-# Windows shows all come from it.
-tauri_config="$(node -e '
-const branding = (JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).branding) || {};
-process.stdout.write(JSON.stringify({
-  productName: process.argv[2],
-  bundle: { publisher: branding.name || process.argv[2] },
-}));
-' "$config" "$product")"
 
 run_cargo() {
-	TAURI_CONFIG="$tauri_config" LAMINARA_CLIENT_CONFIG="$config" "${runner[@]}" "$@"
+	LAMINARA_CLIENT_CONFIG="$config" LAMINARA_PRODUCT_NAME="$product" LAMINARA_PUBLISHER="$publisher" "${runner[@]}" "$@"
 }
 
 mkdir -p "$out"
@@ -143,10 +134,10 @@ if [ "$target" = "macos" ]; then
 	universal="target/release/laminara"
 	mkdir -p target/release
 	lipo -create -output "$universal" "${slices[@]}"
-	codesign --force --sign - --entitlements src-tauri/macos.entitlements "$universal"
+	codesign --force --sign - --entitlements launcher/macos.entitlements "$universal"
 	codesign --verify --verbose "$universal"
 	app="$(go run ../server/cmd/macbundle --config "$config" --binary "$universal" --name "$name" --version "$version" --out "$out")"
-	codesign --force --deep --sign - --entitlements src-tauri/macos.entitlements "$app"
+	codesign --force --deep --sign - --entitlements launcher/macos.entitlements "$app"
 	codesign --verify --deep --strict "$app"
 	tar -C "$out" -czf "$out/${name}.app.tar.gz" "$(basename "$app")"
 	echo "==> $app"
@@ -156,7 +147,6 @@ fi
 
 run_cargo "${args[@]}"
 
-# productName renames the bundle, never the cargo binary.
 built="target/${rust_target:+$rust_target/}release/laminara${suffix}"
 [ -f "$built" ] || {
 	echo "сборка прошла, но файла нет: $built" >&2

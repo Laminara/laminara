@@ -65,6 +65,9 @@ func TestLauncherBuildResolvesPathsFromCaller(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("нет bash — сборку лаунчера запускает build-launcher.sh")
 	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("нет python3 — им build-launcher.sh читает брендинг из конфига")
+	}
 	script := filepath.Join(repoRoot(t), "client", "build-launcher.sh")
 	shell := `
 		set -eu
@@ -73,14 +76,13 @@ func TestLauncherBuildResolvesPathsFromCaller(t *testing.T) {
 		cp "$2" "$work/repo/client/build-launcher.sh"
 		printf '1.0.0\n' > "$work/repo/VERSION"
 		printf '{"branding":{"name":"Fixture"}}\n' > "$work/configuration space/config.json"
-		pnpm() { test "$PWD" = "$work/repo/client"; }
 		cargo() {
+			test "$PWD" = "$work/repo/client"
 			test "$LAMINARA_CLIENT_CONFIG" = "$work/configuration space/config.json"
 			mkdir -p target/release
 			printf 'fixture binary\n' > target/release/laminara
 		}
-		node() { printf 'Fixture'; }
-		export -f pnpm cargo node
+		export -f cargo
 		export work
 		cd "$work"
 		bash repo/client/build-launcher.sh 'configuration space/config.json' --out 'output space'

@@ -1,0 +1,972 @@
+import { Theme } from "theme.slint";
+import { Label, Para, Icon, Panel, Viewport } from "atoms.slint";
+import { Button, ButtonKind, HoverSurface, HintArea, Switch, TextField, RangeSlider, ScrollArea } from "controls.slint";
+import { LogLine } from "log.slint";
+import { ModalHeader, ModalBody, ModalFooter } from "modal.slint";
+import { Store, Report, FeatureRow, BuildItem, NewsPair, AccountItem } from "store.slint";
+import { LibraryCard, NewsCard } from "home.slint";
+import { CredentialsForm } from "overlays.slint";
+
+component Small inherits Para {
+    font-size: 12px;
+    leading: 16px;
+    color: Theme.dim;
+}
+
+component Note inherits Label {
+    leading: 20px;
+    color: Theme.dim;
+}
+
+component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+component SectionTitle inherits Label {
+    font-weight: 500;
+    leading: 20px;
+}
+
+component Trouble inherits VerticalLayout {
+    in property <string> text;
+    padding-bottom: 16px;
+    Rectangle {
+        border-radius: Theme.radius-lg;
+        background: Theme.danger.with-alpha(0.15);
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            Para {
+                text: root.text;
+                leading: 20px;
+                color: Theme.danger;
+            }
+        }
+    }
+}
+
+component Notice inherits Rectangle {
+    in property <string> text;
+    in property <bool> fault;
+    border-radius: Theme.radius-md;
+    border-width: root.fault ? 0px : 1px;
+    border-color: Theme.border;
+    background: root.fault ? Theme.danger.with-alpha(0.15) : Theme.surface-2;
+    HorizontalLayout {
+        padding: root.fault ? 12px : 13px;
+        Para {
+            text: root.text;
+            leading: 20px;
+            color: root.fault ? Theme.danger : Theme.dim;
+        }
+    }
+}
+
+component SmallNote inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> fault;
+    padding-top: 8px;
+    Small {
+        text: root.text;
+        color: root.fault ? Theme.danger : Theme.dim;
+    }
+}
+
+component AccountsError inherits VerticalLayout {
+    spacing: 12px;
+    alignment: start;
+    Para {
+        text: Store.accounts-error;
+        leading: 20px;
+        color: Theme.danger;
+    }
+    HorizontalLayout {
+        alignment: start;
+        Button {
+            kind: ButtonKind.ghost;
+            text: "Повторить";
+            clicked => {
+                Store.reload-accounts();
+            }
+        }
+    }
+}
+
+component RemovalConfirm inherits VerticalLayout {
+    in property <string> uuid;
+    Divider { }
+    VerticalLayout {
+        padding-top: 12px;
+        spacing: 12px;
+        alignment: start;
+        Para {
+            text: "Удалить сохранённый вход? Для возвращения понадобится пароль.";
+            leading: 20px;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button {
+                small: true;
+                text: "Удалить вход";
+                enabled: !Store.busy;
+                clicked => {
+                    Store.remove-account(root.uuid);
+                }
+            }
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Отмена";
+                enabled: !Store.busy;
+                clicked => {
+                    Store.accounts-confirm = "";
+                }
+            }
+        }
+    }
+}
+
+component AccountCard inherits Panel {
+    in property <AccountItem> account;
+    in property <bool> blocked;
+    fill: Theme.surface;
+    shadow: false;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: Theme.surface-2;
+                Label {
+                    text: root.account.initial;
+                    font-weight: 600;
+                    font-size: 16px;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Label {
+                    text: root.account.name;
+                    font-weight: 600;
+                    leading: 20px;
+                    overflow: elide;
+                    HintArea {
+                        hint: root.account.name;
+                    }
+                }
+                Label {
+                    text: root.account.current ? "Текущий аккаунт" : "Вход сохранён";
+                    font-size: 12px;
+                    leading: 16px;
+                    color: Theme.dim;
+                }
+            }
+            if root.account.current: Icon {
+                size: 18px;
+                source: @image-url("../assets/icons/check-regular.svg");
+                colorize: Theme.primary;
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Переключиться";
+                enabled: !root.blocked && Store.multi-account && !root.account.current;
+                clicked => {
+                    Store.switch-account(root.account.uuid);
+                }
+            }
+            if Store.multi-account: Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Войти заново";
+                enabled: !root.blocked;
+                clicked => {
+                    Store.dismiss-error();
+                    Store.prefill-username = root.account.name;
+                    Store.accounts-adding = true;
+                }
+            }
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Удалить";
+                has-icon: true;
+                icon: @image-url("../assets/icons/trash-regular.svg");
+                enabled: !Store.busy;
+                clicked => {
+                    Store.accounts-confirm = root.account.uuid;
+                }
+            }
+        }
+        if Store.accounts-confirm == root.account.uuid: RemovalConfirm {
+            uuid: root.account.uuid;
+        }
+    }
+}
+
+component AccountsList inherits VerticalLayout {
+    property <bool> blocked: Store.busy || Store.accounts-loading || Store.accounts-error != "";
+    property <bool> settled: !Store.accounts-loading && Store.accounts-error == "";
+    spacing: 16px;
+    if Store.accounts-loading: Note {
+        text: "Проверяем настройки сервера…";
+    }
+    if Store.accounts-error != "": AccountsError { }
+    if root.settled: Para {
+        text: Store.multi-account ? "Сохранено " + Store.accounts.length + " из " + Store.max-accounts + "." : "Проект отключил несколько аккаунтов. Сохранённые входы можно удалить.";
+        leading: 20px;
+        color: Theme.dim;
+    }
+    for account in Store.accounts: AccountCard {
+        account: account;
+        blocked: root.blocked;
+    }
+    if root.settled && Store.accounts.length == 0: Label {
+        text: "Сохранённых аккаунтов пока нет.";
+        leading: 20px;
+    }
+    if Store.error-shown: Para {
+        text: Store.error-message;
+        leading: 20px;
+        color: Theme.danger;
+    }
+    if !Store.accounts-loading && Store.multi-account && Store.accounts.length >= Store.max-accounts: Para {
+        text: "Чтобы добавить новый аккаунт, удалите один из сохранённых.";
+        leading: 20px;
+        color: Theme.dim;
+    }
+}
+
+export component AccountsDialog inherits VerticalLayout {
+    property <bool> blocked: Store.busy || Store.accounts-loading || Store.accounts-error != "";
+    ModalHeader {
+        title: Store.accounts-adding ? "Добавить аккаунт" : "Аккаунты";
+        subtitle: Store.accounts-adding ? "Текущий вход сохранится" : "Сохранённые входы на этом компьютере";
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        if Store.accounts-adding: CredentialsForm {
+            initial-username: Store.prefill-username;
+        }
+        if !Store.accounts-adding: AccountsList { }
+    }
+    ModalFooter {
+        if Store.accounts-adding: Button {
+            kind: ButtonKind.ghost;
+            text: "Назад";
+            enabled: !Store.busy;
+            clicked => {
+                Store.accounts-adding = false;
+                Store.dismiss-error();
+            }
+        }
+        if !Store.accounts-adding: Button {
+            text: "Добавить аккаунт";
+            has-icon: true;
+            icon: @image-url("../assets/icons/plus-regular.svg");
+            enabled: !root.blocked && Store.multi-account && Store.accounts.length < Store.max-accounts;
+            clicked => {
+                Store.dismiss-error();
+                Store.prefill-username = "";
+                Store.accounts-adding = true;
+            }
+        }
+    }
+}
+
+component GeneralFields inherits VerticalLayout {
+    spacing: 24px;
+    VerticalLayout {
+        spacing: 6px;
+        Note {
+            text: "Папка установки";
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                height: 36px;
+                horizontal-stretch: 1;
+                min-width: 0px;
+                border-radius: Theme.radius-md;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface-2;
+                Label {
+                    x: 13px;
+                    width: parent.width - 26px;
+                    text: Store.install-dir;
+                    leading: 20px;
+                    overflow: elide;
+                }
+            }
+            Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: "Выбрать";
+                has-icon: true;
+                icon: @image-url("../assets/icons/folder-open-regular.svg");
+                clicked => {
+                    Store.pick-folder();
+                }
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: 6px;
+        Note {
+            text: "Кэш загрузок";
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: "Очистить неиспользуемое";
+                clicked => {
+                    Store.collect-garbage();
+                }
+            }
+            if Store.cleaned != "": Label {
+                text: "Удалено объектов: " + Store.cleaned;
+                font-size: 12px;
+                leading: 16px;
+                color: Theme.mute;
+            }
+        }
+    }
+    VerticalLayout {
+        Divider { }
+        HorizontalLayout {
+            padding-top: 16px;
+            spacing: 24px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                SectionTitle {
+                    text: "Консоль игры";
+                }
+                Small {
+                    text: "Открывать журнал игры в отдельном окне при каждом запуске. Пригодится, если игра не запускается или вы собираете сборку. Кнопка «Консоль» на плашке запущенной игры работает и без этого.";
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Switch {
+                    checked: Store.game-console;
+                    accessible-label: "Консоль игры";
+                    toggled(value) => {
+                        Store.game-console = value;
+                    }
+                }
+            }
+        }
+    }
+    VerticalLayout {
+        Divider { }
+        VerticalLayout {
+            padding-top: 16px;
+            spacing: 2px;
+            SectionTitle {
+                text: "Журнал лаунчера";
+            }
+            Small {
+                text: "Если лаунчер не качает сборку или не входит, отправьте журнал разработчикам проекта: так они увидят, что случилось.";
+            }
+        }
+        HorizontalLayout {
+            padding-top: 12px;
+            spacing: 8px;
+            alignment: start;
+            Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: "Открыть папку";
+                has-icon: true;
+                icon: @image-url("../assets/icons/folder-open-regular.svg");
+                clicked => {
+                    Store.open-launcher-logs();
+                }
+            }
+            Button {
+                kind: ButtonKind.secondary;
+                small: true;
+                text: Store.report == Report.sending ? "Отправляю" : "Отправить разработчикам";
+                has-icon: true;
+                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                enabled: Store.report != Report.sending && Store.report != Report.sent;
+                clicked => {
+                    Store.send-launcher-log();
+                }
+            }
+        }
+        if Store.report == Report.sent: SmallNote {
+            text: Store.report-message;
+        }
+        if Store.report == Report.failed: SmallNote {
+            text: "Журнал не ушёл: " + Store.report-message;
+            fault: true;
+        }
+    }
+}
+
+export component GeneralDialog inherits VerticalLayout {
+    ModalHeader {
+        title: "Настройки";
+        subtitle: "Общие параметры лаунчера";
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        if Store.dialog-trouble != "": Trouble {
+            text: Store.dialog-trouble;
+        }
+        if !Store.general-ready && Store.dialog-trouble == "": Note {
+            text: "Загружаю настройки…";
+        }
+        if Store.general-ready: GeneralFields { }
+    }
+    if Store.general-ready: ModalFooter {
+        note: "Laminara v" + Store.version;
+        Button {
+            text: "Сохранить";
+            pad-x: 24px;
+            clicked => {
+                Store.save-general();
+            }
+        }
+    }
+}
+
+component BuildFields inherits VerticalLayout {
+    spacing: 24px;
+    VerticalLayout {
+        HorizontalLayout {
+            padding-bottom: 8px;
+            Note {
+                text: "Оперативная память";
+                horizontal-stretch: 1;
+            }
+            Label {
+                text: Store.memory-label(Store.memory);
+                font-family: Theme.tabular;
+                leading: 20px;
+                font-weight: 600;
+            }
+        }
+        RangeSlider {
+            accessible-label: "Оперативная память";
+            value: Store.memory;
+            minimum: 1024;
+            maximum: max(1024, Store.memory-ceiling);
+            changed(value) => {
+                Store.memory = value;
+            }
+        }
+        HorizontalLayout {
+            padding-top: 4px;
+            Label {
+                text: Store.memory-label(1024);
+                font-size: 11px;
+                color: Theme.mute;
+                horizontal-stretch: 1;
+            }
+            Label {
+                text: Store.memory-label(max(1024, Store.memory-ceiling)) + " — это 80% памяти компьютера";
+                font-size: 11px;
+                color: Theme.mute;
+            }
+        }
+    }
+    VerticalLayout {
+        Divider { }
+        HorizontalLayout {
+            padding-top: 16px;
+            spacing: 16px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                SectionTitle {
+                    text: "Проверить файлы";
+                }
+                Small {
+                    text: "Сверяет каждый файл сборки с сервером и заново скачивает изменённые. Помогает, когда игра падает после вмешательства антивируса.";
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    kind: ButtonKind.ghost;
+                    small: true;
+                    text: "Проверить";
+                    has-icon: true;
+                    icon: @image-url("../assets/icons/shield-check-regular.svg");
+                    clicked => {
+                        Store.repair-build();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component BuildDialog inherits VerticalLayout {
+    ModalHeader {
+        title: "Настройки сборки";
+        subtitle: Store.modal-profile;
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        if Store.dialog-trouble != "": Trouble {
+            text: Store.dialog-trouble;
+        }
+        if !Store.build-ready && Store.dialog-trouble == "": Note {
+            text: "Загружаю настройки сборки…";
+        }
+        if Store.build-ready: BuildFields { }
+    }
+    if Store.build-ready: ModalFooter {
+        Button {
+            text: "Сохранить";
+            pad-x: 24px;
+            clicked => {
+                Store.save-build();
+            }
+        }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <brush> fill;
+    in property <color> ink;
+    in property <int> weight: 400;
+    border-radius: 9px;
+    background: root.fill;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        Label {
+            text: root.text.to-uppercase();
+            font-size: 10px;
+            leading: 14.3px;
+            font-weight: root.weight;
+            tracking: 0.025;
+            color: root.ink;
+        }
+    }
+}
+
+component FeatureHeader inherits HorizontalLayout {
+    in property <FeatureRow> entry;
+    spacing: 8px;
+    alignment: start;
+    Label {
+        text: root.entry.title;
+        font-weight: 600;
+        leading: 20px;
+    }
+    if root.entry.description != "": Label {
+        text: root.entry.description;
+        font-size: 12px;
+        leading: 16px;
+        color: Theme.mute;
+        vertical-alignment: bottom;
+        height: 18px;
+    }
+}
+
+component FeatureOption inherits HoverSurface {
+    in property <FeatureRow> entry;
+    accessible-label: root.entry.title;
+    property <bool> blocked: root.entry.blocked != "";
+    border-radius: Theme.radius-md;
+    border-width: 1px;
+    border-color: root.entry.active ? Theme.primary.with-alpha(0.5) : Theme.border;
+    rest: root.entry.active ? Theme.primary-soft : Theme.surface;
+    hover: root.entry.active ? Theme.primary-soft : root.blocked ? Theme.surface : Theme.surface-2;
+    enabled: !root.blocked;
+    cursor: root.blocked ? MouseCursor.not-allowed : MouseCursor.pointer;
+    opacity: root.blocked ? 0.45 : 1;
+    clicked => {
+        if root.entry.none {
+            Store.feature-none(root.entry.group);
+        } else {
+            Store.feature-pick(root.entry.group, root.entry.option, root.entry.active, root.entry.single);
+        }
+    }
+    HorizontalLayout {
+        padding-left: 13px;
+        padding-right: 13px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 12px;
+        Icon {
+            size: 18px;
+            colorize: root.entry.active ? Theme.primary : Theme.mute;
+            source: root.entry.single
+                ? (root.entry.active ? @image-url("../assets/icons/radio-button-fill.svg") : @image-url("../assets/icons/circle-regular.svg"))
+                : (root.entry.active ? @image-url("../assets/icons/check-square-fill.svg") : @image-url("../assets/icons/square-regular.svg"));
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Label {
+                    text: root.entry.title;
+                    font-weight: 500;
+                    leading: 20px;
+                }
+                if root.entry.badge != "": VerticalLayout {
+                    alignment: center;
+                    Chip {
+                        text: root.entry.badge;
+                        fill: Theme.primary-soft;
+                        ink: Theme.primary;
+                        weight: 600;
+                    }
+                }
+                if root.blocked: VerticalLayout {
+                    alignment: center;
+                    Chip {
+                        text: root.entry.blocked;
+                        fill: Theme.surface-2;
+                        ink: Theme.mute;
+                    }
+                }
+            }
+            if root.entry.description != "": Small {
+                color: Theme.mute;
+                text: root.entry.description;
+            }
+        }
+    }
+}
+
+component FeatureLine inherits Rectangle {
+    in property <FeatureRow> entry;
+    VerticalLayout {
+        padding-top: root.entry.gap;
+        padding-left: root.entry.depth * 17px;
+        if root.entry.header: FeatureHeader {
+            entry: root.entry;
+        }
+        if !root.entry.header: FeatureOption {
+            entry: root.entry;
+        }
+    }
+    for level in root.entry.depth: Rectangle {
+        x: level * 17px;
+        y: level == root.entry.depth - 1 && root.entry.opens ? root.entry.gap : 0px;
+        width: 1px;
+        height: root.height - self.y;
+        background: Theme.border;
+    }
+}
+
+component FeatureList inherits VerticalLayout {
+    for row in Store.feature-rows: FeatureLine {
+        entry: row;
+    }
+}
+
+export component FeaturesDialog inherits VerticalLayout {
+    ModalHeader {
+        title: "Моды";
+        subtitle: Store.modal-profile;
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        if Store.dialog-trouble != "": Trouble {
+            text: Store.dialog-trouble;
+        }
+        if !Store.features-ready && Store.dialog-trouble == "": Note {
+            text: "Загружаю список модов…";
+        }
+        if Store.features-ready && Store.features-empty: Label {
+            text: "У этой сборки нет опциональных модов.";
+            leading: 20px;
+            color: Theme.mute;
+        }
+        if Store.features-ready: FeatureList { }
+    }
+    if Store.features-ready: ModalFooter {
+        Button {
+            kind: ButtonKind.ghost;
+            small: true;
+            text: "Сбросить";
+            clicked => {
+                Store.features-reset();
+            }
+        }
+        Button {
+            text: "Сохранить";
+            pad-x: 24px;
+            clicked => {
+                Store.features-save();
+            }
+        }
+    }
+}
+
+component LibraryLine inherits HorizontalLayout {
+    in property <[BuildItem]> items;
+    spacing: 12px;
+    alignment: start;
+    for build in root.items: LibraryCard {
+        width: (root.width - 24px) / 3;
+        item: build;
+        selected: build.name == Store.selected;
+        clicked => {
+            Store.select(build.name);
+            Store.close-modal();
+        }
+    }
+}
+
+component LibraryGrid inherits VerticalLayout {
+    spacing: 16px;
+    TextField {
+        placeholder: "Поиск сборки…";
+        init => {
+            self.take-focus();
+        }
+        edited(text) => {
+            Store.library-search(text);
+        }
+    }
+    VerticalLayout {
+        spacing: 12px;
+        for line in Store.library: LibraryLine {
+            items: line.items;
+        }
+        if Store.library-empty: Label {
+            height: 100px;
+            text: "Ничего не найдено";
+            leading: 20px;
+            color: Theme.mute;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component LibraryDialog inherits VerticalLayout {
+    ModalHeader {
+        title: "Все сборки";
+        subtitle: Store.library-caption;
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        LibraryGrid { }
+    }
+}
+
+component NewsPairRow inherits HorizontalLayout {
+    in property <NewsPair> pair;
+    spacing: 20px;
+    NewsCard {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+        compact: false;
+        item: root.pair.left;
+    }
+    if root.pair.has-right: NewsCard {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+        compact: false;
+        item: root.pair.right;
+    }
+    if !root.pair.has-right: Rectangle {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+    }
+}
+
+component NewsPairs inherits VerticalLayout {
+    spacing: 20px;
+    for pair in Store.news-pairs: NewsPairRow {
+        pair: pair;
+    }
+}
+
+component NewsColumn inherits VerticalLayout {
+    spacing: 20px;
+    for item in Store.news: NewsCard {
+        compact: false;
+        item: item;
+    }
+}
+
+export component NewsDialog inherits VerticalLayout {
+    property <bool> paired: (Viewport.width - 64px) * 0.84 - 58px >= 672px;
+    ModalHeader {
+        title: "Новости";
+        subtitle: Store.news-caption;
+        close => {
+            Store.close-modal();
+        }
+    }
+    ModalBody {
+        if Store.news.length == 0: Label {
+            height: (Viewport.height - 64px) * 0.88 - 92px - 48px;
+            text: "Пока новостей нет";
+            leading: 20px;
+            color: Theme.mute;
+            horizontal-alignment: center;
+        }
+        if Store.news.length > 0 && root.paired: NewsPairs { }
+        if Store.news.length > 0 && !root.paired: NewsColumn { }
+    }
+}
+
+component CrashLog inherits VerticalLayout {
+    padding-top: 13px;
+    padding-bottom: 13px;
+    if Store.crash-log.length == 0: Label {
+        x: 16px;
+        text: "Журнал пуст.";
+        font-family: Theme.mono;
+        font-size: 12px;
+        color: Theme.dim;
+    }
+    for line[index] in Store.crash-log: LogLine {
+        index: index;
+        text: line.text;
+        level: line.level;
+    }
+}
+
+export component CrashDialog inherits VerticalLayout {
+    ModalHeader {
+        title: "Игра завершилась с ошибкой";
+        subtitle: "Код выхода " + Store.crash-code;
+        close => {
+            Store.dismiss-crash();
+        }
+    }
+    VerticalLayout {
+        vertical-stretch: 1;
+        padding-left: 28px;
+        padding-right: 28px;
+        padding-top: 24px;
+        padding-bottom: 24px;
+        spacing: 16px;
+        Rectangle {
+            border-radius: Theme.radius-md;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.surface-2;
+            HorizontalLayout {
+                padding: 13px;
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: start;
+                    padding-top: 2px;
+                    Icon {
+                        size: 18px;
+                        source: @image-url("../assets/icons/warning-regular.svg");
+                        colorize: Theme.primary;
+                    }
+                }
+                Para {
+                    text: "Последние строки журнала игры. Весь журнал с поиском по ошибкам — в консоли.";
+                    leading: 20px;
+                    color: Theme.dim;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: Theme.radius-md;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.surface;
+            clip: true;
+            ScrollArea {
+                content-height: log.preferred-height;
+                log := CrashLog {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: self.preferred-height;
+                }
+            }
+        }
+        if Store.crash-sent != "": Notice {
+            text: Store.crash-sent;
+        }
+        if Store.crash-trouble != "": Notice {
+            text: "Отчёт не ушёл: " + Store.crash-trouble;
+            fault: true;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Весь журнал";
+                has-icon: true;
+                icon: @image-url("../assets/icons/terminal-window-regular.svg");
+                clicked => {
+                    Store.open-console();
+                }
+            }
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: "Копировать";
+                clicked => {
+                    Store.copy-crash();
+                }
+            }
+            Button {
+                kind: ButtonKind.ghost;
+                small: true;
+                text: Store.crash-sending ? "Отправляю" : "Отправить разработчикам";
+                has-icon: true;
+                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                enabled: !Store.crash-sending && Store.crash-sent == "";
+                clicked => {
+                    Store.send-crash();
+                }
+            }
+            Button {
+                text: "Закрыть";
+                pad-x: 24px;
+                clicked => {
+                    Store.dismiss-crash();
+                }
+            }
+        }
+    }
+}

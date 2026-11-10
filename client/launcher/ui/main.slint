@@ -1,0 +1,173 @@
+import "../assets/fonts/Inter.ttf";
+import "../assets/fonts/JetBrainsMono.ttf";
+import "../assets/fonts/InterTabular.ttf";
+import { Theme, Media } from "theme.slint";
+import { Viewport, HeroMedia } from "atoms.slint";
+import { WindowButton, TooltipLayer } from "controls.slint";
+import { Modal } from "modal.slint";
+import { LogPick } from "log.slint";
+import { Store, Phase, ModalKind } from "store.slint";
+import { Header, HeroPanel, BuildStrip, RunningBar, NewsPanel, AccountMenu } from "home.slint";
+import { LoginScreen, ConnectingScreen, SyncOverlay, UpdateBanner, UpdateScreen, ErrorToast } from "overlays.slint";
+import { AccountsDialog, GeneralDialog, BuildDialog, FeaturesDialog, LibraryDialog, NewsDialog, CrashDialog } from "dialogs.slint";
+
+export { Theme, Media, Store, Phase, ModalKind, LogPick }
+export { ConsoleWindow, ConsoleStore, ConsoleLine } from "console.slint";
+export { BuildItem, LibraryRow, NewsItem, NewsPair, AccountItem, FeatureRow, LogRow, Install, Report } from "store.slint";
+
+component HomeView inherits VerticalLayout {
+    Header { }
+    HorizontalLayout {
+        vertical-stretch: 1;
+        spacing: 32px;
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            HeroPanel { }
+        }
+        if Viewport.width >= 1024px && Store.news.length > 0: NewsPanel { }
+    }
+    if Store.phase == Phase.running: RunningBar { }
+    BuildStrip { }
+}
+
+export component MainWindow inherits Window {
+    property <bool> home: Store.phase != Phase.connecting && Store.phase != Phase.login && Store.phase != Phase.updating;
+    property <bool> compact-modal: Store.modal == ModalKind.accounts || Store.modal == ModalKind.general || Store.modal == ModalKind.build;
+    title: Media.title;
+    icon: Media.has-logo ? Media.logo : @image-url("../icons/128x128.png");
+    no-frame: true;
+    resize-border-width: 6px;
+    preferred-width: 1180px;
+    preferred-height: 720px;
+    min-width: 960px;
+    min-height: 600px;
+    background: Theme.bg;
+    default-font-family: Theme.sans;
+
+    init => {
+        Viewport.width = self.width;
+        Viewport.height = self.height;
+        keys.focus();
+    }
+    changed width => {
+        Viewport.width = self.width;
+    }
+    changed height => {
+        Viewport.height = self.height;
+    }
+
+    public function refocus() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.modifiers.control && Store.crash-open && LogPick.anchor >= 0 && (event.text == "c" || event.text == "C" || event.text == "с" || event.text == "С") {
+                LogPick.copy();
+                return EventResult.accept;
+            }
+            if event.text == Key.Escape {
+                if Store.crash-open {
+                    Store.dismiss-crash();
+                } else if Store.modal-open {
+                    Store.close-modal();
+                } else if Store.menu-open {
+                    Store.close-menu();
+                }
+                return EventResult.accept;
+            }
+            EventResult.reject
+        }
+
+        HeroMedia { }
+
+        VerticalLayout {
+            Rectangle {
+                height: 36px;
+            }
+            if Store.phase == Phase.connecting: ConnectingScreen {
+                vertical-stretch: 1;
+            }
+            if Store.phase == Phase.updating: UpdateScreen {
+                vertical-stretch: 1;
+            }
+            if Store.phase == Phase.login: LoginScreen {
+                vertical-stretch: 1;
+            }
+            if root.home: HomeView {
+                vertical-stretch: 1;
+            }
+        }
+
+        if Store.phase == Phase.syncing: SyncOverlay {
+            y: 0;
+            height: root.height;
+        }
+
+        if root.home && Store.update-banner: UpdateBanner {
+            y: 0;
+            height: self.preferred-height;
+        }
+
+        if Store.error-shown && Store.phase != Phase.login && Store.modal != ModalKind.accounts: ErrorToast {
+            y: root.height - 196px - self.preferred-height;
+            height: self.preferred-height;
+        }
+
+        Rectangle {
+            y: 0;
+            height: 36px;
+            WindowMoveArea { }
+            HorizontalLayout {
+                alignment: end;
+                WindowButton {
+                    icon: @image-url("../assets/icons/minus-bold.svg");
+                    accessible-label: "Свернуть";
+                    clicked => {
+                        root.minimized = true;
+                    }
+                }
+                WindowButton {
+                    icon: @image-url("../assets/icons/x-bold.svg");
+                    accessible-label: "Закрыть";
+                    icon-size: 16px;
+                    closer: true;
+                    clicked => {
+                        Store.quit();
+                    }
+                }
+            }
+        }
+
+        if Store.menu-open && root.home: AccountMenu {
+            anchor-right: root.width - 36px;
+            anchor-top: 100px;
+        }
+
+        Modal {
+            open: Store.modal-open;
+            compact: root.compact-modal;
+            close => {
+                Store.close-modal();
+            }
+            if Store.modal == ModalKind.accounts: AccountsDialog { }
+            if Store.modal == ModalKind.general: GeneralDialog { }
+            if Store.modal == ModalKind.build: BuildDialog { }
+            if Store.modal == ModalKind.features: FeaturesDialog { }
+            if Store.modal == ModalKind.library: LibraryDialog { }
+            if Store.modal == ModalKind.news: NewsDialog { }
+        }
+
+        Modal {
+            open: Store.crash-open;
+            compact: false;
+            close => {
+                Store.dismiss-crash();
+            }
+            CrashDialog { }
+        }
+
+        TooltipLayer { }
+    }
+}

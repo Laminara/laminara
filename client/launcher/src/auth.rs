@@ -1,0 +1,252 @@
+use std::future::Future;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use keyring::Entry;
+use laminara_core::KEYRING_SERVICE as SERVICE;
+use laminara_core::account::GameSession;
+use laminara_core::secrets::{delete_password, read_password};
+use laminara_core::state::Account;
+use zeroize::Zeroizing;
+
+pub struct Session {
+    pub account: Account,
+    pub access: Zeroizing<String>,
+    pub access_expires_unix_nanos: i64,
+    pub game: GameSession,
+}
+
+pub(crate) async fn offload<T, F>(work: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(message),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+async fn load_secret(
+    what: &str,
+    work: impl Future<Output = Result<Option<String>, String>>,
+) -> Option<String> {
+    match work.await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::warn!("{what} unavailable: {e}");
+            None
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct AuthManager {
+    pub operation: tokio::sync::Mutex<()>,
+    session: Mutex<Option<Session>>,
+    generation: AtomicU64,
+}
+
+pub struct CredentialChange<'a> {
+    core: &'a laminara_core::Core,
+    previous: Option<(Option<String>, Option<String>)>,
+}
+
+impl<'a> CredentialChange<'a> {
+    pub fn new(core: &'a laminara_core::Core) -> Self {
+        Self {
+            core,
+            previous: Some(core.credentials()),
+        }
+    }
+
+    pub fn commit(mut self) {
+        self.previous = None;
+    }
+}
+
+impl Drop for CredentialChange<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.core.restore_credentials(previous);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthStatus {
+    pub signed_in: bool,
+    pub username: Option<String>,
+    pub uuid: Option<String>,
+}
+
+impl AuthManager {
+    fn entry(endpoint_id: &str, uuid: &str) -> Result<Entry, String> {
+        Entry::new(SERVICE, &format!("{endpoint_id}:{uuid}")).map_err(|e| e.to_string())
+    }
+
+    pub async fn store_refresh(
+        &self,
+        endpoint_id: &str,
+        uuid: &str,
+        refresh: &str,
+    ) -> Result<(), String> {
+        let entry = Self::entry(endpoint_id, uuid)?;
+        let refresh = refresh.to_string();
+        offload(move || entry.set_password(&refresh).map_err(|e| e.to_string())).await
+    }
+
+    pub async fn keep_refresh(&self, endpoint_id: &str, uuid: &str, refresh: &str) {
+        if let Err(e) = self.store_refresh(endpoint_id, uuid, refresh).await {
+            tracing::warn!("refresh token save failed for {uuid}: {e}");
+        }
+    }
+
+    pub async fn load_refresh(&self, endpoint_id: &str, uuid: &str) -> Option<String> {
+        let entry = Self::entry(endpoint_id, uuid).ok()?;
+        load_secret("refresh token", offload(move || read_password(entry))).await
+    }
+
+    pub async fn clear_account(&self, endpoint_id: &str, uuid: &str) -> Result<(), String> {
+        let refresh = Self::entry(endpoint_id, uuid)?;
+        let game = Self::game_entry(endpoint_id, uuid)?;
+        offload(move || {
+            delete_password(refresh)?;
+            delete_password(game)
+        })
+        .await
+    }
+
+    fn game_entry(endpoint_id: &str, uuid: &str) -> Result<Entry, String> {
+        Entry::new(SERVICE, &format!("{endpoint_id}:{uuid}:yggdrasil")).map_err(|e| e.to_string())
+    }
+
+    pub async fn store_game(
+        &self,
+        endpoint_id: &str,
+        uuid: &str,
+        access: &str,
+        client: &str,
+    ) -> Result<(), String> {
+        let entry = Self::game_entry(endpoint_id, uuid)?;
+        let secret = format!("{access}\n{client}");
+        offload(move || entry.set_password(&secret).map_err(|e| e.to_string())).await
+    }
+
+    pub async fn load_game(&self, endpoint_id: &str, uuid: &str) -> Option<(String, String)> {
+        let entry = Self::game_entry(endpoint_id, uuid).ok()?;
+        let raw = load_secret("game session secret", offload(move || read_password(entry))).await?;
+        let (access, client) = raw.split_once('\n')?;
+        Some((access.to_string(), client.to_string()))
+    }
+
+    pub fn set_session(&self, session: Session) -> u64 {
+        *self.session.lock().unwrap() = Some(session);
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn clear_session(&self) {
+        *self.session.lock().unwrap() = None;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    pub fn access_expiry(&self) -> Option<i64> {
+        self.session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.access_expires_unix_nanos)
+    }
+
+    pub fn update_access(&self, token: String, expires_unix_nanos: i64) {
+        if let Some(session) = self.session.lock().unwrap().as_mut() {
+            session.access = Zeroizing::new(token);
+            session.access_expires_unix_nanos = expires_unix_nanos;
+        }
+    }
+
+    pub fn status(&self) -> AuthStatus {
+        match self.session.lock().unwrap().as_ref() {
+            Some(session) => AuthStatus {
+                signed_in: true,
+                username: Some(session.account.name.clone()),
+                uuid: Some(session.account.uuid.clone()),
+            },
+            None => AuthStatus {
+                signed_in: false,
+                username: None,
+                uuid: None,
+            },
+        }
+    }
+
+    pub fn game_session(&self) -> Option<GameSession> {
+        self.session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.game.clone())
+    }
+
+    pub fn identity(&self) -> Option<(String, String, String)> {
+        self.session.lock().unwrap().as_ref().map(|s| {
+            (
+                s.account.endpoint_id.clone(),
+                s.account.uuid.clone(),
+                s.account.name.clone(),
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn core(path: &std::path::Path) -> laminara_core::Core {
+        let config = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1, "endpoints": [],
+            "serverPublicKeyHex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+            "installDir": path.join("game")
+        })).unwrap();
+        laminara_core::Core::new(
+            laminara_core::paths::LaminaraPaths {
+                config_dir: path.join("config"),
+                data_dir: path.join("data"),
+            },
+            config,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn failed_or_cancelled_change_restores_both_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let core = core(directory.path());
+        let previous = (Some("alice-access".into()), Some("alice-machine".into()));
+        core.restore_credentials(previous.clone());
+        {
+            let _change = CredentialChange::new(&core);
+            core.sign_out();
+            core.restore_credentials((Some("bob-access".into()), Some("bob-machine".into())));
+        }
+        assert_eq!(core.credentials(), previous);
+    }
+
+    #[test]
+    fn successful_change_keeps_new_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let core = core(directory.path());
+        core.restore_credentials((Some("alice-access".into()), Some("alice-machine".into())));
+        let change = CredentialChange::new(&core);
+        let next = (Some("bob-access".into()), Some("bob-machine".into()));
+        core.restore_credentials(next.clone());
+        change.commit();
+        assert_eq!(core.credentials(), next);
+    }
+}

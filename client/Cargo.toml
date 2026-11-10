@@ -1,3 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["core", "src-tauri"]
+members = ["core", "launcher"]
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 3

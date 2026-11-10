@@ -1,0 +1,891 @@
+import { Theme, Media } from "theme.slint";
+import { Label, Para, Icon, Dot, StatusDot, OnlineDot, PingDot, Panel, Viewport, TopRoundedImage } from "atoms.slint";
+import { Button, ButtonKind, HoverSurface, IconTap } from "controls.slint";
+import { Store, BuildItem, NewsItem, Install, ModalKind, Phase } from "store.slint";
+
+export component BrandMark inherits HorizontalLayout {
+    spacing: 12px;
+    alignment: start;
+    if Media.has-logo: Rectangle {
+        width: 36px;
+        height: 36px;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: Media.logo-mark;
+            image-fit: contain;
+        }
+    }
+    if !Media.has-logo: Rectangle {
+        width: 36px;
+        height: 36px;
+        border-radius: Theme.radius-md;
+        background: Theme.primary;
+        Icon {
+            size: 20px;
+            source: @image-url("../assets/icons/brand-mark.svg");
+            colorize: Theme.primary-ink;
+        }
+    }
+    Label {
+        text: Media.name;
+        font-size: 18px;
+        leading: 28px;
+        font-weight: 800;
+        tracking: 0.14;
+        overflow: elide;
+        horizontal-stretch: 1;
+        min-width: 0px;
+    }
+}
+
+export component Header inherits Rectangle {
+    WindowMoveArea { }
+    HorizontalLayout {
+        padding-left: 36px;
+        padding-right: 36px;
+        padding-top: 24px;
+        padding-bottom: 24px;
+        spacing: 16px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            BrandMark { }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            horizontal-stretch: 0;
+            if Store.has-total: Panel {
+                height: 40px;
+                fill: Theme.panel;
+                radius: 20px;
+                shadow: false;
+                blur-behind: true;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    alignment: center;
+                    OnlineDot { }
+                    HorizontalLayout {
+                        Label {
+                            text: Store.total-online;
+                            font-family: Theme.tabular;
+                            font-weight: 600;
+                            leading: 20px;
+                        }
+                        Label {
+                            text: " / " + Store.total-max;
+                            font-family: Theme.tabular;
+                            font-weight: 600;
+                            leading: 20px;
+                            color: Theme.dim;
+                        }
+                    }
+                    Label {
+                        text: "ИГРАЮТ";
+                        font-size: 11px;
+                        tracking: 0.05;
+                        color: Theme.dim;
+                    }
+                }
+            }
+            IconTap {
+                width: 40px;
+                accessible-label: "Настройки";
+                height: 40px;
+                border-radius: 20px;
+                border-width: 1px;
+                border-color: Theme.border;
+                rest-fill: Theme.surface;
+                icon: @image-url("../assets/icons/gear-regular.svg");
+                icon-size: 18px;
+                clicked => {
+                    Store.open-modal(ModalKind.general);
+                }
+            }
+            HoverSurface {
+                height: 40px;
+                border-radius: 20px;
+                border-width: 1px;
+                border-color: Theme.border;
+                rest: Theme.surface;
+                hover: Theme.surface-2;
+                clicked => {
+                    Store.toggle-menu();
+                }
+                HorizontalLayout {
+                    padding-left: 5px;
+                    padding-right: 15px;
+                    spacing: 10px;
+                    alignment: start;
+                    if Store.has-face: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: Theme.surface-2;
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: Store.face;
+                                image-fit: fill;
+                            }
+                        }
+                    }
+                    if !Store.has-face: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: Theme.primary;
+                            Label {
+                                text: Store.account-initial;
+                                font-weight: 700;
+                                leading: 20px;
+                                color: Theme.primary-ink;
+                            }
+                        }
+                    }
+                    Label {
+                        text: Store.account-name;
+                        font-weight: 600;
+                        leading: 20px;
+                        overflow: elide;
+                        max-width: 160px;
+                    }
+                    Icon {
+                        size: 14px;
+                        source: Store.menu-open ? @image-url("../assets/icons/caret-up-regular.svg") : @image-url("../assets/icons/caret-down-regular.svg");
+                    }
+                }
+            }
+        }
+    }
+}
+
+component MenuEntry inherits HoverSurface {
+    in property <string> label;
+    in property <bool> has-icon;
+    in property <image> icon;
+    accessible-label: root.label;
+    height: 40px;
+    rest: transparent;
+    hover: Theme.surface-2;
+    opacity: self.enabled ? 1 : 0.5;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+        if root.has-icon: Icon {
+            size: 16px;
+            source: root.icon;
+            colorize: root.hovered ? Theme.text : Theme.dim;
+        }
+        Label {
+            text: root.label;
+            leading: 20px;
+            color: root.hovered ? Theme.text : Theme.dim;
+            horizontal-stretch: 1;
+            animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+        }
+    }
+}
+
+export component AccountMenu inherits Rectangle {
+    in property <length> anchor-right;
+    in property <length> anchor-top;
+    TouchArea {
+        clicked => {
+            Store.close-menu();
+        }
+    }
+    Panel {
+        x: root.anchor-right - 176px;
+        y: root.anchor-top + 8px;
+        width: 176px;
+        height: self.preferred-height;
+        fill: Theme.bg-tint;
+        VerticalLayout {
+            padding-top: 4px;
+            padding-bottom: 4px;
+            if Store.multi-account: MenuEntry {
+                label: "Аккаунты";
+                enabled: !Store.busy && Store.phase == Phase.home;
+                clicked => {
+                    Store.open-modal(ModalKind.accounts);
+                }
+            }
+            MenuEntry {
+                label: "Выход";
+                has-icon: true;
+                icon: @image-url("../assets/icons/sign-out-regular.svg");
+                enabled: !Store.busy && Store.phase == Phase.home;
+                opacity: 1;
+                clicked => {
+                    Store.logout();
+                }
+            }
+        }
+    }
+}
+
+export component Meta inherits Label {
+    font-size: 11px;
+    font-weight: 600;
+    tracking: 0.24;
+    color: Theme.dim;
+}
+
+component EmptyHero inherits VerticalLayout {
+    alignment: end;
+    Rectangle {
+        max-width: 672px;
+        VerticalLayout {
+            spacing: 12px;
+            Para {
+                text: "Пока нет доступных сборок";
+                font-size: 30px;
+                leading: 36px;
+                font-weight: 600;
+            }
+            Para {
+                text: "Для вашего аккаунта сборки ещё не открыты. Напишите администратору проекта — он выдаёт доступ вручную.";
+                leading: 20px;
+                color: Theme.dim;
+            }
+        }
+    }
+}
+
+component BuildHero inherits VerticalLayout {
+    property <length> title-size: clamp(40px, Viewport.width * 0.06, 84px);
+    alignment: end;
+    padding-left: 40px;
+    padding-right: 40px;
+    padding-bottom: 16px;
+    spacing: 24px;
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        Meta {
+            text: "ВЫБРАННАЯ СБОРКА";
+        }
+        Dot { }
+        Meta {
+            text: (Store.build.kind != "" ? Store.build.kind : "Minecraft").to-uppercase();
+        }
+        Dot { }
+        Meta {
+            text: Store.build.size.to-uppercase();
+        }
+    }
+    Para {
+        text: Store.build.name;
+        font-size: root.title-size;
+        leading: root.title-size * 0.9;
+        font-weight: 800;
+        tracking: -0.025;
+        max-lines: 2;
+        overflow: elide;
+        max-width: 672px;
+    }
+    if Store.build.has-players: HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        OnlineDot { }
+        HorizontalLayout {
+            Label {
+                text: Store.build.online;
+                font-family: Theme.tabular;
+                font-weight: 600;
+                leading: 20px;
+            }
+            Label {
+                text: " / " + Store.build.max;
+                font-family: Theme.tabular;
+                font-weight: 600;
+                leading: 20px;
+                color: Theme.dim;
+            }
+        }
+        Label {
+            text: "играют";
+            leading: 20px;
+            color: Theme.dim;
+        }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        alignment: start;
+        padding-top: 4px;
+        Button {
+            kind: ButtonKind.primary;
+            fixed-height: 52px;
+            pad-x: 28px;
+            text-size: 15px;
+            text-leading: 21px;
+            text: Store.build.blocked ? Store.build.badge.to-uppercase() : Store.action-label;
+            has-icon: true;
+            icon: @image-url("../assets/icons/play-fill.svg");
+            enabled: !Store.build.blocked;
+            clicked => {
+                Store.play();
+            }
+        }
+        IconTap {
+            width: 52px;
+            accessible-label: "Настройки сборки";
+            height: 52px;
+            border-radius: Theme.radius-md;
+            border-width: 1px;
+            border-color: Theme.border;
+            rest-fill: Theme.surface-2;
+            hover-fill: Theme.surface-3;
+            icon: @image-url("../assets/icons/gear-regular.svg");
+            icon-size: 20px;
+            clicked => {
+                Store.open-modal(ModalKind.build);
+            }
+        }
+        if Store.build.has-features: mods := HoverSurface {
+            height: 52px;
+            border-radius: Theme.radius-md;
+            border-width: 1px;
+            border-color: Theme.border;
+            rest: Theme.surface-2;
+            hover: Theme.surface-3;
+            clicked => {
+                Store.open-modal(ModalKind.features);
+            }
+            HorizontalLayout {
+                padding-left: 17px;
+                padding-right: 17px;
+                spacing: 8px;
+                Icon {
+                    size: 18px;
+                    source: @image-url("../assets/icons/sliders-horizontal-regular.svg");
+                    colorize: mods.hovered ? Theme.text : Theme.dim;
+                }
+                Label {
+                    text: "Моды";
+                    font-weight: 500;
+                    leading: 20px;
+                    color: mods.hovered ? Theme.text : Theme.dim;
+                    animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+                }
+            }
+        }
+    }
+}
+
+export component HeroPanel inherits Rectangle {
+    if !Store.has-build: EmptyHero { }
+    if Store.has-build: BuildHero { }
+}
+
+component CardSurface inherits HoverSurface {
+    in property <BuildItem> item;
+    in property <bool> selected;
+    accessible-label: root.item.name;
+    hint: root.item.name;
+    rest: root.selected ? Theme.primary-soft : Theme.surface;
+    hover: root.selected ? Theme.primary-soft : Theme.surface-2;
+    border-radius: Theme.radius-lg;
+    border-width: 1px;
+    border-color: root.selected ? Theme.primary.with-alpha(0.5) : Theme.border;
+    opacity: root.item.blocked ? 0.5 : 1;
+}
+
+component OnlineMark inherits VerticalLayout {
+    alignment: center;
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.online;
+    }
+}
+
+export component StripCard inherits CardSurface {
+    property <color> faint: root.selected ? Theme.dim : Theme.mute;
+    VerticalLayout {
+        padding: 17px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                alignment: start;
+                Label {
+                    text: (root.item.kind != "" ? root.item.kind : "Сборка").to-uppercase();
+                    font-size: 10px;
+                    font-weight: 600;
+                    tracking: 0.2;
+                    color: root.faint;
+                    overflow: elide;
+                }
+                if root.item.minecraft != "": Label {
+                    text: " · " + root.item.minecraft;
+                    font-size: 10px;
+                    font-weight: 600;
+                    tracking: 0.2;
+                    color: Theme.dim;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+            if root.item.blocked: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    border-radius: Theme.radius-md;
+                    background: Theme.surface-2;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        Label {
+                            text: root.item.badge.to-uppercase();
+                            font-size: 9px;
+                            font-weight: 700;
+                            tracking: 0.05;
+                            color: Theme.mute;
+                        }
+                    }
+                }
+            }
+            if !root.item.blocked && root.selected: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 23px;
+                    height: 15px;
+                    border-radius: Theme.radius-md;
+                    background: Theme.primary;
+                    Icon {
+                        size: 11px;
+                        source: @image-url("../assets/icons/check-bold.svg");
+                        colorize: Theme.primary-ink;
+                    }
+                }
+            }
+            if !root.item.blocked && !root.selected: VerticalLayout {
+                alignment: center;
+                StatusDot {
+                    fill: root.item.install == Install.installed ? Theme.online
+                        : root.item.install == Install.missing ? Theme.mute : Theme.primary;
+                }
+            }
+        }
+        Label {
+            text: root.item.name;
+            font-size: 15px;
+            leading: 18.75px;
+            font-weight: 700;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            if root.item.has-players: OnlineMark { }
+            if root.item.has-players: Label {
+                text: root.item.online;
+                font-family: Theme.tabular;
+                font-size: 12px;
+                leading: 16px;
+                color: Theme.dim;
+            }
+            if root.item.has-players: Label {
+                text: "/ " + root.item.max;
+                font-family: Theme.tabular;
+                font-size: 12px;
+                leading: 16px;
+                color: root.faint;
+            }
+        }
+    }
+}
+
+export component LibraryCard inherits CardSurface {
+    VerticalLayout {
+        padding: 17px;
+        spacing: 8px;
+        alignment: start;
+        HorizontalLayout {
+            Label {
+                text: (root.item.kind != "" ? root.item.kind : "Сборка").to-uppercase();
+                font-size: 10px;
+                font-weight: 600;
+                tracking: 0.18;
+                color: Theme.mute;
+                horizontal-stretch: 1;
+            }
+            if root.item.blocked: Label {
+                text: root.item.badge.to-uppercase();
+                font-size: 10px;
+                font-weight: 700;
+                tracking: 0.05;
+                color: Theme.mute;
+            }
+            if !root.item.blocked && root.item.has-players: HorizontalLayout {
+                spacing: 4px;
+                OnlineMark { }
+                Label {
+                    text: root.item.online + " / " + root.item.max;
+                    font-size: 11px;
+                    color: Theme.dim;
+                }
+            }
+        }
+        Para {
+            text: root.item.name;
+            font-size: 15px;
+            leading: 18.75px;
+            font-weight: 700;
+        }
+        Para {
+            text: root.item.blocked ? root.item.reason : root.item.size;
+            font-size: 12px;
+            leading: 16px;
+            color: Theme.dim;
+        }
+    }
+}
+
+component StripSlot inherits VerticalLayout {
+    in property <BuildItem> item;
+    alignment: start;
+    StripCard {
+        width: 210px;
+        item: root.item;
+        selected: root.item.name == Store.selected;
+        clicked => {
+            Store.select(root.item.name);
+        }
+    }
+}
+
+export component BuildStrip inherits VerticalLayout {
+    padding-left: 40px;
+    padding-right: 40px;
+    padding-bottom: 32px;
+    spacing: 12px;
+    HorizontalLayout {
+        Meta {
+            text: "СМЕНИТЬ СБОРКУ";
+            horizontal-stretch: 1;
+        }
+        all := HoverSurface {
+            height: 24px;
+            rest: transparent;
+            hover: transparent;
+            clicked => {
+                Store.open-modal(ModalKind.library);
+            }
+            Label {
+                text: "ВСЕ СБОРКИ (" + Store.build-count + ")";
+                font-size: 11px;
+                tracking: 0.05;
+                color: all.hovered ? Theme.text : Theme.mute;
+                animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+            }
+        }
+    }
+    Flickable {
+        height: row.preferred-height + 4px;
+        content-width: row.preferred-width;
+        content-height: self.height;
+        mouse-drag-pan-enabled: false;
+        row := HorizontalLayout {
+            x: 0;
+            y: 0;
+            spacing: 12px;
+            alignment: start;
+            height: self.preferred-height;
+            for build in Store.builds: StripSlot {
+                item: build;
+            }
+        }
+    }
+}
+
+export component RunningBar inherits HorizontalLayout {
+    padding-left: 40px;
+    padding-right: 40px;
+    padding-bottom: 12px;
+    alignment: center;
+    Panel {
+        radius: 27px;
+        fill: Theme.panel-2;
+        stroke: Theme.primary.with-alpha(0.4);
+        blur-behind: true;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 8px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 16px;
+            HorizontalLayout {
+                spacing: 10px;
+                PingDot { }
+                HorizontalLayout {
+                    Label {
+                        text: "Игра запущена — ";
+                        leading: 20px;
+                    }
+                    Label {
+                        text: Store.running-build;
+                        leading: 20px;
+                        font-weight: 600;
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    kind: ButtonKind.secondary;
+                    small: true;
+                    pad-x: 16px;
+                    radius: 18px;
+                    text: "Консоль";
+                    text-tracking: 0;
+                    has-icon: true;
+                    icon: @image-url("../assets/icons/terminal-window-regular.svg");
+                    icon-size: 15px;
+                    clicked => {
+                        Store.open-console();
+                    }
+                }
+                stop := Rectangle {
+                    height: 36px;
+                    border-radius: 18px;
+                    background: Theme.primary;
+                    opacity: stop-area.has-hover ? 0.9 : 1;
+                    animate opacity { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+                    stop-area := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            Store.stop-game();
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        Icon {
+                            size: 13px;
+                            source: @image-url("../assets/icons/square-fill.svg");
+                            colorize: Theme.primary-ink;
+                        }
+                        Label {
+                            text: "Остановить";
+                            font-weight: 600;
+                            leading: 20px;
+                            color: Theme.primary-ink;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component NewsCard inherits Panel {
+    in property <NewsItem> item;
+    in property <bool> compact: true;
+    fill: Theme.panel;
+    shadow: false;
+    blur-behind: root.compact;
+    VerticalLayout {
+        alignment: start;
+        if root.item.has-banner: Rectangle {
+            height: root.compact ? 80px : 176px;
+            TopRoundedImage {
+                source: root.item.banner;
+                radius: root.radius - 1px;
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
+            }
+        }
+        VerticalLayout {
+            padding: root.compact ? 16px : 24px;
+            spacing: 8px;
+            if root.item.tag != "" || root.item.date != "": HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                if root.item.tag != "": Rectangle {
+                    border-radius: Theme.radius;
+                    background: Theme.surface-2;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        Label {
+                            text: root.item.tag.to-uppercase();
+                            font-size: 10px;
+                            font-weight: 600;
+                            tracking: 0.18;
+                            color: Theme.primary;
+                        }
+                    }
+                }
+                if root.item.date != "": Label {
+                    text: root.item.date.to-uppercase();
+                    font-size: 10px;
+                    font-weight: 600;
+                    tracking: 0.18;
+                    color: Theme.mute;
+                }
+            }
+            Para {
+                text: root.item.title;
+                font-size: root.compact ? 14px : 18px;
+                leading: root.compact ? 19.25px : 24.75px;
+                font-weight: 700;
+            }
+            if root.item.body != "": Para {
+                text: root.item.body;
+                font-size: root.compact ? 12px : 14px;
+                leading: root.compact ? 19.5px : 22.75px;
+                color: Theme.dim;
+                max-lines: root.compact ? 3 : 0;
+                overflow: elide;
+            }
+            if root.item.link != "": HorizontalLayout {
+                alignment: start;
+                padding-top: 4px;
+                link := HoverSurface {
+                    rest: transparent;
+                    hover: transparent;
+                    opacity: self.hovered ? 0.8 : 1;
+                    clicked => {
+                        Store.open-link(root.item.link);
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Label {
+                            text: "Подробнее";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: Theme.primary;
+                        }
+                        Icon {
+                            size: 12px;
+                            source: @image-url("../assets/icons/arrow-up-right-bold.svg");
+                            colorize: Theme.primary;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component NewsRow inherits HoverSurface {
+    in property <NewsItem> item;
+    accessible-label: root.item.title;
+    rest: transparent;
+    hover: transparent;
+    border-radius: Theme.radius-lg;
+    clicked => {
+        Store.open-modal(ModalKind.news);
+    }
+    Panel {
+        fill: root.hovered ? Theme.panel-2 : Theme.panel;
+        shadow: false;
+        blur-behind: true;
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                Label {
+                    text: root.item.title;
+                    font-size: 12px;
+                    leading: 16px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                Label {
+                    text: root.item.caption.to-uppercase();
+                    font-size: 10px;
+                    tracking: 0.14;
+                    color: Theme.mute;
+                }
+            }
+            Icon {
+                size: 12px;
+                source: @image-url("../assets/icons/caret-right-bold.svg");
+                colorize: Theme.mute;
+            }
+        }
+    }
+}
+
+export component NewsPanel inherits VerticalLayout {
+    width: 320px;
+    padding-right: 40px;
+    padding-top: 24px;
+    spacing: 12px;
+    head := HoverSurface {
+        rest: transparent;
+        hover: transparent;
+        height: 16.5px;
+        clicked => {
+            Store.open-modal(ModalKind.news);
+        }
+        HorizontalLayout {
+            HorizontalLayout {
+                spacing: 8px;
+                horizontal-stretch: 1;
+                alignment: start;
+                Icon {
+                    size: 14px;
+                    source: @image-url("../assets/icons/newspaper-bold.svg");
+                    colorize: head.hovered ? Theme.text : Theme.dim;
+                }
+                Meta {
+                    text: "НОВОСТИ";
+                    color: head.hovered ? Theme.text : Theme.dim;
+                    animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+                }
+                if Store.unread > 0: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Theme.primary;
+                    }
+                }
+            }
+            Label {
+                text: "ВСЕ (" + Store.news.length + ")";
+                font-size: 11px;
+                font-weight: 600;
+                color: Theme.mute;
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: 8px;
+        alignment: start;
+        NewsCard {
+            item: Store.news[0];
+        }
+        for item in Store.news-rest: NewsRow {
+            item: item;
+        }
+    }
+}

@@ -1,0 +1,646 @@
+import { ListView } from "std-widgets.slint";
+import { Theme, Media } from "theme.slint";
+import { Label, Para, Icon, PingDot } from "atoms.slint";
+import { Button, ButtonKind, HintArea, IconTap, TooltipLayer, WindowButton } from "controls.slint";
+import { LogLine, LogPick } from "log.slint";
+
+export struct ConsoleLine {
+    text: string,
+    level: int,
+    hit: bool,
+    rich: styled-text,
+}
+
+export global ConsoleStore {
+    in property <bool> ready;
+    in property <string> build;
+    in property <string> status-label: "Игра не запущена";
+    in property <int> status-tone: 1;
+    in property <bool> started;
+    in property <bool> running;
+    in property <int> total;
+    in property <int> shown;
+    in property <[ConsoleLine]> lines;
+    in-out property <string> query;
+    in-out property <int> filter;
+    in property <string> count-all;
+    in property <string> count-warn;
+    in property <string> count-error;
+    in property <bool> has-warn;
+    in property <bool> has-error;
+    in property <string> summary;
+    in property <string> trouble;
+    in property <bool> copied;
+    in property <string> pill-label: "К последним строкам";
+    in property <string> shortcut: "Ctrl + F";
+    callback search(string);
+    callback set-filter(int);
+    callback copy();
+    callback open-logs();
+    callback stop();
+    callback dismiss-trouble();
+    callback show-everything();
+    callback following(bool);
+    callback close();
+}
+
+component FilterButton inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    in property <string> count;
+    in property <bool> active;
+    in property <color> tone;
+    callback clicked();
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => {
+        area.clicked();
+    }
+    border-radius: Theme.radius-sm;
+    background: root.active ? Theme.surface-3 : transparent;
+    animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    area := HintArea {
+        hint: root.hint;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        Label {
+            text: root.label;
+            font-size: 13px;
+            font-weight: 500;
+            color: root.active || area.has-hover ? Theme.text : Theme.dim;
+            animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+        }
+        Label {
+            text: root.count;
+            font-family: Theme.tabular;
+            font-size: 12px;
+            leading: 16px;
+            color: root.tone;
+        }
+    }
+}
+
+component Placeholder inherits VerticalLayout {
+    in property <image> icon;
+    in property <length> icon-size: 26px;
+    in property <string> title;
+    in property <string> body;
+    in property <bool> action: false;
+    alignment: center;
+    spacing: 12px;
+    padding-left: 32px;
+    padding-right: 32px;
+    HorizontalLayout {
+        alignment: center;
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 28px;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.surface;
+            Icon {
+                size: root.icon-size;
+                source: root.icon;
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: 4px;
+        Label {
+            text: root.title;
+            font-size: 15px;
+            leading: 22.5px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            Para {
+                max-width: 384px;
+                text: root.body;
+                leading: 20px;
+                color: Theme.dim;
+                horizontal-alignment: center;
+            }
+        }
+    }
+    if root.action: HorizontalLayout {
+        alignment: center;
+        Button {
+            kind: ButtonKind.secondary;
+            small: true;
+            text: "Показать весь журнал";
+            clicked => {
+                ConsoleStore.show-everything();
+            }
+        }
+    }
+}
+
+export component ConsoleWindow inherits Window {
+    property <bool> follow: true;
+    property <bool> wide: true;
+    title: Media.title + " — консоль игры";
+    icon: Media.has-logo ? Media.logo : @image-url("../icons/128x128.png");
+    no-frame: true;
+    resize-border-width: 6px;
+    preferred-width: 1080px;
+    preferred-height: 640px;
+    min-width: 720px;
+    min-height: 420px;
+    background: Theme.bg;
+    default-font-family: Theme.sans;
+
+    public function pin() {
+        if root.follow {
+            list.content-y = min(0px, list.visible-height - list.content-height);
+        }
+    }
+    public function restart() {
+        root.follow = true;
+        ConsoleStore.following(true);
+        root.pin();
+    }
+
+    init => {
+        root.wide = root.width >= 1024px;
+    }
+    changed width => {
+        root.wide = root.width >= 1024px;
+        root.pin();
+    }
+    changed height => {
+        root.pin();
+    }
+
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if event.modifiers.control && (event.text == "f" || event.text == "F" || event.text == "а" || event.text == "А") {
+                search.focus();
+                search.select-all();
+                return EventResult.accept;
+            }
+            if event.modifiers.control && LogPick.anchor >= 0 && (event.text == "c" || event.text == "C" || event.text == "с" || event.text == "С") {
+                LogPick.copy();
+                return EventResult.accept;
+            }
+            EventResult.reject
+        }
+
+        VerticalLayout {
+            Rectangle {
+                height: 36px;
+                background: Theme.bg-tint;
+                WindowMoveArea { }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    spacing: 12px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        horizontal-stretch: 0;
+                        min-width: 0px;
+                        Icon {
+                            size: 17px;
+                            source: @image-url("../assets/icons/terminal-window-duotone.svg");
+                            colorize: Theme.primary;
+                        }
+                        Label {
+                            text: "Консоль игры";
+                            font-weight: 600;
+                            leading: 20px;
+                        }
+                        if ConsoleStore.build != "": VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 4px;
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Theme.mute;
+                            }
+                        }
+                        if ConsoleStore.build != "": Label {
+                            text: ConsoleStore.build;
+                            leading: 20px;
+                            color: Theme.dim;
+                            overflow: elide;
+                            min-width: 0px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        Rectangle {
+                            height: 22px;
+                            border-radius: 11px;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            background: Theme.surface;
+                            HorizontalLayout {
+                                padding-left: 11px;
+                                padding-right: 11px;
+                                spacing: 8px;
+                                if ConsoleStore.status-tone == 0: PingDot {
+                                    size: 8px;
+                                    start-opacity: 0.6;
+                                }
+                                if ConsoleStore.status-tone != 0: VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 8px;
+                                        height: 8px;
+                                        border-radius: 4px;
+                                        background: ConsoleStore.status-tone == 2 ? Theme.danger : Theme.mute;
+                                    }
+                                }
+                                Label {
+                                    text: ConsoleStore.status-label;
+                                    font-size: 12px;
+                                    leading: 16px;
+                                    color: ConsoleStore.status-tone == 2 ? Theme.danger : Theme.dim;
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    HorizontalLayout {
+                        WindowButton {
+                            icon: @image-url("../assets/icons/minus-bold.svg");
+                            accessible-label: "Свернуть";
+                            clicked => {
+                                root.minimized = true;
+                            }
+                        }
+                        WindowButton {
+                            icon: root.maximized ? @image-url("../assets/icons/copy-simple-bold-mirrored.svg") : @image-url("../assets/icons/square-bold.svg");
+                            icon-size: root.maximized ? 14px : 13px;
+                            accessible-label: root.maximized ? "Вернуть размер" : "Развернуть";
+                            clicked => {
+                                root.maximized = !root.maximized;
+                            }
+                        }
+                        WindowButton {
+                            icon: @image-url("../assets/icons/x-bold.svg");
+                            accessible-label: "Закрыть";
+                            icon-size: 16px;
+                            closer: true;
+                            clicked => {
+                                ConsoleStore.close();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 12px;
+                    padding-bottom: 13px;
+                    spacing: 12px;
+                    Rectangle {
+                        height: 36px;
+                        min-width: 160px;
+                        max-width: 340px;
+                        horizontal-stretch: 1;
+                        border-radius: Theme.radius-md;
+                        background: Theme.surface-2;
+                        border-width: 1px;
+                        border-color: search.has-focus ? Theme.border-strong : Theme.border;
+                        animate border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+                        TouchArea {
+                            mouse-cursor: MouseCursor.text;
+                            clicked => {
+                                search.focus();
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 6px;
+                            spacing: 8px;
+                            Icon {
+                                size: 16px;
+                                source: @image-url("../assets/icons/magnifying-glass-regular.svg");
+                                colorize: Theme.mute;
+                            }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                if search.text == "" && search.preedit-text == "": Label {
+                                    x: 0;
+                                    text: "Поиск";
+                                    color: Theme.mute;
+                                    leading: 20px;
+                                }
+                                search := TextInput {
+                                    width: parent.width;
+                                    accessible-label: "Поиск по журналу";
+                                    accessible-placeholder-text: "Поиск";
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    font-family: Theme.sans;
+                                    font-size: 14px;
+                                    color: Theme.text;
+                                    selection-background-color: Theme.primary.with-alpha(0.32);
+                                    selection-foreground-color: Theme.text;
+                                    single-line: true;
+                                    text: ConsoleStore.query;
+                                    edited => {
+                                        ConsoleStore.query = self.text;
+                                        ConsoleStore.search(self.text);
+                                    }
+                                    key-pressed(event) => {
+                                        if event.text == Key.Escape {
+                                            if self.text != "" {
+                                                self.text = "";
+                                                ConsoleStore.query = "";
+                                                ConsoleStore.search("");
+                                            } else {
+                                                self.clear-focus();
+                                            }
+                                            return EventResult.accept;
+                                        }
+                                        EventResult.reject
+                                    }
+                                }
+                            }
+                            if ConsoleStore.query != "": VerticalLayout {
+                                alignment: center;
+                                IconTap {
+                                    accessible-label: "Очистить поиск";
+                                    width: 24px;
+                                    height: 24px;
+                                    border-radius: Theme.radius-sm;
+                                    hover-fill: Theme.surface-3;
+                                    icon: @image-url("../assets/icons/x-bold.svg");
+                                    icon-size: 14px;
+                                    clicked => {
+                                        search.text = "";
+                                        ConsoleStore.query = "";
+                                        ConsoleStore.search("");
+                                        search.focus();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 36px;
+                        border-radius: Theme.radius-md;
+                        background: Theme.surface-2;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding: 4px;
+                            FilterButton {
+                                label: "Все";
+                                hint: "Весь журнал";
+                                count: ConsoleStore.count-all;
+                                active: ConsoleStore.filter == 0;
+                                tone: Theme.dim;
+                                clicked => {
+                                    ConsoleStore.set-filter(0);
+                                }
+                            }
+                            FilterButton {
+                                label: "Предупреждения";
+                                hint: "Предупреждения и ошибки";
+                                count: ConsoleStore.count-warn;
+                                active: ConsoleStore.filter == 1;
+                                tone: ConsoleStore.has-warn ? Theme.warn : Theme.dim;
+                                clicked => {
+                                    ConsoleStore.set-filter(1);
+                                }
+                            }
+                            FilterButton {
+                                label: "Ошибки";
+                                hint: "Только ошибки";
+                                count: ConsoleStore.count-error;
+                                active: ConsoleStore.filter == 2;
+                                tone: ConsoleStore.has-error ? Theme.danger : Theme.dim;
+                                clicked => {
+                                    ConsoleStore.set-filter(2);
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        max-width: 10000px;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            kind: ButtonKind.secondary;
+                            small: true;
+                            text: root.wide ? "Копировать" : "";
+                            accessible-label: "Копировать";
+                            hint: "Скопировать строки, которые сейчас видны";
+                            has-icon: true;
+                            icon: ConsoleStore.copied ? @image-url("../assets/icons/check-bold.svg") : @image-url("../assets/icons/copy-regular.svg");
+                            icon-tint: Theme.online;
+                            tinted: ConsoleStore.copied;
+                            enabled: ConsoleStore.shown > 0;
+                            clicked => {
+                                ConsoleStore.copy();
+                            }
+                        }
+                        Button {
+                            kind: ButtonKind.secondary;
+                            small: true;
+                            text: root.wide ? "Журналы" : "";
+                            accessible-label: "Журналы";
+                            hint: "Открыть папку logs этой сборки: там latest.log и debug.log";
+                            has-icon: true;
+                            icon: @image-url("../assets/icons/folder-open-regular.svg");
+                            enabled: ConsoleStore.started;
+                            clicked => {
+                                ConsoleStore.open-logs();
+                            }
+                        }
+                        if ConsoleStore.running: Button {
+                            kind: ButtonKind.danger;
+                            small: true;
+                            text: root.wide ? "Остановить" : "";
+                            accessible-label: "Остановить";
+                            hint: "Остановить игру";
+                            has-icon: true;
+                            icon: @image-url("../assets/icons/stop-fill.svg");
+                            icon-size: 14px;
+                            clicked => {
+                                ConsoleStore.stop();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                if ConsoleStore.ready && !ConsoleStore.started: Placeholder {
+                    icon: @image-url("../assets/icons/terminal-window-duotone.svg");
+                    title: "Игра ещё не запускалась";
+                    body: "Нажмите «Играть» в лаунчере — журнал игры появится здесь и будет обновляться сам.";
+                }
+                if ConsoleStore.ready && ConsoleStore.started && ConsoleStore.total == 0: Placeholder {
+                    icon: @image-url("../assets/icons/terminal-window-duotone.svg");
+                    title: "Ждём первых строк";
+                    body: "Игра запускается, её журнал появится через пару секунд.";
+                }
+                if ConsoleStore.ready && ConsoleStore.started && ConsoleStore.total > 0 && ConsoleStore.shown == 0: Placeholder {
+                    icon: @image-url("../assets/icons/magnifying-glass-regular.svg");
+                    icon-size: 24px;
+                    title: "Ничего не нашлось";
+                    body: "Под этот поиск и фильтр не подходит ни одна строка.";
+                    action: true;
+                }
+                list := ListView {
+                    visible: ConsoleStore.ready && ConsoleStore.started && ConsoleStore.shown > 0;
+                    scrolled => {
+                        let bottom = -self.content-y + self.visible-height >= self.content-height - 24px;
+                        if bottom != root.follow {
+                            root.follow = bottom;
+                            ConsoleStore.following(bottom);
+                        }
+                    }
+                    changed content-height => {
+                        root.pin();
+                    }
+                    for line[index] in ConsoleStore.lines: LogLine {
+                        index: index;
+                        text: line.text;
+                        rich: line.rich;
+                        hit: line.hit;
+                        level: line.level;
+                    }
+                }
+                pill := Rectangle {
+                    property <bool> hidden: root.follow || !list.visible;
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - 16px - self.height + (self.hidden ? 8px : 0px);
+                    width: pill-row.preferred-width;
+                    height: 36px;
+                    opacity: self.hidden ? 0 : 1;
+                    animate y, opacity { duration: 200ms; easing: ease-out; }
+                    Rectangle {
+                        border-radius: 18px;
+                        border-width: 1px;
+                        border-color: Theme.border-strong;
+                        background: pill-area.has-hover ? Theme.surface-3 : Theme.panel-2;
+                        animate background { duration: 200ms; easing: ease-out; }
+                    }
+                    pill-area := TouchArea {
+                        enabled: !pill.hidden;
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.restart();
+                        }
+                    }
+                    pill-row := HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        Icon {
+                            size: 14px;
+                            source: @image-url("../assets/icons/arrow-down-bold.svg");
+                            colorize: Theme.text;
+                        }
+                        Label {
+                            text: ConsoleStore.pill-label;
+                            font-weight: 500;
+                            leading: 20px;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                background: ConsoleStore.trouble != "" ? Theme.danger.with-alpha(0.1) : transparent;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                if ConsoleStore.trouble != "": HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 8px;
+                    Icon {
+                        size: 14px;
+                        source: @image-url("../assets/icons/warning-circle-regular.svg");
+                        colorize: Theme.danger;
+                    }
+                    Label {
+                        text: ConsoleStore.trouble;
+                        font-size: 12px;
+                        leading: 16px;
+                        color: Theme.danger;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconTap {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: Theme.radius-sm;
+                            hover-fill: Theme.danger.with-alpha(0.15);
+                            accessible-label: "Скрыть";
+                            rest-ink: Theme.danger;
+                            hover-ink: Theme.danger;
+                            icon: @image-url("../assets/icons/x-bold.svg");
+                            icon-size: 12px;
+                            clicked => {
+                                ConsoleStore.dismiss-trouble();
+                            }
+                        }
+                    }
+                }
+                if ConsoleStore.trouble == "": HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 16px;
+                    Label {
+                        text: ConsoleStore.summary;
+                        font-family: Theme.tabular;
+                        font-size: 12px;
+                        leading: 16px;
+                        color: Theme.dim;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Label {
+                        text: ConsoleStore.shortcut + " — поиск";
+                        font-size: 12px;
+                        leading: 16px;
+                        color: Theme.dim;
+                    }
+                }
+            }
+        }
+    }
+
+    TooltipLayer { }
+}
