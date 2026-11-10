@@ -1,10 +1,30 @@
+use std::collections::HashMap;
 use std::{env, fs, path::PathBuf};
 
+const DEFAULT_SKIN: &str = "skins/default";
+
 fn main() {
-    slint_build::compile("ui/main.slint").expect("slint ui");
+    compile_skin();
     stamp_version();
     embed_client_config();
     windows_resources();
+}
+
+fn compile_skin() {
+    println!("cargo:rerun-if-env-changed=LAMINARA_SKIN_DIR");
+    let here = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let skin = env::var("LAMINARA_SKIN_DIR")
+        .ok()
+        .filter(|dir| !dir.trim().is_empty())
+        .map(|dir| here.join(dir))
+        .unwrap_or_else(|| here.join(DEFAULT_SKIN));
+    let libraries = HashMap::from([
+        ("laminara".to_string(), here.join("contract")),
+        ("laminara-default".to_string(), here.join(DEFAULT_SKIN)),
+    ]);
+    let config = slint_build::CompilerConfiguration::new().with_library_paths(libraries);
+    slint_build::compile_with_config(skin.join("main.slint"), config)
+        .unwrap_or_else(|error| panic!("скин {}: {error}", skin.display()));
 }
 
 fn stamp_version() {

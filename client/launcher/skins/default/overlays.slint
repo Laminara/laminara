@@ -1,7 +1,7 @@
-import { Theme, Media } from "theme.slint";
+import { Theme, Media, Store, Report, ModalKind } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { Label, Para, Icon, Panel, ProgressBar, Spinner } from "atoms.slint";
 import { Button, ButtonKind, IconTap, TextField } from "controls.slint";
-import { Store, Report, ModalKind } from "store.slint";
 import { BrandMark } from "home.slint";
 
 component FieldLabel inherits Label {
@@ -10,7 +10,7 @@ component FieldLabel inherits Label {
 
 component SpacedPara inherits VerticalLayout {
     in property <string> text;
-    in property <color> tone: Theme.dim;
+    in property <color> tone: Look.dim;
     in property <length> above;
     in property <length> below;
     in property <TextHorizontalAlignment> align: TextHorizontalAlignment.left;
@@ -101,7 +101,7 @@ export component CredentialsForm inherits VerticalLayout {
     }
     if Store.login-error != "": SpacedPara {
         text: Store.login-error;
-        tone: Theme.danger;
+        tone: Look.danger;
         above: 12px;
     }
     VerticalLayout {
@@ -109,7 +109,7 @@ export component CredentialsForm inherits VerticalLayout {
         Button {
             text: Store.busy ? "Входим…" : "Войти";
             has-icon: true;
-            icon: @image-url("../assets/icons/arrow-right-bold.svg");
+            icon: @image-url("assets/icons/arrow-right-bold.svg");
             enabled: root.ready;
             clicked => {
                 root.submit();
@@ -167,7 +167,7 @@ export component ConnectingScreen inherits Rectangle {
         text: "Подключение…";
         font-size: 16px;
         leading: 24px;
-        color: Theme.dim;
+        color: Look.dim;
     }
 }
 
@@ -186,7 +186,7 @@ export component SyncOverlay inherits Rectangle {
             alignment: center;
             Panel {
                 width: min(672px, root.width - 80px);
-                fill: Theme.surface;
+                fill: Look.surface;
                 shadow: false;
                 VerticalLayout {
                     padding: 24px;
@@ -200,7 +200,7 @@ export component SyncOverlay inherits Rectangle {
                                 font-size: 11px;
                                 font-weight: 600;
                                 tracking: 0.22;
-                                color: Theme.dim;
+                                color: Look.dim;
                             }
                             Label {
                                 text: Store.sync-build;
@@ -216,8 +216,8 @@ export component SyncOverlay inherits Rectangle {
                                 accessible-label: "Отменить загрузку";
                                 width: 34px;
                                 height: 34px;
-                                border-radius: Theme.radius-md;
-                                icon: @image-url("../assets/icons/x-regular.svg");
+                                border-radius: Look.radius-md;
+                                icon: @image-url("assets/icons/x-regular.svg");
                                 icon-size: 18px;
                                 enabled: !Store.cancelling;
                                 disabled-opacity: 0.4;
@@ -235,16 +235,16 @@ export component SyncOverlay inherits Rectangle {
                         padding-top: 12px;
                         Label {
                             text: Store.sync-amount;
-                            font-family: Theme.tabular;
+                            font-family: Look.tabular;
                             leading: 20px;
-                            color: Theme.dim;
+                            color: Look.dim;
                             horizontal-stretch: 1;
                         }
                         Label {
                             text: Store.sync-files;
-                            font-family: Theme.tabular;
+                            font-family: Look.tabular;
                             leading: 20px;
-                            color: Theme.dim;
+                            color: Look.dim;
                         }
                     }
                     if Store.sync-speed != "" || Store.sync-left != "": HorizontalLayout {
@@ -253,22 +253,22 @@ export component SyncOverlay inherits Rectangle {
                         alignment: start;
                         if Store.sync-speed != "": Label {
                             text: Store.sync-speed;
-                            font-family: Theme.tabular;
+                            font-family: Look.tabular;
                             font-size: 12px;
                             leading: 16px;
-                            color: Theme.mute;
+                            color: Look.mute;
                         }
                         if Store.sync-speed != "" && Store.sync-left != "": Label {
                             text: "·";
                             font-size: 12px;
                             leading: 16px;
-                            color: Theme.mute;
+                            color: Look.mute;
                         }
                         if Store.sync-left != "": Label {
                             text: "осталось " + Store.sync-left;
                             font-size: 12px;
                             leading: 16px;
-                            color: Theme.mute;
+                            color: Look.mute;
                         }
                     }
                     if Store.sync-path != "": VerticalLayout {
@@ -277,7 +277,7 @@ export component SyncOverlay inherits Rectangle {
                             text: Store.sync-path;
                             font-size: 12px;
                             leading: 16px;
-                            color: Theme.mute;
+                            color: Look.mute;
                             overflow: elide;
                         }
                     }
@@ -294,7 +294,7 @@ export component UpdateBanner inherits HorizontalLayout {
     alignment: center;
     Panel {
         width: min(672px, root.width - 72px);
-        fill: Theme.bg-tint;
+        fill: Look.bg-tint;
         HorizontalLayout {
             padding-left: 20px;
             padding-right: 20px;
@@ -303,7 +303,7 @@ export component UpdateBanner inherits HorizontalLayout {
             spacing: 16px;
             Icon {
                 size: 20px;
-                source: @image-url("../assets/icons/arrows-clockwise-regular.svg");
+                source: @image-url("assets/icons/arrows-clockwise-regular.svg");
                 colorize: Theme.primary;
             }
             VerticalLayout {
@@ -321,7 +321,7 @@ export component UpdateBanner inherits HorizontalLayout {
                         alignment: center;
                         Rectangle {
                             border-radius: 9px;
-                            background: Theme.primary-soft;
+                            background: Look.primary-soft;
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
@@ -342,7 +342,7 @@ export component UpdateBanner inherits HorizontalLayout {
                     text: Store.update-detail;
                     font-size: 12px;
                     leading: 16px;
-                    color: Theme.dim;
+                    color: Look.dim;
                 }
             }
             if !Store.update-mandatory: VerticalLayout {
@@ -351,8 +351,8 @@ export component UpdateBanner inherits HorizontalLayout {
                     accessible-label: "Позже";
                     width: 28px;
                     height: 28px;
-                    border-radius: Theme.radius-md;
-                    icon: @image-url("../assets/icons/x-regular.svg");
+                    border-radius: Look.radius-md;
+                    icon: @image-url("assets/icons/x-regular.svg");
                     icon-size: 16px;
                     clicked => {
                         Store.dismiss-update();
@@ -368,7 +368,7 @@ export component UpdateScreen inherits Rectangle {
     Panel {
         width: min(448px, root.width);
         height: self.preferred-height;
-        fill: Theme.bg-tint;
+        fill: Look.bg-tint;
         card := VerticalLayout {
             padding: 32px;
             BrandMark { }
@@ -387,7 +387,7 @@ export component UpdateScreen inherits Rectangle {
                         text: "Версия " + Store.update-version + " · запустится автоматически";
                         font-size: 12px;
                         leading: 16px;
-                        color: Theme.dim;
+                        color: Look.dim;
                     }
                 }
             }
@@ -402,10 +402,10 @@ export component UpdateScreen inherits Rectangle {
                 padding-top: 8px;
                 Label {
                     text: Store.update-progress;
-                    font-family: Theme.tabular;
+                    font-family: Look.tabular;
                     font-size: 12px;
                     leading: 16px;
-                    color: Theme.dim;
+                    color: Look.dim;
                 }
             }
         }
@@ -418,7 +418,7 @@ export component ErrorToast inherits HorizontalLayout {
     alignment: center;
     Panel {
         max-width: 768px;
-        fill: Theme.panel-2;
+        fill: Look.panel-2;
         blur-behind: true;
         HorizontalLayout {
             padding-left: 20px;
@@ -428,7 +428,7 @@ export component ErrorToast inherits HorizontalLayout {
             spacing: 12px;
             Icon {
                 size: 20px;
-                source: @image-url("../assets/icons/warning-circle-regular.svg");
+                source: @image-url("assets/icons/warning-circle-regular.svg");
                 colorize: Theme.primary;
             }
             VerticalLayout {
@@ -438,13 +438,13 @@ export component ErrorToast inherits HorizontalLayout {
                 Para {
                     text: Store.error-message;
                     leading: 20px;
-                    color: Theme.dim;
+                    color: Look.dim;
                 }
                 if Store.report == Report.failed: Para {
                     text: "Журнал не ушёл: " + Store.report-message;
                     font-size: 12px;
                     leading: 16px;
-                    color: Theme.danger;
+                    color: Look.danger;
                 }
             }
             if Store.error-retry: Button {
@@ -452,7 +452,7 @@ export component ErrorToast inherits HorizontalLayout {
                 small: true;
                 text: "Повторить";
                 has-icon: true;
-                icon: @image-url("../assets/icons/arrow-clockwise-regular.svg");
+                icon: @image-url("assets/icons/arrow-clockwise-regular.svg");
                 clicked => {
                     Store.retry();
                 }
@@ -462,7 +462,7 @@ export component ErrorToast inherits HorizontalLayout {
                 small: true;
                 text: Store.report == Report.sending ? "Отправляю" : Store.report == Report.sent ? "Журнал отправлен" : "Отправить журнал";
                 has-icon: true;
-                icon: @image-url("../assets/icons/paper-plane-tilt-regular.svg");
+                icon: @image-url("assets/icons/paper-plane-tilt-regular.svg");
                 enabled: Store.report != Report.sending && Store.report != Report.sent;
                 clicked => {
                     Store.send-launcher-log();
@@ -473,11 +473,11 @@ export component ErrorToast inherits HorizontalLayout {
                 IconTap {
                     width: 24px;
                     height: 24px;
-                    border-radius: Theme.radius-sm;
-                    icon: @image-url("../assets/icons/x-regular.svg");
+                    border-radius: Look.radius-sm;
+                    icon: @image-url("assets/icons/x-regular.svg");
                     accessible-label: "Закрыть";
                     icon-size: 16px;
-                    rest-ink: Theme.mute;
+                    rest-ink: Look.mute;
                     clicked => {
                         Store.dismiss-error();
                     }

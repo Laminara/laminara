@@ -1,0 +1,27 @@
+export global LogPick {
+    in-out property <int> anchor: -1;
+    in-out property <int> focus: -1;
+    in-out property <bool> dragging;
+    in-out property <length> drag-y;
+    callback copy();
+    public function clear() {
+        root.anchor = -1;
+        root.focus = -1;
+        root.dragging = false;
+    }
+    public function shift(by: int) {
+        if root.anchor >= 0 {
+            root.anchor = root.anchor - by;
+            root.focus = root.focus - by;
+            if max(root.anchor, root.focus) < 0 {
+                root.clear();
+            } else {
+                root.anchor = max(root.anchor, 0);
+                root.focus = max(root.focus, 0);
+            }
+        }
+    }
+    public pure function holds(index: int) -> bool {
+        return root.anchor >= 0 && index >= min(root.anchor, root.focus) && index <= max(root.anchor, root.focus);
+    }
+}

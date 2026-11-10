@@ -82,8 +82,10 @@ import ParamField from "@site/components/ParamField.astro";
 <ParamField path="dir" type="string">Каталог с версиями лаунчера: `<dir>/<версия>/<артефакты>`. Туда же кладёт файлы `launcher build`.</ParamField>
 <ParamField path="endpoints" type="string[]">Адреса, по которым лаунчер ходит на сервер **у игрока**. Запекаются в файл, поэтому меняются только новой сборкой.</ParamField>
 <ParamField path="autoBake" type="boolean" default="true">Пересобирать и выпускать лаунчер после обновления сервера — но только если его уже выпускали.</ParamField>
+<ParamField path="templates.repo" type="string">GitHub-репозиторий, из релизов которого берётся готовый лаунчер, например `Laminara/launcher-myproject` для своего дизайна. Пусто — общий лаунчер Laminara.</ParamField>
+<ParamField path="templates.token" type="string">Токен GitHub только на чтение — нужен, если репозиторий шаблонов закрытый. В настройках и консоли скрыт.</ParamField>
 
-Подробнее — [Сборка лаунчера](/launcher/building) и [Обновление лаунчера](/launcher/updates).
+Подробнее — [Сборка лаунчера](/launcher/building), [Свой дизайн](/launcher/custom-design) и [Обновление лаунчера](/launcher/updates).
 
 ## console
 

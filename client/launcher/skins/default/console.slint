@@ -1,48 +1,9 @@
+import { ConsoleLine, ConsoleStore, Theme, Media, LogPick } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { ListView } from "std-widgets.slint";
-import { Theme, Media } from "theme.slint";
 import { Label, Para, Icon, PingDot } from "atoms.slint";
 import { Button, ButtonKind, HintArea, IconTap, TooltipLayer, WindowButton } from "controls.slint";
-import { LogLine, LogPick } from "log.slint";
-
-export struct ConsoleLine {
-    text: string,
-    level: int,
-    hit: bool,
-    rich: styled-text,
-}
-
-export global ConsoleStore {
-    in property <bool> ready;
-    in property <string> build;
-    in property <string> status-label: "Игра не запущена";
-    in property <int> status-tone: 1;
-    in property <bool> started;
-    in property <bool> running;
-    in property <int> total;
-    in property <int> shown;
-    in property <[ConsoleLine]> lines;
-    in-out property <string> query;
-    in-out property <int> filter;
-    in property <string> count-all;
-    in property <string> count-warn;
-    in property <string> count-error;
-    in property <bool> has-warn;
-    in property <bool> has-error;
-    in property <string> summary;
-    in property <string> trouble;
-    in property <bool> copied;
-    in property <string> pill-label: "К последним строкам";
-    in property <string> shortcut: "Ctrl + F";
-    callback search(string);
-    callback set-filter(int);
-    callback copy();
-    callback open-logs();
-    callback stop();
-    callback dismiss-trouble();
-    callback show-everything();
-    callback following(bool);
-    callback close();
-}
+import { LogLine } from "log.slint";
 
 component FilterButton inherits Rectangle {
     in property <string> label;
@@ -58,8 +19,8 @@ component FilterButton inherits Rectangle {
     accessible-action-default => {
         area.clicked();
     }
-    border-radius: Theme.radius-sm;
-    background: root.active ? Theme.surface-3 : transparent;
+    border-radius: Look.radius-sm;
+    background: root.active ? Look.surface-3 : transparent;
     animate background { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
     area := HintArea {
         hint: root.hint;
@@ -76,12 +37,12 @@ component FilterButton inherits Rectangle {
             text: root.label;
             font-size: 13px;
             font-weight: 500;
-            color: root.active || area.has-hover ? Theme.text : Theme.dim;
+            color: root.active || area.has-hover ? Look.text : Look.dim;
             animate color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
         }
         Label {
             text: root.count;
-            font-family: Theme.tabular;
+            font-family: Look.tabular;
             font-size: 12px;
             leading: 16px;
             color: root.tone;
@@ -106,8 +67,8 @@ component Placeholder inherits VerticalLayout {
             height: 56px;
             border-radius: 28px;
             border-width: 1px;
-            border-color: Theme.border;
-            background: Theme.surface;
+            border-color: Look.border;
+            background: Look.surface;
             Icon {
                 size: root.icon-size;
                 source: root.icon;
@@ -129,7 +90,7 @@ component Placeholder inherits VerticalLayout {
                 max-width: 384px;
                 text: root.body;
                 leading: 20px;
-                color: Theme.dim;
+                color: Look.dim;
                 horizontal-alignment: center;
             }
         }
@@ -151,7 +112,7 @@ export component ConsoleWindow inherits Window {
     property <bool> follow: true;
     property <bool> wide: true;
     title: Media.title + " — консоль игры";
-    icon: Media.has-logo ? Media.logo : @image-url("../icons/128x128.png");
+    icon: Media.has-logo ? Media.logo : @image-url("../../icons/128x128.png");
     no-frame: true;
     resize-border-width: 6px;
     preferred-width: 1080px;
@@ -159,7 +120,7 @@ export component ConsoleWindow inherits Window {
     min-width: 720px;
     min-height: 420px;
     background: Theme.bg;
-    default-font-family: Theme.sans;
+    default-font-family: Look.sans;
 
     public function pin() {
         if root.follow {
@@ -200,12 +161,12 @@ export component ConsoleWindow inherits Window {
         VerticalLayout {
             Rectangle {
                 height: 36px;
-                background: Theme.bg-tint;
+                background: Look.bg-tint;
                 WindowMoveArea { }
                 Rectangle {
                     y: parent.height - 1px;
                     height: 1px;
-                    background: Theme.border;
+                    background: Look.border;
                 }
                 HorizontalLayout {
                     padding-left: 16px;
@@ -216,7 +177,7 @@ export component ConsoleWindow inherits Window {
                         min-width: 0px;
                         Icon {
                             size: 17px;
-                            source: @image-url("../assets/icons/terminal-window-duotone.svg");
+                            source: @image-url("assets/icons/terminal-window-duotone.svg");
                             colorize: Theme.primary;
                         }
                         Label {
@@ -230,13 +191,13 @@ export component ConsoleWindow inherits Window {
                                 width: 4px;
                                 height: 4px;
                                 border-radius: 2px;
-                                background: Theme.mute;
+                                background: Look.mute;
                             }
                         }
                         if ConsoleStore.build != "": Label {
                             text: ConsoleStore.build;
                             leading: 20px;
-                            color: Theme.dim;
+                            color: Look.dim;
                             overflow: elide;
                             min-width: 0px;
                         }
@@ -248,8 +209,8 @@ export component ConsoleWindow inherits Window {
                             height: 22px;
                             border-radius: 11px;
                             border-width: 1px;
-                            border-color: Theme.border;
-                            background: Theme.surface;
+                            border-color: Look.border;
+                            background: Look.surface;
                             HorizontalLayout {
                                 padding-left: 11px;
                                 padding-right: 11px;
@@ -264,14 +225,14 @@ export component ConsoleWindow inherits Window {
                                         width: 8px;
                                         height: 8px;
                                         border-radius: 4px;
-                                        background: ConsoleStore.status-tone == 2 ? Theme.danger : Theme.mute;
+                                        background: ConsoleStore.status-tone == 2 ? Look.danger : Look.mute;
                                     }
                                 }
                                 Label {
                                     text: ConsoleStore.status-label;
                                     font-size: 12px;
                                     leading: 16px;
-                                    color: ConsoleStore.status-tone == 2 ? Theme.danger : Theme.dim;
+                                    color: ConsoleStore.status-tone == 2 ? Look.danger : Look.dim;
                                 }
                             }
                         }
@@ -281,14 +242,14 @@ export component ConsoleWindow inherits Window {
                     }
                     HorizontalLayout {
                         WindowButton {
-                            icon: @image-url("../assets/icons/minus-bold.svg");
+                            icon: @image-url("assets/icons/minus-bold.svg");
                             accessible-label: "Свернуть";
                             clicked => {
                                 root.minimized = true;
                             }
                         }
                         WindowButton {
-                            icon: root.maximized ? @image-url("../assets/icons/copy-simple-bold-mirrored.svg") : @image-url("../assets/icons/square-bold.svg");
+                            icon: root.maximized ? @image-url("assets/icons/copy-simple-bold-mirrored.svg") : @image-url("assets/icons/square-bold.svg");
                             icon-size: root.maximized ? 14px : 13px;
                             accessible-label: root.maximized ? "Вернуть размер" : "Развернуть";
                             clicked => {
@@ -296,7 +257,7 @@ export component ConsoleWindow inherits Window {
                             }
                         }
                         WindowButton {
-                            icon: @image-url("../assets/icons/x-bold.svg");
+                            icon: @image-url("assets/icons/x-bold.svg");
                             accessible-label: "Закрыть";
                             icon-size: 16px;
                             closer: true;
@@ -312,7 +273,7 @@ export component ConsoleWindow inherits Window {
                 Rectangle {
                     y: parent.height - 1px;
                     height: 1px;
-                    background: Theme.border;
+                    background: Look.border;
                 }
                 HorizontalLayout {
                     padding-left: 16px;
@@ -325,10 +286,10 @@ export component ConsoleWindow inherits Window {
                         min-width: 160px;
                         max-width: 340px;
                         horizontal-stretch: 1;
-                        border-radius: Theme.radius-md;
-                        background: Theme.surface-2;
+                        border-radius: Look.radius-md;
+                        background: Look.surface-2;
                         border-width: 1px;
-                        border-color: search.has-focus ? Theme.border-strong : Theme.border;
+                        border-color: search.has-focus ? Look.border-strong : Look.border;
                         animate border-color { duration: 150ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
                         TouchArea {
                             mouse-cursor: MouseCursor.text;
@@ -342,15 +303,15 @@ export component ConsoleWindow inherits Window {
                             spacing: 8px;
                             Icon {
                                 size: 16px;
-                                source: @image-url("../assets/icons/magnifying-glass-regular.svg");
-                                colorize: Theme.mute;
+                                source: @image-url("assets/icons/magnifying-glass-regular.svg");
+                                colorize: Look.mute;
                             }
                             Rectangle {
                                 horizontal-stretch: 1;
                                 if search.text == "" && search.preedit-text == "": Label {
                                     x: 0;
                                     text: "Поиск";
-                                    color: Theme.mute;
+                                    color: Look.mute;
                                     leading: 20px;
                                 }
                                 search := TextInput {
@@ -359,11 +320,11 @@ export component ConsoleWindow inherits Window {
                                     accessible-placeholder-text: "Поиск";
                                     height: parent.height;
                                     vertical-alignment: center;
-                                    font-family: Theme.sans;
+                                    font-family: Look.sans;
                                     font-size: 14px;
-                                    color: Theme.text;
+                                    color: Look.text;
                                     selection-background-color: Theme.primary.with-alpha(0.32);
-                                    selection-foreground-color: Theme.text;
+                                    selection-foreground-color: Look.text;
                                     single-line: true;
                                     text: ConsoleStore.query;
                                     edited => {
@@ -391,9 +352,9 @@ export component ConsoleWindow inherits Window {
                                     accessible-label: "Очистить поиск";
                                     width: 24px;
                                     height: 24px;
-                                    border-radius: Theme.radius-sm;
-                                    hover-fill: Theme.surface-3;
-                                    icon: @image-url("../assets/icons/x-bold.svg");
+                                    border-radius: Look.radius-sm;
+                                    hover-fill: Look.surface-3;
+                                    icon: @image-url("assets/icons/x-bold.svg");
                                     icon-size: 14px;
                                     clicked => {
                                         search.text = "";
@@ -407,10 +368,10 @@ export component ConsoleWindow inherits Window {
                     }
                     Rectangle {
                         height: 36px;
-                        border-radius: Theme.radius-md;
-                        background: Theme.surface-2;
+                        border-radius: Look.radius-md;
+                        background: Look.surface-2;
                         border-width: 1px;
-                        border-color: Theme.border;
+                        border-color: Look.border;
                         HorizontalLayout {
                             padding: 4px;
                             FilterButton {
@@ -418,7 +379,7 @@ export component ConsoleWindow inherits Window {
                                 hint: "Весь журнал";
                                 count: ConsoleStore.count-all;
                                 active: ConsoleStore.filter == 0;
-                                tone: Theme.dim;
+                                tone: Look.dim;
                                 clicked => {
                                     ConsoleStore.set-filter(0);
                                 }
@@ -428,7 +389,7 @@ export component ConsoleWindow inherits Window {
                                 hint: "Предупреждения и ошибки";
                                 count: ConsoleStore.count-warn;
                                 active: ConsoleStore.filter == 1;
-                                tone: ConsoleStore.has-warn ? Theme.warn : Theme.dim;
+                                tone: ConsoleStore.has-warn ? Look.warn : Look.dim;
                                 clicked => {
                                     ConsoleStore.set-filter(1);
                                 }
@@ -438,7 +399,7 @@ export component ConsoleWindow inherits Window {
                                 hint: "Только ошибки";
                                 count: ConsoleStore.count-error;
                                 active: ConsoleStore.filter == 2;
-                                tone: ConsoleStore.has-error ? Theme.danger : Theme.dim;
+                                tone: ConsoleStore.has-error ? Look.danger : Look.dim;
                                 clicked => {
                                     ConsoleStore.set-filter(2);
                                 }
@@ -458,8 +419,8 @@ export component ConsoleWindow inherits Window {
                             accessible-label: "Копировать";
                             hint: "Скопировать строки, которые сейчас видны";
                             has-icon: true;
-                            icon: ConsoleStore.copied ? @image-url("../assets/icons/check-bold.svg") : @image-url("../assets/icons/copy-regular.svg");
-                            icon-tint: Theme.online;
+                            icon: ConsoleStore.copied ? @image-url("assets/icons/check-bold.svg") : @image-url("assets/icons/copy-regular.svg");
+                            icon-tint: Look.online;
                             tinted: ConsoleStore.copied;
                             enabled: ConsoleStore.shown > 0;
                             clicked => {
@@ -473,7 +434,7 @@ export component ConsoleWindow inherits Window {
                             accessible-label: "Журналы";
                             hint: "Открыть папку logs этой сборки: там latest.log и debug.log";
                             has-icon: true;
-                            icon: @image-url("../assets/icons/folder-open-regular.svg");
+                            icon: @image-url("assets/icons/folder-open-regular.svg");
                             enabled: ConsoleStore.started;
                             clicked => {
                                 ConsoleStore.open-logs();
@@ -486,7 +447,7 @@ export component ConsoleWindow inherits Window {
                             accessible-label: "Остановить";
                             hint: "Остановить игру";
                             has-icon: true;
-                            icon: @image-url("../assets/icons/stop-fill.svg");
+                            icon: @image-url("assets/icons/stop-fill.svg");
                             icon-size: 14px;
                             clicked => {
                                 ConsoleStore.stop();
@@ -499,17 +460,17 @@ export component ConsoleWindow inherits Window {
             Rectangle {
                 vertical-stretch: 1;
                 if ConsoleStore.ready && !ConsoleStore.started: Placeholder {
-                    icon: @image-url("../assets/icons/terminal-window-duotone.svg");
+                    icon: @image-url("assets/icons/terminal-window-duotone.svg");
                     title: "Игра ещё не запускалась";
                     body: "Нажмите «Играть» в лаунчере — журнал игры появится здесь и будет обновляться сам.";
                 }
                 if ConsoleStore.ready && ConsoleStore.started && ConsoleStore.total == 0: Placeholder {
-                    icon: @image-url("../assets/icons/terminal-window-duotone.svg");
+                    icon: @image-url("assets/icons/terminal-window-duotone.svg");
                     title: "Ждём первых строк";
                     body: "Игра запускается, её журнал появится через пару секунд.";
                 }
                 if ConsoleStore.ready && ConsoleStore.started && ConsoleStore.total > 0 && ConsoleStore.shown == 0: Placeholder {
-                    icon: @image-url("../assets/icons/magnifying-glass-regular.svg");
+                    icon: @image-url("assets/icons/magnifying-glass-regular.svg");
                     icon-size: 24px;
                     title: "Ничего не нашлось";
                     body: "Под этот поиск и фильтр не подходит ни одна строка.";
@@ -546,8 +507,8 @@ export component ConsoleWindow inherits Window {
                     Rectangle {
                         border-radius: 18px;
                         border-width: 1px;
-                        border-color: Theme.border-strong;
-                        background: pill-area.has-hover ? Theme.surface-3 : Theme.panel-2;
+                        border-color: Look.border-strong;
+                        background: pill-area.has-hover ? Look.surface-3 : Look.panel-2;
                         animate background { duration: 200ms; easing: ease-out; }
                     }
                     pill-area := TouchArea {
@@ -563,8 +524,8 @@ export component ConsoleWindow inherits Window {
                         spacing: 8px;
                         Icon {
                             size: 14px;
-                            source: @image-url("../assets/icons/arrow-down-bold.svg");
-                            colorize: Theme.text;
+                            source: @image-url("assets/icons/arrow-down-bold.svg");
+                            colorize: Look.text;
                         }
                         Label {
                             text: ConsoleStore.pill-label;
@@ -577,11 +538,11 @@ export component ConsoleWindow inherits Window {
 
             Rectangle {
                 height: 32px;
-                background: ConsoleStore.trouble != "" ? Theme.danger.with-alpha(0.1) : transparent;
+                background: ConsoleStore.trouble != "" ? Look.danger.with-alpha(0.1) : transparent;
                 Rectangle {
                     y: 0;
                     height: 1px;
-                    background: Theme.border;
+                    background: Look.border;
                 }
                 if ConsoleStore.trouble != "": HorizontalLayout {
                     padding-left: 16px;
@@ -589,14 +550,14 @@ export component ConsoleWindow inherits Window {
                     spacing: 8px;
                     Icon {
                         size: 14px;
-                        source: @image-url("../assets/icons/warning-circle-regular.svg");
-                        colorize: Theme.danger;
+                        source: @image-url("assets/icons/warning-circle-regular.svg");
+                        colorize: Look.danger;
                     }
                     Label {
                         text: ConsoleStore.trouble;
                         font-size: 12px;
                         leading: 16px;
-                        color: Theme.danger;
+                        color: Look.danger;
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
@@ -605,12 +566,12 @@ export component ConsoleWindow inherits Window {
                         IconTap {
                             width: 24px;
                             height: 24px;
-                            border-radius: Theme.radius-sm;
-                            hover-fill: Theme.danger.with-alpha(0.15);
+                            border-radius: Look.radius-sm;
+                            hover-fill: Look.danger.with-alpha(0.15);
                             accessible-label: "Скрыть";
-                            rest-ink: Theme.danger;
-                            hover-ink: Theme.danger;
-                            icon: @image-url("../assets/icons/x-bold.svg");
+                            rest-ink: Look.danger;
+                            hover-ink: Look.danger;
+                            icon: @image-url("assets/icons/x-bold.svg");
                             icon-size: 12px;
                             clicked => {
                                 ConsoleStore.dismiss-trouble();
@@ -624,10 +585,10 @@ export component ConsoleWindow inherits Window {
                     spacing: 16px;
                     Label {
                         text: ConsoleStore.summary;
-                        font-family: Theme.tabular;
+                        font-family: Look.tabular;
                         font-size: 12px;
                         leading: 16px;
-                        color: Theme.dim;
+                        color: Look.dim;
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
@@ -635,7 +596,7 @@ export component ConsoleWindow inherits Window {
                         text: ConsoleStore.shortcut + " — поиск";
                         font-size: 12px;
                         leading: 16px;
-                        color: Theme.dim;
+                        color: Look.dim;
                     }
                 }
             }

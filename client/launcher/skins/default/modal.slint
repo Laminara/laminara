@@ -1,4 +1,5 @@
-import { Theme, Media } from "theme.slint";
+import { Theme, Media } from "@laminara/contract.slint";
+import { Look } from "look.slint";
 import { Label, Icon, Shadow } from "atoms.slint";
 import { IconTap, ScrollArea } from "controls.slint";
 
@@ -47,10 +48,10 @@ export component Modal inherits Rectangle {
             box-height: parent.height;
         }
         Rectangle {
-            border-radius: Theme.radius-lg;
+            border-radius: Look.radius-lg;
             border-width: 1px;
-            border-color: Theme.border;
-            background: Theme.bg-tint;
+            border-color: Look.border;
+            background: Look.bg-tint;
             TouchArea { }
             stack := VerticalLayout {
                 padding: 1px;
@@ -84,7 +85,7 @@ export component ModalHeader inherits Rectangle {
             if root.subtitle != "": Label {
                 text: root.subtitle;
                 leading: 20px;
-                color: Theme.dim;
+                color: Look.dim;
                 overflow: elide;
             }
         }
@@ -94,8 +95,8 @@ export component ModalHeader inherits Rectangle {
                 width: 36px;
                 accessible-label: "Закрыть";
                 height: 36px;
-                border-radius: Theme.radius-md;
-                icon: @image-url("../assets/icons/x-regular.svg");
+                border-radius: Look.radius-md;
+                icon: @image-url("assets/icons/x-regular.svg");
                 icon-size: 18px;
                 clicked => {
                     root.close();
@@ -106,7 +107,7 @@ export component ModalHeader inherits Rectangle {
     Rectangle {
         y: parent.height - 1px;
         height: 1px;
-        background: Theme.border;
+        background: Look.border;
     }
 }
 
@@ -138,7 +139,7 @@ export component ModalFooter inherits Rectangle {
     Rectangle {
         y: 0;
         height: 1px;
-        background: Theme.border;
+        background: Look.border;
     }
     HorizontalLayout {
         padding-left: 28px;
@@ -150,7 +151,7 @@ export component ModalFooter inherits Rectangle {
             text: root.note;
             font-size: 12px;
             leading: 16px;
-            color: Theme.mute;
+            color: Look.mute;
         }
         Rectangle {
             horizontal-stretch: 1;

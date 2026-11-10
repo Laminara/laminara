@@ -1,19 +1,17 @@
-import "../assets/fonts/Inter.ttf";
-import "../assets/fonts/JetBrainsMono.ttf";
-import "../assets/fonts/InterTabular.ttf";
-import { Theme, Media } from "theme.slint";
+import { Theme, Media, LogPick, Store, Phase, ModalKind } from "@laminara/contract.slint";
+import { Look } from "look.slint";
+import "assets/fonts/Inter.ttf";
+import "assets/fonts/JetBrainsMono.ttf";
+import "assets/fonts/InterTabular.ttf";
 import { Viewport, HeroMedia } from "atoms.slint";
 import { WindowButton, TooltipLayer } from "controls.slint";
 import { Modal } from "modal.slint";
-import { LogPick } from "log.slint";
-import { Store, Phase, ModalKind } from "store.slint";
 import { Header, HeroPanel, BuildStrip, RunningBar, NewsPanel, AccountMenu } from "home.slint";
 import { LoginScreen, ConnectingScreen, SyncOverlay, UpdateBanner, UpdateScreen, ErrorToast } from "overlays.slint";
 import { AccountsDialog, GeneralDialog, BuildDialog, FeaturesDialog, LibraryDialog, NewsDialog, CrashDialog } from "dialogs.slint";
 
-export { Theme, Media, Store, Phase, ModalKind, LogPick }
-export { ConsoleWindow, ConsoleStore, ConsoleLine } from "console.slint";
-export { BuildItem, LibraryRow, NewsItem, NewsPair, AccountItem, FeatureRow, LogRow, Install, Report } from "store.slint";
+export { ConsoleWindow } from "console.slint";
+export * from "@laminara/contract.slint";
 
 component HomeView inherits VerticalLayout {
     Header { }
@@ -35,7 +33,7 @@ export component MainWindow inherits Window {
     property <bool> home: Store.phase != Phase.connecting && Store.phase != Phase.login && Store.phase != Phase.updating;
     property <bool> compact-modal: Store.modal == ModalKind.accounts || Store.modal == ModalKind.general || Store.modal == ModalKind.build;
     title: Media.title;
-    icon: Media.has-logo ? Media.logo : @image-url("../icons/128x128.png");
+    icon: Media.has-logo ? Media.logo : @image-url("../../icons/128x128.png");
     no-frame: true;
     resize-border-width: 6px;
     preferred-width: 1180px;
@@ -43,7 +41,7 @@ export component MainWindow inherits Window {
     min-width: 960px;
     min-height: 600px;
     background: Theme.bg;
-    default-font-family: Theme.sans;
+    default-font-family: Look.sans;
 
     init => {
         Viewport.width = self.width;
@@ -122,14 +120,14 @@ export component MainWindow inherits Window {
             HorizontalLayout {
                 alignment: end;
                 WindowButton {
-                    icon: @image-url("../assets/icons/minus-bold.svg");
+                    icon: @image-url("assets/icons/minus-bold.svg");
                     accessible-label: "Свернуть";
                     clicked => {
                         root.minimized = true;
                     }
                 }
                 WindowButton {
-                    icon: @image-url("../assets/icons/x-bold.svg");
+                    icon: @image-url("assets/icons/x-bold.svg");
                     accessible-label: "Закрыть";
                     icon-size: 16px;
                     closer: true;

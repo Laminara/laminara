@@ -1,0 +1,39 @@
+export struct ConsoleLine {
+    text: string,
+    level: int,
+    hit: bool,
+    rich: styled-text,
+}
+
+export global ConsoleStore {
+    in property <bool> ready;
+    in property <string> build;
+    in property <string> status-label: "Игра не запущена";
+    in property <int> status-tone: 1;
+    in property <bool> started;
+    in property <bool> running;
+    in property <int> total;
+    in property <int> shown;
+    in property <[ConsoleLine]> lines;
+    in-out property <string> query;
+    in-out property <int> filter;
+    in property <string> count-all;
+    in property <string> count-warn;
+    in property <string> count-error;
+    in property <bool> has-warn;
+    in property <bool> has-error;
+    in property <string> summary;
+    in property <string> trouble;
+    in property <bool> copied;
+    in property <string> pill-label: "К последним строкам";
+    in property <string> shortcut: "Ctrl + F";
+    callback search(string);
+    callback set-filter(int);
+    callback copy();
+    callback open-logs();
+    callback stop();
+    callback dismiss-trouble();
+    callback show-everything();
+    callback following(bool);
+    callback close();
+}

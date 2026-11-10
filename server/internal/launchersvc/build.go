@@ -27,6 +27,7 @@ const (
 
 type Bakery struct {
 	Repo     string
+	Token    string
 	Version  string
 	Auto     bool
 	Document func() (clientconfig.Document, error)
@@ -217,8 +218,12 @@ func (b *Bakery) template(ctx context.Context, tag, asset, root string, out io.W
 	return path, err
 }
 
+func (b *Bakery) templateDir(root, tag string) string {
+	return filepath.Join(root, templatesDir, strings.ReplaceAll(b.Repo, "/", "_"), tag)
+}
+
 func (b *Bakery) fetchTemplate(ctx context.Context, tag, asset, root string, out io.Writer) (string, error) {
-	dir := filepath.Join(root, templatesDir, tag)
+	dir := b.templateDir(root, tag)
 	path := filepath.Join(dir, asset)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
@@ -227,7 +232,7 @@ func (b *Bakery) fetchTemplate(ctx context.Context, tag, asset, root string, out
 		return "", err
 	}
 
-	releases := &ghrelease.Client{Repo: b.Repo, API: b.API, HTTP: b.HTTP}
+	releases := &ghrelease.Client{Repo: b.Repo, Token: b.Token, API: b.API, HTTP: b.HTTP}
 	release, err := releases.ByTag(ctx, "v"+tag)
 	if err != nil {
 		return "", fmt.Errorf("не нашёл релиз v%s, из которого берут лаунчер: %w", tag, err)
