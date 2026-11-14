@@ -26,12 +26,14 @@ func init() {
 const maxAuthResponseBytes = 1 << 20
 
 type httpConfig struct {
+	LookupURL         string            `json:"lookupURL"`
 	URL               string            `json:"url"`
 	Headers           map[string]string `json:"headers"`
 	Timeout           string            `json:"timeout"`
 	UsernameField     string            `json:"usernameField"`
 	PasswordField     string            `json:"passwordField"`
 	CodeField         string            `json:"codeField"`
+	NameField         string            `json:"nameField"`
 	UUIDField         string            `json:"uuidField"`
 	SuccessField      string            `json:"successField"`
 	SecondFactorField string            `json:"secondFactorField"`
@@ -39,11 +41,13 @@ type httpConfig struct {
 
 type httpProvider struct {
 	client            *http.Client
+	lookupURL         string
 	url               string
 	headers           map[string]string
 	usernameField     string
 	passwordField     string
 	codeField         string
+	nameField         string
 	uuidField         string
 	successField      string
 	secondFactorField string
@@ -69,11 +73,13 @@ func newHTTP(raw json.RawMessage) (auth.Provider, error) {
 	return &httpProvider{
 		client:            &http.Client{Timeout: timeout},
 		url:               cfg.URL,
+		lookupURL:         cfg.LookupURL,
 		headers:           cfg.Headers,
 		usernameField:     orDefault(cfg.UsernameField, "username"),
 		passwordField:     orDefault(cfg.PasswordField, "password"),
 		codeField:         orDefault(cfg.CodeField, "totp"),
 		uuidField:         cfg.UUIDField,
+		nameField:         cfg.NameField,
 		successField:      cfg.SuccessField,
 		secondFactorField: cfg.SecondFactorField,
 	}, nil
@@ -114,31 +120,24 @@ func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials)
 	if creds.TwoFactorCode != "" {
 		body[p.codeField] = creds.TwoFactorCode
 	}
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return auth.Identity{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(encoded))
-	if err != nil {
-		return auth.Identity{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for name, value := range p.headers {
-		req.Header.Set(name, value)
-	}
-	resp, err := p.client.Do(req)
+	resp, err := p.post(ctx, p.url, body)
 	if err != nil {
 		return auth.Identity{}, err
 	}
 	defer resp.Body.Close()
 
 	var payload map[string]any
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAuthResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAuthResponseBytes+1))
 	if err != nil {
 		return auth.Identity{}, fmt.Errorf("ответ источника аккаунтов не дочитался: %w", err)
 	}
+	if len(data) > maxAuthResponseBytes {
+		return auth.Identity{}, fmt.Errorf("ответ источника аккаунтов больше допустимого размера")
+	}
 	if len(data) > 0 {
-		_ = json.Unmarshal(data, &payload)
+		if err := json.Unmarshal(data, &payload); err != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return auth.Identity{}, fmt.Errorf("ответ источника аккаунтов не разобрать: %w", err)
+		}
 	}
 
 	accepted := resp.StatusCode >= 200 && resp.StatusCode < 300
@@ -146,11 +145,24 @@ func (p *httpProvider) Authenticate(ctx context.Context, creds auth.Credentials)
 		accepted = marked(lookup(payload, p.successField))
 	}
 	if accepted {
-		id := auth.OfflineUUID(creds.Username)
-		if raw, ok := lookup(payload, p.uuidField).(string); ok {
-			if parsed, err := uuid.Parse(raw); err == nil {
-				id = parsed
+		if p.nameField != "" {
+			name, ok := lookup(payload, p.nameField).(string)
+			if !ok || name == "" {
+				return auth.Identity{}, fmt.Errorf("в ответе источника аккаунтов нет имени игрока — проверьте nameField")
 			}
+			creds.Username = name
+		}
+		raw := ""
+		if p.uuidField != "" {
+			value, ok := lookup(payload, p.uuidField).(string)
+			if !ok || value == "" {
+				return auth.Identity{}, fmt.Errorf("в ответе источника аккаунтов нет UUID — проверьте uuidField")
+			}
+			raw = value
+		}
+		id, err := accountUUID(raw, creds.Username)
+		if err != nil {
+			return auth.Identity{}, err
 		}
 		return auth.Identity{Subject: creds.Username, Username: creds.Username, UUID: id}, nil
 	}
@@ -198,4 +210,57 @@ func marked(value any) bool {
 	default:
 		return true
 	}
+}
+
+func (p *httpProvider) LookupProfile(ctx context.Context, username string) (auth.Identity, error) {
+	if p.lookupURL == "" {
+		return auth.Identity{}, fmt.Errorf("для поиска профилей у HTTP-источника задайте lookupURL")
+	}
+	resp, err := p.post(ctx, p.lookupURL, map[string]string{p.usernameField: username})
+	if err != nil {
+		return auth.Identity{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return auth.Identity{}, auth.ErrInvalidCredentials
+	}
+	if resp.StatusCode != http.StatusOK {
+		return auth.Identity{}, fmt.Errorf("источник профилей ответил %d", resp.StatusCode)
+	}
+	var profile struct {
+		Name string `json:"name"`
+		ID   string `json:"id"`
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAuthResponseBytes+1))
+	if err != nil {
+		return auth.Identity{}, err
+	}
+	if len(data) > maxAuthResponseBytes {
+		return auth.Identity{}, fmt.Errorf("ответ источника профилей больше допустимого размера")
+	}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return auth.Identity{}, err
+	}
+	id, err := uuid.Parse(profile.ID)
+	if err != nil || id == uuid.Nil || !strings.EqualFold(profile.Name, username) {
+		return auth.Identity{}, fmt.Errorf("источник профилей вернул неверный UUID или имя игрока")
+	}
+	return auth.Identity{Subject: profile.Name, Username: profile.Name, UUID: id}, nil
+}
+
+func (p *httpProvider) post(ctx context.Context, endpoint string, body map[string]string) (*http.Response, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range p.headers {
+		req.Header.Set(name, value)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return p.client.Do(req)
 }
