@@ -182,7 +182,7 @@ pub async fn download_artifact(
         .as_ref()
         .ok_or_else(|| CoreError::Launch("release artifact has no hash".into()))?;
     let expected = hex::encode(&hash.value);
-    let key = crate::manifest::object_key(hash.algo, &hash.value);
+    let key = crate::manifest::object_key(hash.algo, &hash.value)?;
 
     std::fs::create_dir_all(staging)
         .map_err(|e| CoreError::Launch(format!("create staging: {e}")))?;
@@ -206,7 +206,8 @@ pub async fn download_artifact(
     let mut done = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| CoreError::Launch(format!("download launcher: {}", describe(&e))))?;
+        let chunk =
+            chunk.map_err(|e| CoreError::Launch(format!("download launcher: {}", describe(&e))))?;
         hasher.update(&chunk);
         done += chunk.len() as u64;
         if done > limit {

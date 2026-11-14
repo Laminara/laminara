@@ -54,7 +54,7 @@ impl LaunchExtras {
     pub fn adopt_build(&mut self, manifest: &Manifest) {
         self.prepend_build_args(&manifest.jvm_args, &manifest.game_args);
         for entry in &manifest.classpath {
-            match crate::sync::validate_manifest_path(entry) {
+            match crate::manifest::validate_manifest_path(entry) {
                 Ok(()) => self.classpath_first.push(entry.clone()),
                 Err(error) => tracing::warn!("classpath entry dropped: {error}"),
             }
@@ -119,7 +119,7 @@ pub fn resolve_extras(model: &Option<FeatureModel>, selection: &FeatureSelection
         extras.jvm_args.extend(option.jvm_args.iter().cloned());
         extras.game_args.extend(option.game_args.iter().cloned());
         for entry in &option.classpath {
-            match crate::sync::validate_manifest_path(entry) {
+            match crate::manifest::validate_manifest_path(entry) {
                 Ok(()) => extras.classpath.push(entry.clone()),
                 Err(error) => tracing::warn!("classpath entry dropped: {error}"),
             }

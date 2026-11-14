@@ -421,7 +421,7 @@ impl Core {
                 && update::compare(current_version, &release.minimum_version) < 0,
             file_name: artifact.file_name.clone(),
             size: object.size,
-            object_key: crate::manifest::object_key(hash.algo, &hash.value),
+            object_key: crate::manifest::object_key(hash.algo, &hash.value)?,
             algo: hash.algo,
             hash_hex: hex::encode(&hash.value),
             can_install: blocked_reason.is_none(),
