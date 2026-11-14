@@ -2,6 +2,8 @@ package yggdrasil
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -89,9 +91,12 @@ func (r *redisSessions) get(ctx context.Context, accessToken string) (session, b
 	if err := json.Unmarshal(data, &stored); err != nil {
 		return session{}, false, err
 	}
-	left, err := r.client.TTL(ctx, gameSessionKey(accessToken)).Result()
+	left, err := r.client.PTTL(ctx, gameSessionKey(accessToken)).Result()
 	if err != nil {
 		return session{}, false, err
+	}
+	if left <= 0 {
+		return session{}, false, nil
 	}
 	return session{
 		clientToken: stored.ClientToken,
@@ -100,19 +105,37 @@ func (r *redisSessions) get(ctx context.Context, accessToken string) (session, b
 	}, true, nil
 }
 
+var rotateGameSession = redis.NewScript(`
+ local data = redis.call('GET', KEYS[1])
+ if not data then return 0 end
+ local userKey = KEYS[3]
+ redis.call('SET', KEYS[2], data, 'PX', ARGV[1])
+ redis.call('DEL', KEYS[1])
+ redis.call('SREM', userKey, ARGV[2])
+ redis.call('SADD', userKey, ARGV[3])
+ local remaining = redis.call('PTTL', userKey)
+ if remaining < tonumber(ARGV[1]) then redis.call('PEXPIRE', userKey, ARGV[1]) end
+ return data
+`)
+
 func (r *redisSessions) rotate(ctx context.Context, oldToken, newToken string, ttl time.Duration) (session, bool, error) {
-	sess, found, err := r.get(ctx, oldToken)
+	current, found, err := r.get(ctx, oldToken)
 	if err != nil || !found {
 		return session{}, false, err
 	}
-	if err := r.put(ctx, newToken, sess, ttl); err != nil {
+	result, err := rotateGameSession.Run(ctx, r.client, []string{gameSessionKey(oldToken), gameSessionKey(newToken), gameUserKey(current.identity.Username)}, ttl.Milliseconds(), oldToken, newToken).Result()
+	if err != nil {
 		return session{}, false, err
 	}
-	if err := r.remove(ctx, oldToken); err != nil {
+	data, ok := result.(string)
+	if !ok {
+		return session{}, false, nil
+	}
+	var stored storedSession
+	if err := json.Unmarshal([]byte(data), &stored); err != nil {
 		return session{}, false, err
 	}
-	sess.expiresAt = time.Now().Add(ttl)
-	return sess, true, nil
+	return session{clientToken: stored.ClientToken, identity: stored.Identity, expiresAt: time.Now().Add(ttl)}, true, nil
 }
 
 func (r *redisSessions) remove(ctx context.Context, accessToken string) error {
@@ -129,17 +152,41 @@ func (r *redisSessions) remove(ctx context.Context, accessToken string) error {
 	return err
 }
 
+var removeGameUser = redis.NewScript(`
+ local tokens = redis.call('SMEMBERS', KEYS[1])
+ for _, token in ipairs(tokens) do redis.call('DEL', ARGV[1] .. token) end
+ redis.call('DEL', KEYS[1])
+ return 1
+`)
+
 func (r *redisSessions) removeUser(ctx context.Context, username string) error {
-	userKey := gameUserKey(username)
-	tokens, err := r.client.SMembers(ctx, userKey).Result()
+	return removeGameUser.Run(ctx, r.client, []string{gameUserKey(username)}, "laminara:ygg:session:").Err()
+}
+
+func gameJoinKey(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return "laminara:ygg:join:" + hex.EncodeToString(digest[:])
+}
+
+func (r *redisSessions) putJoin(ctx context.Context, key string, record joinRecord, ttl time.Duration) error {
+	data, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	pipe := r.client.TxPipeline()
-	for _, token := range tokens {
-		pipe.Del(ctx, gameSessionKey(token))
+	return r.client.Set(ctx, gameJoinKey(key), data, ttl).Err()
+}
+
+func (r *redisSessions) getJoin(ctx context.Context, key string) (joinRecord, bool, error) {
+	data, err := r.client.Get(ctx, gameJoinKey(key)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return joinRecord{}, false, nil
 	}
-	pipe.Del(ctx, userKey)
-	_, err = pipe.Exec(ctx)
-	return err
+	if err != nil {
+		return joinRecord{}, false, err
+	}
+	var record joinRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return joinRecord{}, false, err
+	}
+	return record, true, nil
 }

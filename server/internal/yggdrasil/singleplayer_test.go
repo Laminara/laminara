@@ -112,3 +112,28 @@ func TestRefreshBringsTheProfileBack(t *testing.T) {
 		t.Fatalf("после продления сессии профиль обязан снова отдаваться: %d", status)
 	}
 }
+
+func TestSessionStorageFailureIsNotReportedAsSuccess(t *testing.T) {
+	_, client := sharedSessions(t)
+	api := httptest.NewServer(newHandlerOn(t, client))
+	defer api.Close()
+	account := signIn(t, api.URL)
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requests := []struct {
+		path string
+		body map[string]string
+	}{
+		{"/authserver/authenticate", map[string]string{"username": "neo", "password": "matrix"}},
+		{"/authserver/invalidate", map[string]string{"accessToken": account.accessToken}},
+		{"/authserver/signout", map[string]string{"username": "neo", "password": "matrix"}},
+	}
+	for _, req := range requests {
+		response := post(t, api.URL+req.path, req.body)
+		response.Body.Close()
+		if response.StatusCode != 503 {
+			t.Fatalf("%s returned false success: %d", req.path, response.StatusCode)
+		}
+	}
+}

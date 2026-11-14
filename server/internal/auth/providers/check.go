@@ -30,7 +30,7 @@ func (p *sqlProvider) Check(ctx context.Context, probe *diag.Probe) {
 	}
 	probe.OK("база пользователей", "%s отвечает за %s", p.driver, time.Since(started).Round(time.Millisecond))
 
-	if _, _, _, err := p.lookup(ctx, "laminara-doctor-"+uuid.NewString()); err != nil && !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := p.lookup(ctx, "laminara-doctor-"+uuid.NewString()); err != nil && !errors.Is(err, auth.ErrInvalidCredentials) {
 		probe.Fail("запрос аккаунта", fmt.Sprintf("не выполняется: %v", err), diag.Remedy{
 			Hint: p.schemaHint(),
 		})

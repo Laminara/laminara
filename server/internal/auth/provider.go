@@ -56,3 +56,7 @@ type Accounts interface {
 	Remove(ctx context.Context, username string) error
 	List(ctx context.Context) ([]Identity, error)
 }
+
+type ProfileLookup interface {
+	LookupProfile(context.Context, string) (Identity, error)
+}

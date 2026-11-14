@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -79,7 +80,7 @@ func NewServer(authService *auth.Service, skinProvider skin.Provider, machines *
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.metadata)
+	mux.HandleFunc("GET /{$}", s.metadata)
 	mux.HandleFunc("POST /authserver/authenticate", s.authenticate)
 	mux.HandleFunc("POST /authserver/refresh", s.refresh)
 	mux.HandleFunc("POST /authserver/validate", s.validate)
@@ -111,6 +112,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		Password      string `json:"password"`
 		ClientToken   string `json:"clientToken"`
 		TwoFactorCode string `json:"twoFactorCode"`
+		RequestUser   bool   `json:"requestUser"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -122,6 +124,10 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.auth.Verify(r.Context(), req.Username, req.Password, req.TwoFactorCode)
 	if err != nil {
+		if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrTwoFactorRequired) {
+			yggError(w, http.StatusServiceUnavailable, "Источник аккаунтов недоступен — попробуйте позже.")
+			return
+		}
 		if !errors.Is(err, auth.ErrTwoFactorRequired) {
 			s.limits.SignInFailed(r.Context(), address, req.Username)
 		}
@@ -145,55 +151,73 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		clientToken = randomToken()
 	}
 	accessToken := randomToken()
-	s.store.putSession(r.Context(), accessToken, clientToken, identity, tokenTTL)
+	if err := s.store.putSession(r.Context(), accessToken, clientToken, identity, tokenTTL); err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	s.store.rememberProfile(r.Context(), identity)
 
-	profile := gameProfile(identity)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"accessToken":       accessToken,
-		"clientToken":       clientToken,
-		"availableProfiles": []map[string]string{profile},
-		"selectedProfile":   profile,
-	})
+	s.writeSession(w, accessToken, session{clientToken: clientToken, identity: identity}, true, req.RequestUser)
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AccessToken string `json:"accessToken"`
-		ClientToken string `json:"clientToken"`
+		RequestUser     bool `json:"requestUser"`
+		SelectedProfile *struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"selectedProfile"`
+		AccessToken string  `json:"accessToken"`
+		ClientToken *string `json:"clientToken"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	current, ok := s.store.session(r.Context(), req.AccessToken)
-	if !ok || (req.ClientToken != "" && req.ClientToken != current.clientToken) {
+	current, ok, err := s.store.session(r.Context(), req.AccessToken)
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
+	if !ok || (req.ClientToken != nil && *req.ClientToken != current.clientToken) {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
+	if req.SelectedProfile != nil && (req.SelectedProfile.ID != dashless(current.identity.UUID) || req.SelectedProfile.Name != current.identity.Username) {
+		yggError(w, http.StatusForbidden, "Выбранный профиль не принадлежит этому токену.")
+		return
+	}
+	if req.SelectedProfile != nil {
+		yggErrorType(w, http.StatusBadRequest, "IllegalArgumentException", "Access token already has a profile assigned.")
+		return
+	}
 	newAccess := randomToken()
-	sess, rotated := s.store.rotateSession(r.Context(), req.AccessToken, newAccess, tokenTTL)
+	sess, rotated, err := s.store.rotateSession(r.Context(), req.AccessToken, newAccess, tokenTTL)
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	if !rotated {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
 	s.store.rememberProfile(r.Context(), sess.identity)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"accessToken":     newAccess,
-		"clientToken":     sess.clientToken,
-		"selectedProfile": gameProfile(sess.identity),
-	})
+	s.writeSession(w, newAccess, sess, false, req.RequestUser)
 }
 
 func (s *Server) validate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AccessToken string `json:"accessToken"`
-		ClientToken string `json:"clientToken"`
+		AccessToken string  `json:"accessToken"`
+		ClientToken *string `json:"clientToken"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	sess, ok := s.store.session(r.Context(), req.AccessToken)
-	if !ok || (req.ClientToken != "" && req.ClientToken != sess.clientToken) {
+	sess, ok, err := s.store.session(r.Context(), req.AccessToken)
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
+	if !ok || (req.ClientToken != nil && *req.ClientToken != sess.clientToken) {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
 	}
@@ -207,7 +231,10 @@ func (s *Server) invalidate(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	s.store.deleteSession(r.Context(), req.AccessToken)
+	if err := s.store.deleteSession(r.Context(), req.AccessToken); err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -225,26 +252,39 @@ func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusTooManyRequests, "Too many attempts. Try again in a few minutes.")
 		return
 	}
-	if _, err := s.auth.Verify(r.Context(), req.Username, req.Password, req.TwoFactorCode); err != nil {
+	identity, err := s.auth.Verify(r.Context(), req.Username, req.Password, req.TwoFactorCode)
+	if err != nil {
+		if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrTwoFactorRequired) {
+			yggError(w, http.StatusServiceUnavailable, "Источник аккаунтов недоступен — попробуйте позже.")
+			return
+		}
 		if !errors.Is(err, auth.ErrTwoFactorRequired) {
 			s.limits.SignInFailed(r.Context(), address, req.Username)
 		}
 		yggError(w, http.StatusForbidden, messageFor(err))
 		return
 	}
-	s.store.deleteUser(r.Context(), req.Username)
+	if err := s.store.deleteUser(r.Context(), identity.Username); err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AccessToken string `json:"accessToken"`
-		ServerID    string `json:"serverId"`
+		AccessToken     string `json:"accessToken"`
+		ServerID        string `json:"serverId"`
+		SelectedProfile string `json:"selectedProfile"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	sess, ok := s.store.session(r.Context(), req.AccessToken)
+	sess, ok, err := s.store.session(r.Context(), req.AccessToken)
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	if !ok {
 		yggError(w, http.StatusForbidden, "Токен недействителен.")
 		return
@@ -253,7 +293,14 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		yggError(w, http.StatusForbidden, machineMessage(err))
 		return
 	}
-	s.store.putJoin(req.ServerID, sess.identity, joinTTL)
+	if req.ServerID == "" || req.SelectedProfile != dashless(sess.identity.UUID) {
+		yggError(w, http.StatusForbidden, "Выбран неверный профиль или не указан идентификатор сервера.")
+		return
+	}
+	if err := s.store.putJoin(r.Context(), req.ServerID, req.AccessToken, s.proxies.OfRequest(r), sess.identity, joinTTL); err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	s.store.rememberProfile(r.Context(), sess.identity)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -261,7 +308,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 func (s *Server) hasJoined(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	serverID := r.URL.Query().Get("serverId")
-	identity, ok := s.store.join(serverID)
+	identity, ok, err := s.store.join(r.Context(), serverID, username, r.URL.Query().Get("ip"))
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище игровых сессий недоступно — попробуйте позже.")
+		return
+	}
 	if !ok || !strings.EqualFold(identity.Username, username) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -270,7 +321,16 @@ func (s *Server) hasJoined(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.store.profile(r.Context(), r.PathValue("uuid"))
+	id, err := uuid.Parse(r.PathValue("uuid"))
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	identity, ok, err := s.store.profile(r.Context(), dashless(id))
+	if err != nil {
+		yggError(w, http.StatusServiceUnavailable, "Хранилище профилей недоступно — попробуйте позже.")
+		return
+	}
 	if !ok {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -284,9 +344,31 @@ func (s *Server) profilesByName(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &names) {
 		return
 	}
+	if names == nil {
+		yggError(w, http.StatusBadRequest, "Нужен массив имён игроков.")
+		return
+	}
+	if len(names) > 100 {
+		yggError(w, http.StatusBadRequest, "За один запрос можно найти не больше 100 игроков.")
+		return
+	}
+	resolver, ok := s.auth.Provider().(auth.ProfileLookup)
+	if !ok {
+		yggError(w, http.StatusServiceUnavailable, "Источник аккаунтов не поддерживает поиск профилей.")
+		return
+	}
 	result := make([]map[string]string, 0, len(names))
 	for _, name := range names {
-		result = append(result, map[string]string{"id": dashless(auth.OfflineUUID(name)), "name": name})
+		identity, err := resolver.LookupProfile(r.Context(), name)
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			continue
+		}
+		if err != nil {
+			yggError(w, http.StatusServiceUnavailable, "Источник профилей недоступен — попробуйте позже.")
+			return
+		}
+		result = append(result, gameProfile(identity))
+		s.store.rememberProfile(r.Context(), identity)
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -307,6 +389,18 @@ func (s *Server) writeProfile(w http.ResponseWriter, r *http.Request, identity a
 		"name":       identity.Username,
 		"properties": properties,
 	})
+}
+
+func (s *Server) writeSession(w http.ResponseWriter, accessToken string, sess session, available, requestUser bool) {
+	profile := gameProfile(sess.identity)
+	response := map[string]any{"accessToken": accessToken, "clientToken": sess.clientToken, "selectedProfile": profile}
+	if available {
+		response["availableProfiles"] = []map[string]string{profile}
+	}
+	if requestUser {
+		response["user"] = map[string]any{"id": dashless(sess.identity.UUID), "properties": []any{}}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func gameProfile(identity auth.Identity) map[string]string {
@@ -351,7 +445,12 @@ const maxYggBodyBytes = 64 << 10
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxYggBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(target); err != nil {
+		yggError(w, http.StatusBadRequest, "Запрос составлен неверно.")
+		return false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		yggError(w, http.StatusBadRequest, "Запрос составлен неверно.")
 		return false
 	}

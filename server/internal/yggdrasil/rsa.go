@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"os"
+	"path/filepath"
 )
 
 func loadOrCreateRSA(path string) (*rsa.PrivateKey, error) {
@@ -20,7 +21,26 @@ func loadOrCreateRSA(path string) (*rsa.PrivateKey, error) {
 			return nil, err
 		}
 		block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}
-		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		file, err := os.CreateTemp(filepath.Dir(path), ".yggdrasil-key-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.Remove(file.Name())
+		if _, err := file.Write(pem.EncodeToMemory(block)); err != nil {
+			file.Close()
+			return nil, err
+		}
+		if err := file.Sync(); err != nil {
+			file.Close()
+			return nil, err
+		}
+		if err := file.Close(); err != nil {
+			return nil, err
+		}
+		if err := os.Link(file.Name(), path); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return loadOrCreateRSA(path)
+			}
 			return nil, err
 		}
 		return key, nil

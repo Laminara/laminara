@@ -114,7 +114,7 @@ func TestYggdrasilFlow(t *testing.T) {
 	}
 
 	const serverID = "abc123"
-	joinResp := post(t, server.URL+"/sessionserver/session/minecraft/join", map[string]string{"accessToken": authBody.AccessToken, "serverId": serverID})
+	joinResp := post(t, server.URL+"/sessionserver/session/minecraft/join", map[string]string{"accessToken": authBody.AccessToken, "serverId": serverID, "selectedProfile": authBody.SelectedProfile["id"]})
 	joinResp.Body.Close()
 	if joinResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("join = %d", joinResp.StatusCode)
