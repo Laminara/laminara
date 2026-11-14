@@ -1,3 +1,6 @@
+mod safety;
+#[cfg(test)]
+mod safety_tests;
 pub mod statcache;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -67,36 +70,89 @@ pub(crate) struct OwnedEntry {
 
 pub(crate) type Ledger = BTreeMap<String, OwnedEntry>;
 
-fn load_ledger(path: &Path) -> Ledger {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+fn read_ledger(path: &Path) -> Result<Ledger, CoreError> {
+    use std::io::Read;
+    if let Some(parent) = path.parent() {
+        match std::fs::symlink_metadata(parent) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Ledger::new()),
+            _ => safety::check_parents(parent, path, false)?,
+        }
+    }
+    let mut file = match safety::read_private(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Ledger::new()),
+        Err(error) => {
+            return Err(CoreError::Sync(format!(
+                "не прочитать журнал владения {}: {error}",
+                path.display()
+            )))
+        }
+    };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        CoreError::Sync(format!(
+            "не разобрать журнал владения {}: {error}",
+            path.display()
+        ))
+    })
 }
 
 pub(crate) const UNFINISHED_FILE: &str = "unfinished";
 
 pub fn install_unfinished(state_dir: &Path) -> bool {
-    state_dir.join(UNFINISHED_FILE).exists()
+    match std::fs::symlink_metadata(state_dir.join(UNFINISHED_FILE)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        _ => true,
+    }
 }
 
 fn mark_unfinished(state_dir: &Path) -> Result<(), CoreError> {
-    std::fs::write(state_dir.join(UNFINISHED_FILE), b"")
-        .map_err(|e| CoreError::Sync(format!("не отметить начало установки: {e}")))
+    let path = state_dir.join(UNFINISHED_FILE);
+    safety::check_parents(state_dir, &path, false)?;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            safety::read_private(&path).map(|_| ()).map_err(|error| {
+                CoreError::Sync(format!(
+                    "не проверить маркер установки {}: {error}",
+                    path.display()
+                ))
+            })
+        }
+        Err(error) => Err(CoreError::Sync(format!(
+            "не отметить начало установки: {error}"
+        ))),
+    }
 }
 
-fn mark_finished(state_dir: &Path) {
-    let _ = std::fs::remove_file(state_dir.join(UNFINISHED_FILE));
+fn mark_finished(state_dir: &Path) -> Result<(), CoreError> {
+    let path = state_dir.join(UNFINISHED_FILE);
+    safety::check_parents(state_dir, &path, false)?;
+    safety::remove_file(&path)?;
+    Ok(())
 }
 
 pub(crate) fn save_ledger(path: &Path, ledger: &Ledger) -> Result<(), CoreError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_string(ledger).map_err(|e| CoreError::Sync(e.to_string()))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| CoreError::Sync("у журнала владения нет каталога".into()))?;
+    safety::create_root(parent)?;
+    safety::check_parents(parent, path, false)?;
+    safety::regular_metadata(path)?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".lam-ledger-")
+        .tempfile_in(parent)?;
+    serde_json::to_writer(&mut tmp, ledger).map_err(|error| CoreError::Sync(error.to_string()))?;
+    tmp.flush()?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)
+        .map_err(|error| CoreError::Sync(format!("не сохранить журнал владения: {error}")))?;
     Ok(())
 }
 
@@ -177,35 +233,7 @@ fn clone_or_copy(source: &Path, dest: &Path) -> Result<(), CoreError> {
 }
 
 fn ensure_safe_parents(root: &Path, dest: &Path) -> Result<(), CoreError> {
-    let parent = dest
-        .parent()
-        .ok_or_else(|| CoreError::Sync("dest has no parent".into()))?;
-    let relative = parent
-        .strip_prefix(root)
-        .map_err(|_| CoreError::Sync(format!("path escapes the profile: {}", dest.display())))?;
-
-    let mut current = root.to_path_buf();
-    for segment in relative.components() {
-        current.push(segment);
-        match std::fs::symlink_metadata(&current) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(CoreError::Sync(format!(
-                    "refusing to write through a symlinked directory: {}",
-                    current.display()
-                )));
-            }
-            Ok(meta) if meta.is_dir() => {}
-            Ok(_) => {
-                return Err(CoreError::Sync(format!(
-                    "expected a directory: {}",
-                    current.display()
-                )))
-            }
-            Err(_) => std::fs::create_dir(&current)
-                .map_err(|e| CoreError::Sync(format!("create {}: {e}", current.display())))?,
-        }
-    }
-    Ok(())
+    safety::check_parents(root, dest, true)
 }
 
 fn is_read_only(meta: &std::fs::Metadata) -> bool {
@@ -321,7 +349,9 @@ fn partial_path(cas_path: &Path) -> PathBuf {
 }
 
 fn partial_len(partial: &Path) -> u64 {
-    std::fs::metadata(partial)
+    std::fs::symlink_metadata(partial)
+        .ok()
+        .filter(|meta| meta.is_file() && !safety::is_link(meta))
         .map(|meta| meta.len())
         .unwrap_or(0)
 }
@@ -377,10 +407,8 @@ async fn download(
 ) -> Result<(), CoreError> {
     let cas_path = cas_dir.join(object_key(wanted.algo, &wanted.value));
     let partial = partial_path(&cas_path);
-    let parent = cas_path
-        .parent()
-        .ok_or_else(|| CoreError::Sync("cas path has no parent".into()))?;
-    tokio::fs::create_dir_all(parent).await?;
+    ensure_safe_parents(cas_dir, &cas_path)?;
+    safety::regular_metadata(&cas_path)?;
     meter.started(&wanted.path);
     let mut counted = partial_len(&partial).min(wanted.size);
     let mut attempt = 0;
@@ -430,12 +458,7 @@ async fn download(
 }
 
 fn lock_partial(partial: &Path) -> std::io::Result<Option<tokio::fs::File>> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(partial)?;
+    let file = safety::open_partial(partial)?;
     match file.try_lock() {
         Ok(()) => Ok(Some(tokio::fs::File::from_std(file))),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
@@ -492,7 +515,10 @@ async fn fetch(
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
     let mode = object_mode(wanted.executable);
-    if cas_path.exists() {
+    if safety::regular_metadata(cas_path)
+        .map_err(|error| disk_error(wanted, error))?
+        .is_some()
+    {
         set_mode(cas_path, mode);
         meter.reconcile(counted, wanted.size);
         return Ok(());
@@ -633,7 +659,7 @@ async fn fetch(
 
 fn settle_object(from: &Path, cas_path: &Path, object_mode: u32) -> Result<(), CoreError> {
     if let Err(e) = std::fs::rename(from, cas_path) {
-        if !cas_path.exists() {
+        if safety::regular_metadata(cas_path)?.is_none() {
             return Err(CoreError::Sync(format!("persist object: {e}")));
         }
         let _ = std::fs::remove_file(from);
@@ -686,16 +712,7 @@ fn materialize_writable(
 }
 
 fn remove_stubborn_file(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            set_mode(path, 0o644);
-            match std::fs::remove_file(path) {
-                Ok(()) => Ok(()),
-                Err(_) => Err(e),
-            }
-        }
-    }
+    safety::remove_file(path).map(|_| ())
 }
 
 fn replace_file(tmp: &Path, dest: &Path) -> Result<(), CoreError> {
@@ -797,20 +814,72 @@ struct PlanItem {
 }
 
 pub(crate) fn validate_manifest_path(path: &str) -> Result<(), CoreError> {
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.contains(['\\', ':'])
+        || path
+            .chars()
+            .any(|c| c.is_control() || "<>\"|?*".contains(c))
+    {
         return Err(CoreError::Sync(format!("unsafe manifest path: {path}")));
     }
     for segment in path.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
+        let device = segment
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .trim_end()
+            .to_uppercase();
+        let reserved = matches!(
+            device.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || ["COM", "LPT"].iter().any(|prefix| {
+            device.strip_prefix(prefix).is_some_and(|n| {
+                matches!(
+                    n,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.ends_with(['.', ' '])
+            || reserved
+        {
             return Err(CoreError::Sync(format!(
                 "unsafe segment in manifest path: {path}"
             )));
         }
     }
-    if path == ".laminara" || path.starts_with(".laminara/") {
+    let lower = path.to_uppercase();
+    if lower == ".LAMINARA" || lower.starts_with(".LAMINARA/") {
         return Err(CoreError::Sync(format!(
             "manifest path targets client state: {path}"
         )));
+    }
+    Ok(())
+}
+
+fn validate_manifest_paths(manifest: &Manifest) -> Result<(), CoreError> {
+    let mut paths = HashSet::new();
+    for file in &manifest.files {
+        validate_manifest_path(&file.path)?;
+        if !paths.insert(file.path.to_uppercase()) {
+            return Err(CoreError::Sync(format!(
+                "повторяющийся путь: {}",
+                file.path
+            )));
+        }
+    }
+    for path in &paths {
+        for (index, _) in path.match_indices('/') {
+            if paths.contains(&path[..index]) {
+                return Err(CoreError::Sync(format!(
+                    "файл используется как каталог: {path}"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -847,14 +916,15 @@ pub async fn sync(
     } else {
         max_parallel
     };
-    tokio::fs::create_dir_all(profile_dir)
-        .await
-        .map_err(|e| CoreError::Sync(format!("create {}: {e}", profile_dir.display())))?;
-    tokio::fs::create_dir_all(state_dir)
-        .await
-        .map_err(|e| CoreError::Sync(format!("create {}: {e}", state_dir.display())))?;
+    validate_manifest_paths(manifest)?;
+    safety::create_root(profile_dir)?;
+    safety::create_root(state_dir)?;
+    safety::create_root(cas_dir)?;
     let ledger_path = state_dir.join(LEDGER_FILE);
-    let previous = load_ledger(&ledger_path);
+    let previous = read_ledger(&ledger_path)?;
+    for path in previous.keys() {
+        validate_manifest_path(path)?;
+    }
     mark_unfinished(state_dir)?;
 
     let optional = features::optional_paths(&manifest.features);
@@ -892,6 +962,8 @@ pub async fn sync(
         let hex = hex::encode(&hash.value);
         let policy = FilePolicy::try_from(file.policy).unwrap_or(FilePolicy::Unspecified);
         let dest = profile_dir.join(&file.path);
+        safety::check_parents(profile_dir, &dest, false)?;
+        safety::regular_metadata(&dest)?;
         current_paths.insert(file.path.clone());
 
         let (action, released) = match policy {
@@ -947,7 +1019,8 @@ pub async fn sync(
     let mut resumable = 0u64;
     for object in needed.into_values() {
         let cas_path = cas_dir.join(object_key(object.algo, &object.value));
-        if cas_path.exists() {
+        safety::check_parents(cas_dir, &cas_path, false)?;
+        if safety::regular_metadata(&cas_path)?.is_some() {
             set_mode(&cas_path, object_mode(object.executable));
             continue;
         }
@@ -1069,7 +1142,7 @@ pub async fn sync(
     let pruned = prune(profile_dir, &previous, &current_paths)?;
 
     save_ledger(&ledger_path, &ledger)?;
-    mark_finished(state_dir);
+    mark_finished(state_dir)?;
     on_progress(SyncProgress {
         stage: SyncStage::Done,
         files_done: meter.files_total,
@@ -1097,18 +1170,29 @@ pub fn verify_contents(profile_dir: &Path, state_dir: &Path) -> Vec<String> {
 }
 
 fn verify(profile_dir: &Path, state_dir: &Path, hash_contents: bool) -> Vec<String> {
-    let ledger = load_ledger(&state_dir.join(LEDGER_FILE));
+    let ledger = match read_ledger(&state_dir.join(LEDGER_FILE)) {
+        Ok(ledger) => ledger,
+        Err(_) => return vec![".laminara/installed.json".into()],
+    };
     let mut broken = Vec::new();
     for (path, entry) in &ledger {
         if entry.class == FilePolicy::UserWritable as i32 || entry.released {
             continue;
         }
         let target = profile_dir.join(path);
+        if validate_manifest_path(path).is_err()
+            || safety::check_parents(profile_dir, &target, false).is_err()
+        {
+            broken.push(path.clone());
+            continue;
+        }
         let intact = match std::fs::symlink_metadata(&target) {
             Ok(meta) if meta.file_type().is_symlink() => false,
             Ok(meta) if !meta.is_file() => false,
             Ok(meta) => {
-                is_read_only(&meta)
+                meta.is_file()
+                    && !safety::is_link(&meta)
+                    && is_read_only(&meta)
                     && (entry.size == 0 || meta.len() == entry.size)
                     && (!(hash_contents || carries_code(path)) || content_matches(&target, entry))
             }
@@ -1130,7 +1214,12 @@ fn carries_code(path: &str) -> bool {
 }
 
 fn content_matches(path: &Path, entry: &OwnedEntry) -> bool {
-    let Ok(bytes) = std::fs::read(path) else {
+    use std::io::Read;
+    let Ok(mut file) = safety::read_file(path) else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    let Ok(_) = file.read_to_end(&mut bytes) else {
         return false;
     };
     let mut hasher = Hasher::for_algo(entry.algo);
@@ -1144,99 +1233,146 @@ pub fn discard_installed(
     cas_dir: &Path,
     paths: &[String],
 ) -> Result<u64, CoreError> {
-    let ledger = load_ledger(&state_dir.join(LEDGER_FILE));
-    let mut discarded = 0u64;
+    let ledger = read_ledger(&state_dir.join(LEDGER_FILE))?;
+    let mut checked = Vec::with_capacity(paths.len());
     for path in paths {
+        validate_manifest_path(path)?;
+        let entry = ledger
+            .get(path)
+            .ok_or_else(|| CoreError::Sync(format!("файл не принадлежит лаунчеру: {path}")))?;
+        if entry.class == FilePolicy::UserWritable as i32
+            || entry.released
+            || FilePolicy::try_from(entry.class).is_err()
+        {
+            return Err(CoreError::Sync(format!(
+                "нельзя удалить пользовательский файл: {path}"
+            )));
+        }
         let target = profile_dir.join(path);
-        if remove_stubborn_file(&target).is_ok() {
+        safety::check_parents(profile_dir, &target, false)?;
+        safety::regular_metadata(&target)?;
+        let value = hex::decode(&entry.object_hash)
+            .map_err(|_| CoreError::Sync(format!("неверный хеш в журнале владения: {path}")))?;
+        if value.len() < 2 || HashAlgo::try_from(entry.algo).is_err() {
+            return Err(CoreError::Sync(format!(
+                "неверный хеш в журнале владения: {path}"
+            )));
+        }
+        let cached = cas_dir.join(object_key(entry.algo, &value));
+        safety::check_parents(cas_dir, &cached, false)?;
+        safety::regular_metadata(&cached)?;
+        checked.push((target, cached));
+    }
+    let mut discarded = 0;
+    for (target, cached) in checked {
+        if safety::remove_file(&target)? {
             discarded += 1;
         }
-        let Some(entry) = ledger.get(path) else {
-            continue;
-        };
-        let Ok(value) = hex::decode(&entry.object_hash) else {
-            continue;
-        };
-        let _ = remove_stubborn_file(&cas_dir.join(object_key(entry.algo, &value)));
+        safety::remove_file(&cached)?;
     }
     Ok(discarded)
 }
 
-pub fn gc_cas(cas_dir: &Path, install_dir: &Path) -> Result<u64, CoreError> {
-    let mut referenced: HashSet<String> = HashSet::new();
-    if let Ok(entries) = std::fs::read_dir(install_dir) {
-        for entry in entries.flatten() {
-            let ledger = load_ledger(&entry.path().join(".laminara").join(LEDGER_FILE));
-            for owned in ledger.values() {
-                referenced.insert(owned.object_hash.clone());
-            }
-        }
-    }
-
-    let mut removed = 0u64;
+fn visit_cas_files(
+    cas_dir: &Path,
+    mut visit: impl FnMut(&Path) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    safety::check_parents(cas_dir, &cas_dir.join("entry"), false)?;
     let mut stack = vec![cas_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry?;
             let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if safety::is_link(&metadata)
+                || entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .starts_with(".lam-")
+            {
+                continue;
+            }
+            if metadata.is_dir() {
                 stack.push(path);
                 continue;
             }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if name.starts_with(".lam-") {
+            if !metadata.is_file()
+                || path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case(PARTIAL_SUFFIX))
+            {
                 continue;
             }
-            if !referenced.contains(name) && remove_stubborn_file(&path).is_ok() {
-                removed += 1;
+            safety::check_parents(cas_dir, &path, false)?;
+            visit(&path)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn gc_cas(cas_dir: &Path, install_dir: &Path) -> Result<u64, CoreError> {
+    safety::check_parents(install_dir, &install_dir.join("profile"), false)?;
+    let mut referenced = HashSet::new();
+    let entries = match std::fs::read_dir(install_dir) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(entries) = entries {
+        for entry in entries {
+            let entry = entry?;
+            let profile = entry.path();
+            let metadata = std::fs::symlink_metadata(&profile)?;
+            if !metadata.is_dir() || safety::is_link(&metadata) {
+                continue;
+            }
+            let ledger_path = profile.join(".laminara").join(LEDGER_FILE);
+            safety::check_parents(&profile, &ledger_path, false)?;
+            for owned in read_ledger(&ledger_path)?.values() {
+                referenced.insert(owned.object_hash.to_lowercase());
             }
         }
     }
+    let mut removed = 0;
+    visit_cas_files(cas_dir, |path| {
+        let name = path.file_name().unwrap().to_string_lossy();
+        if !referenced.contains(name.as_ref()) && safety::remove_file(path)? {
+            removed += 1;
+        }
+        Ok(())
+    })?;
     Ok(removed)
 }
 
 pub fn scrub_cas(cas_dir: &Path) -> Result<(u64, u64), CoreError> {
-    let mut checked = 0u64;
-    let mut repaired = 0u64;
-    let mut stack = vec![cas_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
-                stack.push(path);
-                continue;
+    use std::io::Read;
+    let mut checked = 0;
+    let mut repaired = 0;
+    visit_cas_files(cas_dir, |path| {
+        let name = path.file_name().unwrap().to_string_lossy();
+        let mut file = safety::read_file(path)?;
+        let mut buffer = [0u8; HASH_READ_BYTES];
+        let mut hasher = Hasher::for_algo(algo_from_cas_path(path, cas_dir));
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
             }
-            let Some(name) = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            if name.starts_with(".lam-") {
-                continue;
-            }
-            let algo = algo_from_cas_path(&path, cas_dir);
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            let mut hasher = Hasher::for_algo(algo);
-            hasher.update(&bytes);
-            checked += 1;
-            if hasher.finalize_hex() != name && remove_stubborn_file(&path).is_ok() {
-                repaired += 1;
-            }
+            hasher.update(&buffer[..count]);
         }
-    }
+        drop(file);
+        checked += 1;
+        if hasher.finalize_hex() != name && safety::remove_file(path)? {
+            repaired += 1;
+        }
+        Ok(())
+    })?;
     Ok((checked, repaired))
 }
 
@@ -1310,19 +1446,36 @@ fn prune(
     previous: &Ledger,
     current: &HashSet<String>,
 ) -> Result<u64, CoreError> {
-    let mut pruned = 0u64;
+    let aliases: HashMap<_, _> = current
+        .iter()
+        .map(|path| (path.to_uppercase(), path))
+        .collect();
+    let mut targets = Vec::new();
     for (path, entry) in previous {
-        if current.contains(path) {
-            continue;
-        }
-        if entry.class == FilePolicy::UserWritable as i32 {
+        validate_manifest_path(path)?;
+        if current.contains(path)
+            || entry.class == FilePolicy::UserWritable as i32
+            || entry.released
+        {
             continue;
         }
         let target = profile_dir.join(path);
-        if let Ok(meta) = target.symlink_metadata() {
-            if meta.is_file() && remove_stubborn_file(&target).is_ok() {
-                pruned += 1;
+        safety::check_parents(profile_dir, &target, false)?;
+        safety::regular_metadata(&target)?;
+        if let Some(current_path) = aliases.get(&path.to_uppercase()) {
+            let installed = profile_dir.join(current_path);
+            safety::check_parents(profile_dir, &installed, false)?;
+            safety::regular_metadata(&installed)?;
+            if safety::same_entry(&target, &installed)? {
+                continue;
             }
+        }
+        targets.push(target);
+    }
+    let mut pruned = 0;
+    for target in targets {
+        if safety::remove_file(&target)? {
+            pruned += 1;
         }
     }
     Ok(pruned)
@@ -1416,7 +1569,7 @@ mod tests {
             assert!(!same_file(&object, &dest));
             assert!(!same_file(&other, &dest));
             assert_eq!(
-                load_ledger(&state.join(LEDGER_FILE))["mods/a.jar"].placement,
+                read_ledger(&state.join(LEDGER_FILE)).unwrap()["mods/a.jar"].placement,
                 Placement::Copy
             );
 
@@ -1529,7 +1682,7 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
         assert!(!same_file(&dest, &object));
         assert!(!is_read_only(&std::fs::metadata(&dest).unwrap()));
-        let released = &load_ledger(&state.join(LEDGER_FILE))["options.txt"];
+        let released = &read_ledger(&state.join(LEDGER_FILE)).unwrap()["options.txt"];
         assert_eq!(released.placement, Placement::Copy);
         assert!(released.released);
         std::fs::write(&dest, b"new settings").unwrap();
@@ -1614,7 +1767,7 @@ mod tests {
         assert_eq!(outcome.downloaded, 0);
         assert_eq!(outcome.linked, 0);
         assert!(!temp.path().join("build/options.txt").exists());
-        assert!(load_ledger(&state.join(LEDGER_FILE))["options.txt"].released);
+        assert!(read_ledger(&state.join(LEDGER_FILE)).unwrap()["options.txt"].released);
     }
 
     #[test]
