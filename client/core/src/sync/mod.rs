@@ -208,6 +208,23 @@ fn same_file(a: &Path, b: &Path) -> bool {
     same_file::is_same_file(a, b).unwrap_or(false)
 }
 
+#[cfg(unix)]
+fn has_hardlinks(_path: &Path, metadata: &std::fs::Metadata) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(metadata.nlink() > 1)
+}
+
+#[cfg(windows)]
+fn has_hardlinks(path: &Path, _metadata: &std::fs::Metadata) -> std::io::Result<bool> {
+    let handle = winapi_util::Handle::from_path_any(path)?;
+    Ok(winapi_util::file::information(&handle)?.number_of_links() > 1)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn has_hardlinks(_path: &Path, _metadata: &std::fs::Metadata) -> std::io::Result<bool> {
+    Ok(true)
+}
+
 fn clone_or_copy(source: &Path, dest: &Path) -> Result<(), CoreError> {
     match reflink_copy::reflink_or_copy(source, dest) {
         Ok(_) => Ok(()),
@@ -661,19 +678,16 @@ fn materialize_immutable(
     let parent = dest
         .parent()
         .ok_or_else(|| CoreError::Sync("dest has no parent".into()))?;
-    let tmp = parent.join(format!(".lam-link-{}", unique_suffix(dest)));
-    let _ = remove_stubborn_file(&tmp);
+    let staging = tempfile::Builder::new()
+        .prefix(".lam-place-")
+        .tempdir_in(parent)
+        .map_err(|e| CoreError::Sync(format!("не подготовить замену {}: {e}", dest.display())))?;
+    let tmp = staging.path().join("replacement");
 
-    let placement = match std::fs::hard_link(cas_path, &tmp) {
-        Ok(_) => Placement::Hardlink,
-        Err(_) => {
-            clone_or_copy(cas_path, &tmp)?;
-            set_mode(&tmp, object_mode(executable));
-            Placement::Copy
-        }
-    };
+    clone_or_copy(cas_path, &tmp)?;
+    set_mode(&tmp, object_mode(executable));
     replace_file(&tmp, dest)?;
-    Ok(placement)
+    Ok(Placement::Copy)
 }
 
 fn materialize_writable(
@@ -686,8 +700,11 @@ fn materialize_writable(
     let parent = dest
         .parent()
         .ok_or_else(|| CoreError::Sync("dest has no parent".into()))?;
-    let tmp = parent.join(format!(".lam-seed-{}", unique_suffix(dest)));
-    let _ = remove_stubborn_file(&tmp);
+    let staging = tempfile::Builder::new()
+        .prefix(".lam-place-")
+        .tempdir_in(parent)
+        .map_err(|e| CoreError::Sync(format!("не подготовить замену {}: {e}", dest.display())))?;
+    let tmp = staging.path().join("replacement");
     clone_or_copy(cas_path, &tmp).map_err(|e| CoreError::Sync(format!("seed {e}")))?;
     set_mode(&tmp, if executable { 0o755 } else { 0o644 });
     replace_file(&tmp, dest)?;
@@ -699,19 +716,81 @@ fn remove_stubborn_file(path: &Path) -> std::io::Result<()> {
 }
 
 fn replace_file(tmp: &Path, dest: &Path) -> Result<(), CoreError> {
-    if std::fs::rename(tmp, dest).is_ok() {
-        return Ok(());
-    }
-    let _ = remove_stubborn_file(dest);
-    std::fs::rename(tmp, dest).map_err(|e| {
-        let _ = std::fs::remove_file(tmp);
-        CoreError::Sync(format!("place {}: {e}", dest.display()))
-    })
+    replace_file_with(tmp, dest, |from, to| std::fs::rename(from, to))
 }
 
-fn unique_suffix(dest: &Path) -> String {
-    let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("f");
-    format!("{}-{}", name, dest.as_os_str().len())
+fn replace_file_with(
+    tmp: &Path,
+    dest: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), CoreError> {
+    let source = std::fs::symlink_metadata(tmp)
+        .map_err(|e| CoreError::Sync(format!("не прочитать замену {}: {e}", tmp.display())))?;
+    if !source.is_file() {
+        return Err(CoreError::Sync(format!(
+            "замена {} должна быть обычным файлом",
+            tmp.display()
+        )));
+    }
+    let first_error = match rename(tmp, dest) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    let place_error =
+        |e: &std::io::Error| CoreError::Sync(format!("не заменить {}: {e}", dest.display()));
+    if !matches!(
+        first_error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AlreadyExists
+    ) || !std::fs::symlink_metadata(dest).is_ok_and(|meta| meta.is_file())
+    {
+        return Err(place_error(&first_error));
+    }
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let backup_dir = tempfile::Builder::new()
+        .prefix(".lam-old-")
+        .tempdir_in(parent)
+        .map_err(|e| {
+            CoreError::Sync(format!(
+                "не сохранить {} перед заменой: {e}",
+                dest.display()
+            ))
+        })?
+        .keep();
+    let backup = backup_dir.join("original");
+    if let Err(e) = rename(dest, &backup) {
+        let _ = std::fs::remove_dir(&backup_dir);
+        return Err(CoreError::Sync(format!(
+            "не сохранить {} перед заменой: {e}",
+            dest.display()
+        )));
+    }
+    if let Err(e) = rename(tmp, dest) {
+        let restored = match std::fs::symlink_metadata(dest) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => rename(&backup, dest),
+            Ok(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "место назначения уже занято другим файлом",
+            )),
+            Err(error) => Err(error),
+        };
+        return match restored {
+            Ok(()) => {
+                let _ = std::fs::remove_dir(&backup_dir);
+                Err(place_error(&e))
+            }
+            Err(rollback) => Err(CoreError::Sync(format!(
+                "не заменить {}: {e}; восстановление не удалось: {rollback}; исходный файл сохранён в {}",
+                dest.display(),
+                backup.display()
+            ))),
+        };
+    }
+    if let Err(e) = remove_stubborn_file(&backup) {
+        tracing::warn!(path = %backup.display(), error = %e, "не удалить старый файл после замены");
+    } else {
+        let _ = std::fs::remove_dir(&backup_dir);
+    }
+    Ok(())
 }
 
 enum Action {
@@ -896,6 +975,7 @@ pub async fn sync(
                     &hash.value,
                     &hex,
                     &dest,
+                    file.executable,
                     previous.get(&file.path),
                 ),
                 false,
@@ -1003,17 +1083,37 @@ pub async fn sync(
         cancelled(&cancel)?;
         let cas_path = cas_dir.join(object_key(item.algo, &item.value));
         let (placement, released) = match item.action {
-            Action::Skip => (
-                previous
-                    .get(&item.path)
-                    .map(|e| e.placement)
-                    .unwrap_or(Placement::Hardlink),
-                false,
-            ),
-            Action::Leave => (
-                Placement::Copy,
-                item.released || item.dest.symlink_metadata().is_ok(),
-            ),
+            Action::Skip => (Placement::Copy, false),
+            Action::Leave => {
+                let was_managed = previous.get(&item.path).is_some_and(|entry| {
+                    entry.placement == Placement::Hardlink
+                        || entry.class != FilePolicy::UserWritable as i32
+                });
+                let existing = match item.dest.symlink_metadata() {
+                    Ok(metadata) => Some(metadata),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => {
+                        return Err(CoreError::Sync(format!(
+                            "не проверить файл {}: {error}",
+                            item.dest.display()
+                        )))
+                    }
+                };
+                if let Some(metadata) = existing.as_ref() {
+                    if metadata.is_file()
+                        && (was_managed
+                            || has_hardlinks(&item.dest, metadata).map_err(|error| {
+                                CoreError::Sync(format!(
+                                    "не проверить ссылки {}: {error}",
+                                    item.dest.display()
+                                ))
+                            })?)
+                    {
+                        materialize_writable(profile_dir, &item.dest, &item.dest, item.executable)?;
+                    }
+                }
+                (Placement::Copy, item.released || existing.is_some())
+            }
             Action::Link => {
                 let placement =
                     materialize_immutable(profile_dir, &cas_path, &item.dest, item.executable)?;
@@ -1305,6 +1405,7 @@ fn plan_immutable(
     value: &[u8],
     hex: &str,
     dest: &Path,
+    executable: bool,
     previous: Option<&OwnedEntry>,
 ) -> Action {
     let cas_path = cas_dir.join(object_key(algo, value));
@@ -1315,8 +1416,17 @@ fn plan_immutable(
     if !dest_meta.is_file() || !is_read_only(&dest_meta) {
         return Action::Link;
     }
-    if same_file(dest, &cas_path) {
-        return Action::Skip;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if dest_meta.permissions().mode() & 0o111 != object_mode(executable) & 0o111 {
+            return Action::Link;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = executable;
+    if same_file(dest, &cas_path) || has_hardlinks(dest, &dest_meta).unwrap_or(true) {
+        return Action::Link;
     }
     match previous {
         Some(entry)
@@ -1375,6 +1485,290 @@ fn prune(
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn immutable_profiles_do_not_share_writable_inodes() {
+        let temp = tempfile::tempdir().unwrap();
+        let object = temp.path().join("object");
+        let a = temp.path().join("A/mod.jar");
+        let b = temp.path().join("B/mod.jar");
+        std::fs::write(&object, b"original").unwrap();
+        set_mode(&object, 0o444);
+
+        let placement_a = materialize_immutable(temp.path(), &object, &a, true).unwrap();
+        let placement_b = materialize_immutable(temp.path(), &object, &b, false).unwrap();
+        #[cfg(unix)]
+        let a_permissions = std::fs::metadata(&a).unwrap().permissions();
+        #[cfg(unix)]
+        let b_permissions = std::fs::metadata(&b).unwrap().permissions();
+        set_mode(&a, 0o644);
+        std::fs::write(&a, b"modified").unwrap();
+
+        assert_eq!(std::fs::read(&object).unwrap(), b"original");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(a_permissions.mode() & 0o777, 0o555);
+            assert_eq!(b_permissions.mode() & 0o777, 0o444);
+        }
+        assert_eq!(placement_a, Placement::Copy);
+        assert_eq!(placement_b, Placement::Copy);
+        assert!(!same_file(&a, &object));
+        assert!(!same_file(&b, &object));
+        assert!(!same_file(&a, &b));
+        assert_eq!(std::fs::read(&b).unwrap(), b"original");
+        assert!(is_read_only(&std::fs::metadata(&object).unwrap()));
+        assert!(is_read_only(&std::fs::metadata(&b).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn sync_detaches_legacy_hardlinks_and_then_reuses_private_copies() {
+        for (has_ledger, replaced_cache) in [(false, false), (true, false), (true, true)] {
+            let temp = tempfile::tempdir().unwrap();
+            let content = b"original";
+            let hash = blake3::hash(content);
+            let hex = hash.to_hex().to_string();
+            let object = temp
+                .path()
+                .join("objects")
+                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+            let dest = temp.path().join("build/mods/a.jar");
+            let other = temp.path().join("other.jar");
+            let state = temp.path().join("build/.laminara");
+            std::fs::create_dir_all(object.parent().unwrap()).unwrap();
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(&object, content).unwrap();
+            std::fs::hard_link(&object, &dest).unwrap();
+            std::fs::hard_link(&object, &other).unwrap();
+            set_mode(&object, 0o444);
+            if has_ledger {
+                let ledger = Ledger::from([(
+                    "mods/a.jar".into(),
+                    OwnedEntry {
+                        object_hash: hex,
+                        class: FilePolicy::Unspecified as i32,
+                        placement: Placement::Hardlink,
+                        released: false,
+                        size: content.len() as u64,
+                        algo: HashAlgo::Blake3 as i32,
+                    },
+                )]);
+                save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+            }
+            if replaced_cache {
+                std::fs::rename(&object, temp.path().join("old-object")).unwrap();
+                std::fs::write(&object, content).unwrap();
+                set_mode(&object, 0o444);
+            }
+            let manifest = one_file_manifest("mods/a.jar", content);
+            let (first, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+            let first = first.unwrap();
+            assert_eq!(first.downloaded, 0);
+            assert_eq!(first.linked, 1);
+            assert!(!same_file(&object, &dest));
+            assert!(!same_file(&other, &dest));
+            assert_eq!(
+                read_ledger(&state.join(LEDGER_FILE)).unwrap()["mods/a.jar"].placement,
+                Placement::Copy
+            );
+
+            let (second, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+            let second = second.unwrap();
+            assert_eq!(second.linked, 0);
+            assert_eq!(second.downloaded, 0);
+            assert_eq!(second.skipped, 1);
+            set_mode(&dest, 0o644);
+            std::fs::write(&dest, b"modified").unwrap();
+            assert_eq!(std::fs::read(&object).unwrap(), content);
+            assert_eq!(std::fs::read(&other).unwrap(), content);
+        }
+    }
+
+    #[tokio::test]
+    async fn immutable_profiles_share_downloads_but_not_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let content = b"shared download".to_vec();
+        let server = object_server(content.clone(), vec![Reply::Serve]).await;
+        let manifest = one_file_manifest("mods/a.jar", &content);
+        let cache = temp.path().join("objects");
+        for (name, expected_downloads) in [("A", 1), ("B", 0)] {
+            let profile = temp.path().join(name);
+            let outcome = sync(
+                SyncPlan {
+                    transport: &Transport::default(),
+                    base_url: &server.base_url,
+                    profile_dir: &profile,
+                    state_dir: &profile.join(".laminara"),
+                    cas_dir: &cache,
+                    manifest: &manifest,
+                    selection: &FeatureSelection::default(),
+                    max_parallel: 1,
+                    cancel: CancellationToken::new(),
+                },
+                |_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(outcome.downloaded, expected_downloads);
+        }
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+        let a = temp.path().join("A/mods/a.jar");
+        let b = temp.path().join("B/mods/a.jar");
+        let object = cache.join(object_key(
+            HashAlgo::Blake3 as i32,
+            blake3::hash(&content).as_bytes(),
+        ));
+        set_mode(&a, 0o644);
+        std::fs::write(&a, b"changed profile").unwrap();
+        assert_eq!(std::fs::read(&b).unwrap(), content);
+        assert_eq!(std::fs::read(&object).unwrap(), content);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executable_permissions_are_updated_without_another_download() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let content = b"java executable".to_vec();
+        let server = object_server(content.clone(), vec![Reply::Serve]).await;
+        let mut manifest = one_file_manifest("runtime/java", &content);
+        for executable in [false, true, false] {
+            manifest.files[0].executable = executable;
+            let (outcome, _) = sync_one(&server.base_url, temp.path(), &manifest).await;
+            outcome.unwrap();
+            let dest = temp.path().join("build/runtime/java");
+            assert_eq!(
+                std::fs::metadata(dest).unwrap().permissions().mode() & 0o777,
+                if executable { 0o555 } else { 0o444 }
+            );
+        }
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn releasing_a_legacy_hardlink_preserves_player_bytes_and_detaches_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let expected = b"defaults";
+        let hash = blake3::hash(expected);
+        let object = temp
+            .path()
+            .join("objects")
+            .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+        let dest = temp.path().join("build/options.txt");
+        let state = temp.path().join("build/.laminara");
+        std::fs::create_dir_all(object.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(&object, b"player settings").unwrap();
+        std::fs::hard_link(&object, &dest).unwrap();
+        set_mode(&object, 0o444);
+        let ledger = Ledger::from([(
+            "options.txt".into(),
+            OwnedEntry {
+                object_hash: hash.to_hex().to_string(),
+                class: FilePolicy::Unspecified as i32,
+                placement: Placement::Hardlink,
+                released: false,
+                size: expected.len() as u64,
+                algo: HashAlgo::Blake3 as i32,
+            },
+        )]);
+        save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+        let mut manifest = one_file_manifest("options.txt", expected);
+        manifest.files[0].policy = FilePolicy::UserWritable as i32;
+
+        let (outcome, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+        assert_eq!(outcome.unwrap().downloaded, 0);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
+        assert!(!same_file(&dest, &object));
+        assert!(!is_read_only(&std::fs::metadata(&dest).unwrap()));
+        let released = &read_ledger(&state.join(LEDGER_FILE)).unwrap()["options.txt"];
+        assert_eq!(released.placement, Placement::Copy);
+        assert!(released.released);
+        std::fs::write(&dest, b"new settings").unwrap();
+        assert_eq!(std::fs::read(&object).unwrap(), b"player settings");
+    }
+
+    #[tokio::test]
+    async fn a_shared_file_marked_as_a_copy_is_detached_even_after_the_cache_changed() {
+        for writable in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let content = b"old settings";
+            let dest = temp.path().join("build/settings.cfg");
+            let other = temp.path().join("other.cfg");
+            let state = temp.path().join("build/.laminara");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(&dest, content).unwrap();
+            std::fs::hard_link(&dest, &other).unwrap();
+            let hash = blake3::hash(content);
+            let policy = if writable {
+                FilePolicy::UserWritable
+            } else {
+                FilePolicy::Unspecified
+            };
+            let ledger = Ledger::from([(
+                "settings.cfg".into(),
+                OwnedEntry {
+                    object_hash: hash.to_hex().to_string(),
+                    class: policy as i32,
+                    placement: Placement::Copy,
+                    released: writable,
+                    size: content.len() as u64,
+                    algo: HashAlgo::Blake3 as i32,
+                },
+            )]);
+            save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+            let mut manifest = one_file_manifest("settings.cfg", content);
+            manifest.files[0].policy = policy as i32;
+            let object = temp
+                .path()
+                .join("objects")
+                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+            std::fs::create_dir_all(object.parent().unwrap()).unwrap();
+            std::fs::write(&object, content).unwrap();
+            if !writable {
+                set_mode(&dest, 0o444);
+            }
+
+            let (outcome, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+            assert_eq!(outcome.unwrap().downloaded, 0);
+            assert!(!same_file(&dest, &other));
+            set_mode(&dest, 0o644);
+            std::fs::write(&dest, b"new settings").unwrap();
+            assert_eq!(std::fs::read(&other).unwrap(), content);
+            assert_eq!(std::fs::read(&object).unwrap(), content);
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_does_not_recreate_a_removed_user_writable_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let content = b"defaults";
+        let hash = blake3::hash(content);
+        let state = temp.path().join("build/.laminara");
+        std::fs::create_dir_all(&state).unwrap();
+        let ledger = Ledger::from([(
+            "options.txt".into(),
+            OwnedEntry {
+                object_hash: hash.to_hex().to_string(),
+                class: FilePolicy::UserWritable as i32,
+                placement: Placement::Copy,
+                released: true,
+                size: content.len() as u64,
+                algo: HashAlgo::Blake3 as i32,
+            },
+        )]);
+        save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
+        let mut manifest = one_file_manifest("options.txt", content);
+        manifest.files[0].policy = FilePolicy::UserWritable as i32;
+
+        let (outcome, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+        let outcome = outcome.unwrap();
+        assert_eq!(outcome.downloaded, 0);
+        assert_eq!(outcome.linked, 0);
+        assert!(!temp.path().join("build/options.txt").exists());
+        assert!(read_ledger(&state.join(LEDGER_FILE)).unwrap()["options.txt"].released);
+    }
 
     #[test]
     fn user_writable_is_private_per_build() {
@@ -1460,6 +1854,234 @@ mod tests {
             is_read_only(&meta),
             "объект в CAS должен быть только для чтения, иначе проверка целостности назовёт битым весь клиент"
         );
+    }
+
+    #[test]
+    fn materialization_does_not_remove_existing_staging_names() {
+        for writable in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let dest = temp.path().join("settings.cfg");
+            let object = temp.path().join("object");
+            let kind = if writable { "seed" } else { "link" };
+            let occupied = temp.path().join(format!(
+                ".lam-{kind}-settings.cfg-{}",
+                dest.as_os_str().len()
+            ));
+            std::fs::write(&object, b"new settings").unwrap();
+            std::fs::write(&dest, b"old settings").unwrap();
+            std::fs::write(&occupied, b"unrelated settings").unwrap();
+
+            if writable {
+                materialize_writable(temp.path(), &object, &dest, false).unwrap();
+            } else {
+                materialize_immutable(temp.path(), &object, &dest, false).unwrap();
+            }
+
+            assert_eq!(std::fs::read(&dest).unwrap(), b"new settings");
+            assert_eq!(std::fs::read(&occupied).unwrap(), b"unrelated settings");
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 3);
+        }
+    }
+
+    #[test]
+    fn failed_materialization_keeps_existing_files_and_cleans_staging() {
+        for writable in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let dest = temp.path().join("settings.cfg");
+            let object = temp.path().join("missing");
+            std::fs::write(&dest, b"old settings").unwrap();
+
+            let result = if writable {
+                materialize_writable(temp.path(), &object, &dest, false)
+            } else {
+                materialize_immutable(temp.path(), &object, &dest, false).map(|_| ())
+            };
+
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn failed_rollback_does_not_overwrite_a_file_that_appeared_at_the_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let error = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            match calls {
+                1 => Err(std::io::ErrorKind::PermissionDenied.into()),
+                3 => {
+                    std::fs::write(&dest, b"other settings").unwrap();
+                    Err(std::io::ErrorKind::PermissionDenied.into())
+                }
+                _ => std::fs::rename(from, to),
+            }
+        })
+        .unwrap_err();
+
+        let backup = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.is_dir())
+            .unwrap()
+            .join("original");
+        assert_eq!(calls, 3);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"other settings");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert!(
+            error.to_string().contains(&backup.display().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn failed_replace_preserves_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        std::fs::write(&dest, b"player settings").unwrap();
+        set_mode(&dest, 0o444);
+
+        assert!(replace_file(&temp.path().join("missing"), &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
+        assert!(is_read_only(&std::fs::metadata(&dest).unwrap()));
+    }
+
+    #[test]
+    fn refuses_a_directory_as_a_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"player settings").unwrap();
+        std::fs::create_dir(&replacement).unwrap();
+
+        assert!(replace_file(&replacement, &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
+        assert!(replacement.is_dir());
+    }
+
+    #[test]
+    fn replacement_fallback_preserves_the_original_until_placement_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            if calls == 1 {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            if calls == 3 {
+                let backups: Vec<_> = std::fs::read_dir(temp.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| path.is_dir())
+                    .collect();
+                assert_eq!(backups.len(), 1);
+                assert_eq!(
+                    std::fs::read(backups[0].join("original")).unwrap(),
+                    b"old settings"
+                );
+            }
+            std::fs::rename(from, to)
+        })
+        .unwrap();
+
+        assert_eq!(calls, 3);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_preservation_keeps_both_files_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+
+        let result = replace_file_with(&replacement, &dest, |_, _| {
+            Err(std::io::ErrorKind::PermissionDenied.into())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn failed_placement_restores_the_original() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let result = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            match calls {
+                1 | 3 => Err(std::io::ErrorKind::PermissionDenied.into()),
+                _ => std::fs::rename(from, to),
+            }
+        });
+
+        assert!(result.is_err());
+        assert_eq!(calls, 4);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn failed_rollback_keeps_a_named_backup_and_does_not_overwrite_previous_backups() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        let previous = temp.path().join(".lam-old-previous");
+        std::fs::create_dir(&previous).unwrap();
+        std::fs::write(previous.join("original"), b"previous settings").unwrap();
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let error = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            if calls == 2 {
+                std::fs::rename(from, to)
+            } else {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            }
+        })
+        .unwrap_err();
+
+        assert_eq!(calls, 4);
+        let backup = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.is_dir() && *path != previous)
+            .unwrap()
+            .join("original");
+        assert!(
+            error.to_string().contains(&backup.display().to_string()),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old settings");
+        assert_eq!(
+            std::fs::read(previous.join("original")).unwrap(),
+            b"previous settings"
+        );
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
     }
 
     #[test]
