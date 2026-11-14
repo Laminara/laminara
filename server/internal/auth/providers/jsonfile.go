@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -46,6 +48,7 @@ type jsonFileProvider struct {
 	mu      sync.RWMutex
 	records []map[string]any
 	users   map[string]map[string]any
+	loaded  []byte
 }
 
 func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
@@ -75,9 +78,14 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 }
 
 func (p *jsonFileProvider) load() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	data, err := os.ReadFile(p.path)
 	if err != nil {
 		return err
+	}
+	if bytes.Equal(data, p.loaded) {
+		return nil
 	}
 	var records []map[string]any
 	if err := json.Unmarshal(data, &records); err != nil {
@@ -93,10 +101,9 @@ func (p *jsonFileProvider) load() error {
 			}
 		}
 		if name != "" {
-			for existing := range users {
-				if strings.EqualFold(existing, name) {
-					return fmt.Errorf("имя аккаунта %q встречается несколько раз без учёта регистра", name)
-				}
+			key := foldUsername(name)
+			if _, exists := users[key]; exists {
+				return fmt.Errorf("имя аккаунта %q встречается несколько раз без учёта регистра", name)
 			}
 			if raw, present := record[p.uuidKey]; present && raw != nil {
 				text, ok := raw.(string)
@@ -107,14 +114,25 @@ func (p *jsonFileProvider) load() error {
 					return err
 				}
 			}
-			users[name] = record
+			users[key] = record
 		}
 	}
-	p.mu.Lock()
 	p.records = records
 	p.users = users
-	p.mu.Unlock()
+	p.loaded = data
 	return nil
+}
+
+func foldUsername(name string) string {
+	return strings.Map(func(r rune) rune {
+		key := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < key {
+				key = next
+			}
+		}
+		return key
+	}, name)
 }
 
 func (p *jsonFileProvider) record(username string) (map[string]any, bool, error) {
@@ -123,12 +141,8 @@ func (p *jsonFileProvider) record(username string) (map[string]any, bool, error)
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	for name, record := range p.users {
-		if strings.EqualFold(name, username) {
-			return maps.Clone(record), true, nil
-		}
-	}
-	return nil, false, nil
+	record, ok := p.users[foldUsername(username)]
+	return maps.Clone(record), ok, nil
 }
 
 func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credentials) (auth.Identity, error) {
@@ -176,8 +190,10 @@ func (p *jsonFileProvider) save() error {
 		return err
 	}
 	if err := atomicfile.Write(p.path, append(data, '\n'), 0o600); err != nil {
+		p.loaded = nil
 		return err
 	}
+	p.loaded = append(data, '\n')
 	return nil
 }
 
@@ -187,10 +203,8 @@ func (p *jsonFileProvider) Add(_ context.Context, username, password, wanted str
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for name := range p.users {
-		if strings.EqualFold(name, username) {
-			return auth.Identity{}, fmt.Errorf("игрок «%s» уже есть — сменить пароль: auth passwd %s", username, username)
-		}
+	if _, exists := p.users[foldUsername(username)]; exists {
+		return auth.Identity{}, fmt.Errorf("игрок «%s» уже есть — сменить пароль: auth passwd %s", username, username)
 	}
 	digest, err := hash.ProduceCost(p.scheme, password, 0)
 	if err != nil {
@@ -203,7 +217,7 @@ func (p *jsonFileProvider) Add(_ context.Context, username, password, wanted str
 	}
 	record[p.uuidKey] = id.String()
 	p.records = append(p.records, record)
-	p.users[username] = record
+	p.users[foldUsername(username)] = record
 	if err := p.save(); err != nil {
 		return auth.Identity{}, err
 	}
@@ -216,7 +230,7 @@ func (p *jsonFileProvider) SetPassword(_ context.Context, username, password str
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	record, ok := p.users[username]
+	record, ok := p.users[foldUsername(username)]
 	if !ok {
 		return fmt.Errorf("игрока «%s» нет — завести: auth add %s", username, username)
 	}
@@ -234,18 +248,18 @@ func (p *jsonFileProvider) Remove(_ context.Context, username string) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, ok := p.users[username]; !ok {
+	if _, ok := p.users[foldUsername(username)]; !ok {
 		return fmt.Errorf("игрока «%s» нет", username)
 	}
 	kept := make([]map[string]any, 0, len(p.records))
 	for _, record := range p.records {
-		if name, _ := record[p.usernameKey].(string); name == username {
+		if name, _ := record[p.usernameKey].(string); strings.EqualFold(name, username) {
 			continue
 		}
 		kept = append(kept, record)
 	}
 	p.records = kept
-	delete(p.users, username)
+	delete(p.users, foldUsername(username))
 	return p.save()
 }
 

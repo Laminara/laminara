@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -128,17 +129,46 @@ func (r *remoteAuth) Authenticate(ctx context.Context, creds auth.Credentials) (
 	case err != nil:
 		return auth.Identity{}, err
 	}
+	return moduleIdentity(identity, creds.Username)
+}
+
+func (r *remoteAuth) LookupProfile(ctx context.Context, username string) (auth.Identity, error) {
+	identity, err := r.svc.LookupProfile(ctx, r.handle, username)
+	if errors.Is(err, sdkmodule.ErrInvalidCredentials) {
+		return auth.Identity{}, auth.ErrInvalidCredentials
+	}
+	if err != nil {
+		return auth.Identity{}, err
+	}
+	resolved, err := moduleIdentity(identity, username)
+	if err != nil {
+		return auth.Identity{}, err
+	}
+	if !strings.EqualFold(resolved.Username, username) {
+		return auth.Identity{}, errors.New("модуль вернул профиль другого игрока")
+	}
+	return resolved, nil
+}
+
+func moduleIdentity(identity sdkmodule.Identity, fallback string) (auth.Identity, error) {
 	username := identity.Username
 	if username == "" {
-		username = creds.Username
+		username = fallback
+	}
+	if username == "" {
+		return auth.Identity{}, errors.New("модуль не вернул имя игрока")
 	}
 	subject := identity.Subject
 	if subject == "" {
 		subject = username
 	}
-	id, err := uuid.Parse(identity.UUID)
-	if err != nil {
-		id = auth.OfflineUUID(username)
+	id := auth.OfflineUUID(username)
+	if identity.UUID != "" {
+		parsed, err := uuid.Parse(identity.UUID)
+		if err != nil || parsed == uuid.Nil {
+			return auth.Identity{}, errors.New("модуль вернул некорректный или нулевой UUID")
+		}
+		id = parsed
 	}
 	return auth.Identity{Subject: subject, Username: username, UUID: id}, nil
 }

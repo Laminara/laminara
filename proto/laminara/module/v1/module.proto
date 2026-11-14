@@ -96,6 +96,18 @@ message AuthenticateResponse {
   string uuid = 4;
 }
 
+message LookupProfileRequest {
+  uint64 handle = 1;
+  string username = 2;
+}
+
+message LookupProfileResponse {
+  bool found = 1;
+  string subject = 2;
+  string username = 3;
+  string uuid = 4;
+}
+
 message TexturesRequest {
   uint64 handle = 1;
   string username = 2;
@@ -150,6 +162,7 @@ service ModuleService {
   rpc Emit(EmitRequest) returns (EmitResponse);
   rpc OpenProvider(OpenProviderRequest) returns (OpenProviderResponse);
   rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+  rpc LookupProfile(LookupProfileRequest) returns (LookupProfileResponse);
   rpc Textures(TexturesRequest) returns (TexturesResponse);
   rpc Allows(AllowsRequest) returns (AllowsResponse);
   rpc NewsItems(NewsItemsRequest) returns (NewsItemsResponse);

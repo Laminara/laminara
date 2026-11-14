@@ -186,6 +186,7 @@ impl RateMeter {
         if self.last_bytes.is_none_or(|last| bytes_done < last) {
             self.last_bytes = Some(bytes_done);
             self.last_at = now;
+            self.speed = 0.0;
         }
         let seconds = now.duration_since(self.last_at).as_secs_f64();
         let gained = bytes_done.saturating_sub(self.last_bytes.unwrap_or(bytes_done)) as f64;
@@ -204,6 +205,21 @@ impl RateMeter {
         }
         let left = bytes_total.saturating_sub(bytes_done) as f64;
         (Some(self.speed), Some(left / self.speed))
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+
+    #[test]
+    fn checking_speed_is_not_reused_when_downloading_starts() {
+        let mut meter = RateMeter {
+            last_bytes: Some(1024),
+            last_at: Instant::now(),
+            speed: 4096.0,
+        };
+        assert_eq!(meter.sample(0, 2048), (None, None));
     }
 }
 

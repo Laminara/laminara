@@ -11,6 +11,8 @@ import (
 
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	modulev1 "github.com/laminara/laminara/sdk/go/gen/laminara/module/v1"
 )
@@ -232,6 +234,28 @@ func (s *grpcServer) Authenticate(ctx context.Context, req *modulev1.Authenticat
 	}, nil
 }
 
+func (s *grpcServer) LookupProfile(ctx context.Context, req *modulev1.LookupProfileRequest) (*modulev1.LookupProfileResponse, error) {
+	opened, err := s.provider(req.Handle)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := opened.(AuthProvider); !ok {
+		return nil, fmt.Errorf("provider handle %d is not an auth provider", req.Handle)
+	}
+	provider, ok := opened.(ProfileLookup)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "модуль не поддерживает поиск профилей")
+	}
+	identity, err := provider.LookupProfile(ctx, req.Username)
+	if errors.Is(err, ErrInvalidCredentials) {
+		return &modulev1.LookupProfileResponse{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &modulev1.LookupProfileResponse{Found: true, Subject: identity.Subject, Username: identity.Username, Uuid: identity.UUID}, nil
+}
+
 func (s *grpcServer) Textures(ctx context.Context, req *modulev1.TexturesRequest) (*modulev1.TexturesResponse, error) {
 	opened, err := s.provider(req.Handle)
 	if err != nil {
@@ -400,6 +424,17 @@ func (c *grpcClient) Authenticate(ctx context.Context, handle Handle, creds Cred
 	default:
 		return Identity{}, fmt.Errorf("модуль ответил непонятным исходом входа (%s) — считаю, что источник аккаунтов недоступен", resp.Outcome)
 	}
+}
+
+func (c *grpcClient) LookupProfile(ctx context.Context, handle Handle, username string) (Identity, error) {
+	resp, err := c.client.LookupProfile(ctx, &modulev1.LookupProfileRequest{Handle: uint64(handle), Username: username})
+	if err != nil {
+		return Identity{}, err
+	}
+	if !resp.Found {
+		return Identity{}, ErrInvalidCredentials
+	}
+	return Identity{Subject: resp.Subject, Username: resp.Username, UUID: resp.Uuid}, nil
 }
 
 func (c *grpcClient) Textures(ctx context.Context, handle Handle, username, uuid string) (Textures, error) {

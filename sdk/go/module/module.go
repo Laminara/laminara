@@ -114,6 +114,10 @@ type AuthProvider interface {
 	Authenticate(ctx context.Context, creds Credentials) (Identity, error)
 }
 
+type ProfileLookup interface {
+	LookupProfile(ctx context.Context, username string) (Identity, error)
+}
+
 type AuthProviders interface {
 	AuthProviders() []string
 	OpenAuth(ctx context.Context, name string, config []byte) (AuthProvider, error)
@@ -155,6 +159,7 @@ type Service interface {
 	Emit(ctx context.Context, topic string, data map[string]string) error
 	OpenProvider(ctx context.Context, kind ProviderKind, name string, config []byte) (Handle, error)
 	Authenticate(ctx context.Context, handle Handle, creds Credentials) (Identity, error)
+	LookupProfile(ctx context.Context, handle Handle, username string) (Identity, error)
 	Textures(ctx context.Context, handle Handle, username, uuid string) (Textures, error)
 	Allows(ctx context.Context, handle Handle, build string, subject Subject) (bool, error)
 	NewsItems(ctx context.Context, handle Handle) ([]NewsItem, error)

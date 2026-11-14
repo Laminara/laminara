@@ -1,7 +1,10 @@
+mod checking;
 mod safety;
 #[cfg(test)]
 mod safety_tests;
 pub mod statcache;
+#[cfg(test)]
+mod verification_tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,6 +15,8 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use tokio_util::sync::CancellationToken;
+
+use checking::{disk_work, CheckProgress};
 
 use crate::backoff;
 use crate::error::{describe, CoreError};
@@ -258,6 +263,7 @@ const RETRY_LONGEST: Duration = Duration::from_secs(15);
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 const HASH_READ_BYTES: usize = 64 * 1024;
 
+#[derive(Clone)]
 struct Wanted {
     hex: String,
     algo: i32,
@@ -426,6 +432,7 @@ async fn download(
             &partial,
             &mut counted,
             meter,
+            cancel,
         )
         .await;
         let error = match outcome {
@@ -514,11 +521,13 @@ async fn fetch(
     partial: &Path,
     counted: &mut u64,
     meter: &Meter<'_>,
+    cancel: &CancellationToken,
 ) -> Result<(), Attempt> {
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
     let mode = object_mode(wanted.executable);
-    if file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))
+    if cached_object_matches(cas_path, wanted, cancel)
+        .await
         .map_err(Attempt::Final)?
     {
         set_mode(cas_path, mode);
@@ -536,7 +545,8 @@ async fn fetch(
         .map_err(|error| disk_error(wanted, error))?
         .is_some()
     {
-        if file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))
+        if cached_object_matches(cas_path, wanted, cancel)
+            .await
             .map_err(Attempt::Final)?
         {
             set_mode(cas_path, mode);
@@ -559,7 +569,9 @@ async fn fetch(
             .map_err(|e| disk_error(wanted, e))?;
         if length == wanted.size && hasher.finalize_hex() == wanted.hex {
             drop(file);
-            return settle_object(partial, cas_path, wanted).map_err(Attempt::Again);
+            return finish_object(partial, cas_path, wanted, cancel)
+                .await
+                .map_err(Attempt::Again);
         }
         empty_partial(&mut file, counted, meter)
             .await
@@ -670,17 +682,41 @@ async fn fetch(
         ))));
     }
     drop(file);
-    settle_object(partial, cas_path, wanted).map_err(Attempt::Again)
+    finish_object(partial, cas_path, wanted, cancel)
+        .await
+        .map_err(Attempt::Again)
 }
 
-fn settle_object(from: &Path, cas_path: &Path, wanted: &Wanted) -> Result<(), CoreError> {
-    if let Err(e) = std::fs::rename(from, cas_path) {
-        if !file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))? {
-            return Err(CoreError::Sync(format!("persist object: {e}")));
+async fn cached_object_matches(
+    path: &Path,
+    wanted: &Wanted,
+    cancel: &CancellationToken,
+) -> Result<bool, CoreError> {
+    let path = path.to_path_buf();
+    let wanted = wanted.clone();
+    disk_work(cancel, &|_| {}, move |cancel, _progress| {
+        file_matches_with(&path, wanted.algo, &wanted.hex, Some(wanted.size), |_| {
+            cancelled(&cancel)
+        })
+    })
+    .await
+}
+
+async fn finish_object(
+    from: &Path,
+    path: &Path,
+    wanted: &Wanted,
+    cancel: &CancellationToken,
+) -> Result<(), CoreError> {
+    cancelled(cancel)?;
+    if let Err(error) = std::fs::rename(from, path) {
+        if !cached_object_matches(path, wanted, cancel).await? {
+            return Err(CoreError::Sync(format!("persist object: {error}")));
         }
+        cancelled(cancel)?;
         let _ = std::fs::remove_file(from);
     }
-    set_mode(cas_path, object_mode(wanted.executable));
+    set_mode(path, object_mode(wanted.executable));
     Ok(())
 }
 
@@ -841,26 +877,26 @@ pub struct SyncPlan<'a> {
     pub cancel: CancellationToken,
 }
 
-pub async fn sync(
-    plan: SyncPlan<'_>,
-    on_progress: impl Fn(SyncProgress) + Send + Sync,
-) -> Result<SyncOutcome, CoreError> {
-    let SyncPlan {
-        transport,
-        base_url,
-        profile_dir,
-        state_dir,
-        cas_dir,
-        manifest,
-        selection,
-        max_parallel,
-        cancel,
-    } = plan;
-    let parallel = if max_parallel == 0 {
-        DEFAULT_PARALLEL
-    } else {
-        max_parallel
-    };
+struct PreparedSync {
+    plan: Vec<PlanItem>,
+    current_paths: HashSet<String>,
+    previous: Ledger,
+    ledger_path: PathBuf,
+    wanted: Vec<Wanted>,
+    resumable: u64,
+    skipped: u64,
+}
+
+fn prepare_sync(
+    profile_dir: &Path,
+    state_dir: &Path,
+    cas_dir: &Path,
+    manifest: &Manifest,
+    selection: &FeatureSelection,
+    cancel: &CancellationToken,
+    on_progress: &(dyn Fn(SyncProgress) + Send + Sync),
+) -> Result<PreparedSync, CoreError> {
+    cancelled(cancel)?;
     crate::manifest::validate(manifest)?;
     safety::create_root(profile_dir)?;
     safety::create_root(state_dir)?;
@@ -889,12 +925,13 @@ pub async fn sync(
         current_path: None,
     });
 
+    let mut checks = CheckProgress::new(&included, cancel, on_progress);
     let mut plan: Vec<PlanItem> = Vec::with_capacity(included.len());
     let mut current_paths: HashSet<String> = HashSet::with_capacity(included.len());
     let mut skipped = 0u64;
 
     for &file in &included {
-        cancelled(&cancel)?;
+        cancelled(cancel)?;
         validate_manifest_path(&file.path)?;
         let object = file
             .object
@@ -913,6 +950,7 @@ pub async fn sync(
         safety::regular_metadata(&dest)?;
         current_paths.insert(file.path.clone());
 
+        checks.start(&file.path);
         let (action, released) = match policy {
             FilePolicy::UserWritable => plan_user_writable(&dest, previous.get(&file.path)),
             _ => (
@@ -924,10 +962,12 @@ pub async fn sync(
                     &dest,
                     file.executable,
                     previous.get(&file.path),
+                    |bytes| checks.advance(bytes),
                 )?,
                 false,
             ),
         };
+        checks.finish(object.size);
         if matches!(action, Action::Skip | Action::Leave) {
             skipped += 1;
         }
@@ -962,12 +1002,22 @@ pub async fn sync(
         }
     }
 
+    checks.extend(needed.values());
     let mut wanted: Vec<Wanted> = Vec::with_capacity(needed.len());
     let mut resumable = 0u64;
     for object in needed.into_values() {
+        checks.start(&object.path);
         let cas_path = cas_dir.join(object_key(object.algo, &object.value)?);
         safety::check_parents(cas_dir, &cas_path, false)?;
-        if file_matches(&cas_path, object.algo, &object.hex, Some(object.size))? {
+        let matches = file_matches_with(
+            &cas_path,
+            object.algo,
+            &object.hex,
+            Some(object.size),
+            |bytes| checks.advance(bytes),
+        )?;
+        checks.finish(object.size);
+        if matches {
             set_mode(&cas_path, object_mode(object.executable));
             continue;
         }
@@ -975,6 +1025,68 @@ pub async fn sync(
         wanted.push(object);
     }
     wanted.sort_by(|left, right| left.path.cmp(&right.path));
+    checks.publish(true);
+    cancelled(cancel)?;
+
+    Ok(PreparedSync {
+        plan,
+        current_paths,
+        previous,
+        ledger_path,
+        wanted,
+        resumable,
+        skipped,
+    })
+}
+
+pub async fn sync(
+    plan: SyncPlan<'_>,
+    on_progress: impl Fn(SyncProgress) + Send + Sync,
+) -> Result<SyncOutcome, CoreError> {
+    let SyncPlan {
+        transport,
+        base_url,
+        profile_dir,
+        state_dir,
+        cas_dir,
+        manifest,
+        selection,
+        max_parallel,
+        cancel,
+    } = plan;
+    let parallel = if max_parallel == 0 {
+        DEFAULT_PARALLEL
+    } else {
+        max_parallel
+    };
+    let profile = profile_dir.to_path_buf();
+    let state = state_dir.to_path_buf();
+    let cache = cas_dir.to_path_buf();
+    let checked_manifest = manifest.clone();
+    let selected = selection.clone();
+    let PreparedSync {
+        plan,
+        current_paths,
+        previous,
+        ledger_path,
+        wanted,
+        resumable,
+        skipped,
+    } = disk_work(&cancel, &on_progress, move |cancel, progress| {
+        prepare_sync(
+            &profile,
+            &state,
+            &cache,
+            &checked_manifest,
+            &selected,
+            &cancel,
+            &|event| {
+                progress.send_replace(Some(event));
+            },
+        )
+    })
+    .await?;
+    cancelled(&cancel)?;
 
     let meter = Meter {
         report: &on_progress,
@@ -1119,7 +1231,7 @@ pub fn verify_contents(profile_dir: &Path, state_dir: &Path) -> Vec<String> {
 fn verify(profile_dir: &Path, state_dir: &Path, hash_contents: bool) -> Vec<String> {
     let ledger = match read_ledger(&state_dir.join(LEDGER_FILE)) {
         Ok(ledger) => ledger,
-        Err(_) => return vec![".laminara/installed.json".into()],
+        Err(_) => return vec![format!(".laminara/{LEDGER_FILE}")],
     };
     let mut broken = Vec::new();
     for (path, entry) in &ledger {
@@ -1161,6 +1273,17 @@ fn carries_code(path: &str) -> bool {
 }
 
 fn file_matches(path: &Path, algo: i32, hex: &str, size: Option<u64>) -> Result<bool, CoreError> {
+    file_matches_with(path, algo, hex, size, |_| Ok(()))
+}
+
+fn file_matches_with(
+    path: &Path,
+    algo: i32,
+    hex: &str,
+    size: Option<u64>,
+    mut on_bytes: impl FnMut(u64) -> Result<(), CoreError>,
+) -> Result<bool, CoreError> {
+    on_bytes(0)?;
     use std::io::Read;
     let Some(metadata) = safety::regular_metadata(path)? else {
         return Ok(false);
@@ -1173,12 +1296,14 @@ fn file_matches(path: &Path, algo: i32, hex: &str, size: Option<u64>) -> Result<
     let mut buffer = [0u8; HASH_READ_BYTES];
     let mut length = 0u64;
     loop {
+        on_bytes(length)?;
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
         length += read as u64;
+        on_bytes(length)?;
         if size.is_some_and(|expected| length > expected) {
             return Ok(false);
         }
@@ -1207,7 +1332,14 @@ pub fn discard_installed(
     cas_dir: &Path,
     paths: &[String],
 ) -> Result<u64, CoreError> {
-    let ledger = read_ledger(&state_dir.join(LEDGER_FILE))?;
+    let ledger = match read_ledger(&state_dir.join(LEDGER_FILE)) {
+        Ok(ledger) => ledger,
+        Err(_) if paths == [format!(".laminara/{LEDGER_FILE}")] => {
+            recover_ledger(profile_dir, state_dir)?;
+            return Ok(0);
+        }
+        Err(error) => return Err(error),
+    };
     let mut checked = Vec::with_capacity(paths.len());
     for path in paths {
         validate_manifest_path(path)?;
@@ -1245,6 +1377,33 @@ pub fn discard_installed(
         safety::remove_file(&cached)?;
     }
     Ok(discarded)
+}
+
+fn recover_ledger(profile_dir: &Path, state_dir: &Path) -> Result<(), CoreError> {
+    use std::io::{Read, Write};
+    let path = state_dir.join(LEDGER_FILE);
+    safety::check_parents(profile_dir, &path, false)?;
+    let mut file = safety::read_private(&path)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    drop(file);
+    if serde_json::from_slice::<Ledger>(&bytes).is_ok() {
+        return Err(CoreError::Sync(
+            "журнал владения изменился во время восстановления — повторите проверку".into(),
+        ));
+    }
+    let mut backup = tempfile::Builder::new()
+        .prefix(".lam-ledger-corrupt-")
+        .tempfile_in(state_dir)?;
+    backup.write_all(&bytes)?;
+    backup.as_file().sync_all()?;
+    let (_, backup_path) = backup
+        .keep()
+        .map_err(|error| CoreError::from(error.error))?;
+    mark_unfinished(state_dir)?;
+    save_ledger(&path, &Ledger::new())?;
+    tracing::warn!(backup = %backup_path.display(), "повреждённый журнал сохранён, сборка будет синхронизирована заново");
+    Ok(())
 }
 
 fn visit_cas_files(
@@ -1381,6 +1540,7 @@ fn plan_immutable(
     dest: &Path,
     executable: bool,
     previous: Option<&OwnedEntry>,
+    on_bytes: impl FnMut(u64) -> Result<(), CoreError>,
 ) -> Result<Action, CoreError> {
     let cas_path = cas_dir.join(object_key(hash.algo, &hash.value)?);
     let Some(dest_meta) = safety::regular_metadata(dest)? else {
@@ -1403,7 +1563,7 @@ fn plan_immutable(
     }
     if previous.is_some_and(|entry| {
         entry.placement == Placement::Copy && entry.object_hash == hex && !entry.released
-    }) && file_matches(dest, hash.algo, hex, Some(size))?
+    }) && file_matches_with(dest, hash.algo, hex, Some(size), on_bytes)?
     {
         Ok(Action::Skip)
     } else {
@@ -1557,40 +1717,16 @@ mod tests {
 
     #[tokio::test]
     async fn immutable_profiles_share_downloads_but_not_files() {
-        let temp = tempfile::tempdir().unwrap();
         let content = b"shared download".to_vec();
         let server = object_server(content.clone(), vec![Reply::Serve]).await;
         let manifest = one_file_manifest("mods/a.jar", &content);
-        let cache = temp.path().join("objects");
-        for (name, expected_downloads) in [("A", 1), ("B", 0)] {
-            let profile = temp.path().join(name);
-            let outcome = sync(
-                SyncPlan {
-                    transport: &Transport::default(),
-                    base_url: &server.base_url,
-                    profile_dir: &profile,
-                    state_dir: &profile.join(".laminara"),
-                    cas_dir: &cache,
-                    manifest: &manifest,
-                    selection: &FeatureSelection::default(),
-                    max_parallel: 1,
-                    cancel: CancellationToken::new(),
-                },
-                |_| {},
-            )
-            .await
-            .unwrap();
-            assert_eq!(outcome.downloaded, expected_downloads);
-        }
+        super::live::check_cross_build_isolation(
+            &Transport::default(),
+            &server.base_url,
+            &manifest,
+        )
+        .await;
         assert_eq!(server.requests.lock().unwrap().len(), 1);
-        let a = temp.path().join("A/mods/a.jar");
-        let b = temp.path().join("B/mods/a.jar");
-        let object = cache
-            .join(object_key(HashAlgo::Blake3 as i32, blake3::hash(&content).as_bytes()).unwrap());
-        set_mode(&a, 0o644);
-        std::fs::write(&a, b"changed profile").unwrap();
-        assert_eq!(std::fs::read(&b).unwrap(), content);
-        assert_eq!(std::fs::read(&object).unwrap(), content);
     }
 
     #[cfg(unix)]
@@ -1808,8 +1944,8 @@ mod tests {
         assert!(root.join("a/b/c").is_dir());
     }
 
-    #[test]
-    fn an_object_that_lands_in_the_cas_is_read_only() {
+    #[tokio::test]
+    async fn an_object_that_lands_in_the_cas_is_read_only() {
         let tmp = tempfile::tempdir().unwrap();
         let cas_path = tmp.path().join("object");
         let partial = partial_path(&cas_path);
@@ -1824,7 +1960,9 @@ mod tests {
             size: 6,
             path: "object".into(),
         };
-        settle_object(&partial, &cas_path, &wanted).unwrap();
+        finish_object(&partial, &cas_path, &wanted, &CancellationToken::new())
+            .await
+            .unwrap();
 
         let meta = std::fs::metadata(&cas_path).unwrap();
         assert!(
@@ -2869,8 +3007,8 @@ mod tests {
             assert!(!temp.path().join("objects").exists());
         }
     }
-    #[test]
-    fn a_failed_rename_only_reuses_a_verified_cache_object() {
+    #[tokio::test]
+    async fn a_failed_rename_only_reuses_a_verified_cache_object() {
         let temp = tempfile::tempdir().unwrap();
         let cached = temp.path().join("object");
         let missing = temp.path().join("missing.part");
@@ -2884,9 +3022,15 @@ mod tests {
             path: "mods/a.jar".into(),
         };
         std::fs::write(&cached, b"broken").unwrap();
-        assert!(settle_object(&missing, &cached, &wanted).is_err());
+        assert!(
+            finish_object(&missing, &cached, &wanted, &CancellationToken::new())
+                .await
+                .is_err()
+        );
         std::fs::write(&cached, b"object").unwrap();
-        settle_object(&missing, &cached, &wanted).unwrap();
+        finish_object(&missing, &cached, &wanted, &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(std::fs::read(&cached).unwrap(), b"object");
     }
 
@@ -2997,6 +3141,14 @@ mod live {
         let verified = verify_and_decode(&[verifying_key], &response.manifest, &response.signature)
             .expect("verify");
 
+        check_cross_build_isolation(&transport, &base, &verified.manifest).await;
+    }
+
+    pub(super) async fn check_cross_build_isolation(
+        transport: &Transport,
+        base: &str,
+        manifest: &Manifest,
+    ) {
         let temp = tempfile::tempdir().unwrap();
         let cas = temp.path().join("objects");
         let cancel = CancellationToken::new();
@@ -3005,12 +3157,12 @@ mod live {
         let a_state = a_dir.join(".laminara");
         let first = sync(
             SyncPlan {
-                transport: &transport,
-                base_url: &base,
+                transport,
+                base_url: base,
                 profile_dir: &a_dir,
                 state_dir: &a_state,
                 cas_dir: &cas,
-                manifest: &verified.manifest,
+                manifest,
                 selection: &FeatureSelection::default(),
                 max_parallel: 8,
                 cancel: cancel.clone(),
@@ -3029,12 +3181,12 @@ mod live {
         let b_state = b_dir.join(".laminara");
         let second = sync(
             SyncPlan {
-                transport: &transport,
-                base_url: &base,
+                transport,
+                base_url: base,
                 profile_dir: &b_dir,
                 state_dir: &b_state,
                 cas_dir: &cas,
-                manifest: &verified.manifest,
+                manifest,
                 selection: &FeatureSelection::default(),
                 max_parallel: 8,
                 cancel: cancel.clone(),
@@ -3055,12 +3207,12 @@ mod live {
 
         let third = sync(
             SyncPlan {
-                transport: &transport,
-                base_url: &base,
+                transport,
+                base_url: base,
                 profile_dir: &a_dir,
                 state_dir: &a_state,
                 cas_dir: &cas,
-                manifest: &verified.manifest,
+                manifest,
                 selection: &FeatureSelection::default(),
                 max_parallel: 8,
                 cancel,
@@ -3074,20 +3226,39 @@ mod live {
             third.downloaded, third.skipped
         );
         assert_eq!(third.downloaded, 0);
-        assert_eq!(third.skipped as usize, verified.manifest.files.len());
+        let optional = features::optional_paths(&manifest.features);
+        let (_, active) =
+            features::resolve_active(&manifest.features, &FeatureSelection::default());
+        assert_eq!(
+            third.skipped as usize,
+            manifest
+                .files
+                .iter()
+                .filter(|file| !optional.contains(&file.path) || active.contains(&file.path))
+                .count()
+        );
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let sample = &verified.manifest.files[0].path;
-            let am = std::fs::metadata(a_dir.join(sample)).unwrap();
-            let bm = std::fs::metadata(b_dir.join(sample)).unwrap();
-            assert_ne!(am.ino(), bm.ino(), "profiles must have private copies");
-            assert_eq!(
-                std::fs::read(a_dir.join(sample)).unwrap(),
-                std::fs::read(b_dir.join(sample)).unwrap()
-            );
-            assert!(is_read_only(&am), "immutable file is read-only");
-        }
+        let sample = manifest
+            .files
+            .iter()
+            .find(|file| {
+                file.policy != FilePolicy::UserWritable as i32
+                    && (!optional.contains(&file.path) || active.contains(&file.path))
+            })
+            .expect("an immutable file");
+        let a = a_dir.join(&sample.path);
+        let b = b_dir.join(&sample.path);
+        let hash = sample.object.as_ref().unwrap().hash.as_ref().unwrap();
+        let cached = cas.join(object_key(hash.algo, &hash.value).unwrap());
+        assert!(!same_file(&a, &b), "builds must have independent files");
+        assert!(!same_file(&a, &cached), "build A must be isolated from CAS");
+        assert!(!same_file(&b, &cached), "build B must be isolated from CAS");
+        assert!(is_read_only(&std::fs::metadata(&a).unwrap()));
+        assert!(is_read_only(&std::fs::metadata(&b).unwrap()));
+        let original = std::fs::read(&b).unwrap();
+        set_mode(&a, 0o644);
+        std::fs::write(&a, b"changed build A").unwrap();
+        assert_eq!(std::fs::read(&b).unwrap(), original);
+        assert_eq!(std::fs::read(&cached).unwrap(), original);
     }
 }

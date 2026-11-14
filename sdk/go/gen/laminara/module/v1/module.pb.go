@@ -984,6 +984,126 @@ func (x *AuthenticateResponse) GetUuid() string {
 	return ""
 }
 
+type LookupProfileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Handle        uint64                 `protobuf:"varint,1,opt,name=handle,proto3" json:"handle,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LookupProfileRequest) Reset() {
+	*x = LookupProfileRequest{}
+	mi := &file_laminara_module_v1_module_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LookupProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LookupProfileRequest) ProtoMessage() {}
+
+func (x *LookupProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_laminara_module_v1_module_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LookupProfileRequest.ProtoReflect.Descriptor instead.
+func (*LookupProfileRequest) Descriptor() ([]byte, []int) {
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *LookupProfileRequest) GetHandle() uint64 {
+	if x != nil {
+		return x.Handle
+	}
+	return 0
+}
+
+func (x *LookupProfileRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type LookupProfileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Found         bool                   `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	Subject       string                 `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	Uuid          string                 `protobuf:"bytes,4,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LookupProfileResponse) Reset() {
+	*x = LookupProfileResponse{}
+	mi := &file_laminara_module_v1_module_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LookupProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LookupProfileResponse) ProtoMessage() {}
+
+func (x *LookupProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_laminara_module_v1_module_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LookupProfileResponse.ProtoReflect.Descriptor instead.
+func (*LookupProfileResponse) Descriptor() ([]byte, []int) {
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *LookupProfileResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *LookupProfileResponse) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *LookupProfileResponse) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *LookupProfileResponse) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
 type TexturesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Handle        uint64                 `protobuf:"varint,1,opt,name=handle,proto3" json:"handle,omitempty"`
@@ -995,7 +1115,7 @@ type TexturesRequest struct {
 
 func (x *TexturesRequest) Reset() {
 	*x = TexturesRequest{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[16]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +1127,7 @@ func (x *TexturesRequest) String() string {
 func (*TexturesRequest) ProtoMessage() {}
 
 func (x *TexturesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[16]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +1140,7 @@ func (x *TexturesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TexturesRequest.ProtoReflect.Descriptor instead.
 func (*TexturesRequest) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{16}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TexturesRequest) GetHandle() uint64 {
@@ -1055,7 +1175,7 @@ type TexturesResponse struct {
 
 func (x *TexturesResponse) Reset() {
 	*x = TexturesResponse{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[17]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1187,7 @@ func (x *TexturesResponse) String() string {
 func (*TexturesResponse) ProtoMessage() {}
 
 func (x *TexturesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[17]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1200,7 @@ func (x *TexturesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TexturesResponse.ProtoReflect.Descriptor instead.
 func (*TexturesResponse) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{17}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TexturesResponse) GetSkinUrl() string {
@@ -1115,7 +1235,7 @@ type AccessSubject struct {
 
 func (x *AccessSubject) Reset() {
 	*x = AccessSubject{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[18]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1127,7 +1247,7 @@ func (x *AccessSubject) String() string {
 func (*AccessSubject) ProtoMessage() {}
 
 func (x *AccessSubject) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[18]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1140,7 +1260,7 @@ func (x *AccessSubject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessSubject.ProtoReflect.Descriptor instead.
 func (*AccessSubject) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{18}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AccessSubject) GetSubject() string {
@@ -1175,7 +1295,7 @@ type AllowsRequest struct {
 
 func (x *AllowsRequest) Reset() {
 	*x = AllowsRequest{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[19]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1187,7 +1307,7 @@ func (x *AllowsRequest) String() string {
 func (*AllowsRequest) ProtoMessage() {}
 
 func (x *AllowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[19]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1200,7 +1320,7 @@ func (x *AllowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllowsRequest.ProtoReflect.Descriptor instead.
 func (*AllowsRequest) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{19}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AllowsRequest) GetHandle() uint64 {
@@ -1233,7 +1353,7 @@ type AllowsResponse struct {
 
 func (x *AllowsResponse) Reset() {
 	*x = AllowsResponse{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[20]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1245,7 +1365,7 @@ func (x *AllowsResponse) String() string {
 func (*AllowsResponse) ProtoMessage() {}
 
 func (x *AllowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[20]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1258,7 +1378,7 @@ func (x *AllowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllowsResponse.ProtoReflect.Descriptor instead.
 func (*AllowsResponse) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{20}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *AllowsResponse) GetAllowed() bool {
@@ -1283,7 +1403,7 @@ type NewsItem struct {
 
 func (x *NewsItem) Reset() {
 	*x = NewsItem{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[21]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1295,7 +1415,7 @@ func (x *NewsItem) String() string {
 func (*NewsItem) ProtoMessage() {}
 
 func (x *NewsItem) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[21]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1308,7 +1428,7 @@ func (x *NewsItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsItem.ProtoReflect.Descriptor instead.
 func (*NewsItem) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{21}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *NewsItem) GetId() string {
@@ -1369,7 +1489,7 @@ type NewsItemsRequest struct {
 
 func (x *NewsItemsRequest) Reset() {
 	*x = NewsItemsRequest{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[22]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1501,7 @@ func (x *NewsItemsRequest) String() string {
 func (*NewsItemsRequest) ProtoMessage() {}
 
 func (x *NewsItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[22]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1514,7 @@ func (x *NewsItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsItemsRequest.ProtoReflect.Descriptor instead.
 func (*NewsItemsRequest) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{22}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *NewsItemsRequest) GetHandle() uint64 {
@@ -1413,7 +1533,7 @@ type NewsItemsResponse struct {
 
 func (x *NewsItemsResponse) Reset() {
 	*x = NewsItemsResponse{}
-	mi := &file_laminara_module_v1_module_proto_msgTypes[23]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1425,7 +1545,7 @@ func (x *NewsItemsResponse) String() string {
 func (*NewsItemsResponse) ProtoMessage() {}
 
 func (x *NewsItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_laminara_module_v1_module_proto_msgTypes[23]
+	mi := &file_laminara_module_v1_module_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1438,7 +1558,7 @@ func (x *NewsItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsItemsResponse.ProtoReflect.Descriptor instead.
 func (*NewsItemsResponse) Descriptor() ([]byte, []int) {
-	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{23}
+	return file_laminara_module_v1_module_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *NewsItemsResponse) GetItems() []*NewsItem {
@@ -1506,6 +1626,14 @@ const file_laminara_module_v1_module_proto_rawDesc = "" +
 	"\aoutcome\x18\x01 \x01(\x0e2\x1f.laminara.module.v1.AuthOutcomeR\aoutcome\x12\x18\n" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +
 	"\busername\x18\x03 \x01(\tR\busername\x12\x12\n" +
+	"\x04uuid\x18\x04 \x01(\tR\x04uuid\"J\n" +
+	"\x14LookupProfileRequest\x12\x16\n" +
+	"\x06handle\x18\x01 \x01(\x04R\x06handle\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"w\n" +
+	"\x15LookupProfileResponse\x12\x14\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\x12\x18\n" +
+	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x12\n" +
 	"\x04uuid\x18\x04 \x01(\tR\x04uuid\"Y\n" +
 	"\x0fTexturesRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\x04R\x06handle\x12\x1a\n" +
@@ -1547,7 +1675,7 @@ const file_laminara_module_v1_module_proto_rawDesc = "" +
 	"\x18AUTH_OUTCOME_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15AUTH_OUTCOME_ACCEPTED\x10\x01\x12$\n" +
 	" AUTH_OUTCOME_INVALID_CREDENTIALS\x10\x02\x12$\n" +
-	" AUTH_OUTCOME_TWO_FACTOR_REQUIRED\x10\x032\x8c\a\n" +
+	" AUTH_OUTCOME_TWO_FACTOR_REQUIRED\x10\x032\xf2\a\n" +
 	"\rModuleService\x12m\n" +
 	"\x10DescribeSettings\x12+.laminara.module.v1.DescribeSettingsRequest\x1a,.laminara.module.v1.DescribeSettingsResponse\x12X\n" +
 	"\tConfigure\x12$.laminara.module.v1.ConfigureRequest\x1a%.laminara.module.v1.ConfigureResponse\x12I\n" +
@@ -1555,7 +1683,8 @@ const file_laminara_module_v1_module_proto_rawDesc = "" +
 	"\aExecute\x12\".laminara.module.v1.ExecuteRequest\x1a#.laminara.module.v1.ExecuteResponse0\x01\x12I\n" +
 	"\x04Emit\x12\x1f.laminara.module.v1.EmitRequest\x1a .laminara.module.v1.EmitResponse\x12a\n" +
 	"\fOpenProvider\x12'.laminara.module.v1.OpenProviderRequest\x1a(.laminara.module.v1.OpenProviderResponse\x12a\n" +
-	"\fAuthenticate\x12'.laminara.module.v1.AuthenticateRequest\x1a(.laminara.module.v1.AuthenticateResponse\x12U\n" +
+	"\fAuthenticate\x12'.laminara.module.v1.AuthenticateRequest\x1a(.laminara.module.v1.AuthenticateResponse\x12d\n" +
+	"\rLookupProfile\x12(.laminara.module.v1.LookupProfileRequest\x1a).laminara.module.v1.LookupProfileResponse\x12U\n" +
 	"\bTextures\x12#.laminara.module.v1.TexturesRequest\x1a$.laminara.module.v1.TexturesResponse\x12O\n" +
 	"\x06Allows\x12!.laminara.module.v1.AllowsRequest\x1a\".laminara.module.v1.AllowsResponse\x12X\n" +
 	"\tNewsItems\x12$.laminara.module.v1.NewsItemsRequest\x1a%.laminara.module.v1.NewsItemsResponseB\xd4\x01\n" +
@@ -1574,7 +1703,7 @@ func file_laminara_module_v1_module_proto_rawDescGZIP() []byte {
 }
 
 var file_laminara_module_v1_module_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_laminara_module_v1_module_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_laminara_module_v1_module_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_laminara_module_v1_module_proto_goTypes = []any{
 	(ProviderKind)(0),                // 0: laminara.module.v1.ProviderKind
 	(AuthOutcome)(0),                 // 1: laminara.module.v1.AuthOutcome
@@ -1594,26 +1723,28 @@ var file_laminara_module_v1_module_proto_goTypes = []any{
 	(*OpenProviderResponse)(nil),     // 15: laminara.module.v1.OpenProviderResponse
 	(*AuthenticateRequest)(nil),      // 16: laminara.module.v1.AuthenticateRequest
 	(*AuthenticateResponse)(nil),     // 17: laminara.module.v1.AuthenticateResponse
-	(*TexturesRequest)(nil),          // 18: laminara.module.v1.TexturesRequest
-	(*TexturesResponse)(nil),         // 19: laminara.module.v1.TexturesResponse
-	(*AccessSubject)(nil),            // 20: laminara.module.v1.AccessSubject
-	(*AllowsRequest)(nil),            // 21: laminara.module.v1.AllowsRequest
-	(*AllowsResponse)(nil),           // 22: laminara.module.v1.AllowsResponse
-	(*NewsItem)(nil),                 // 23: laminara.module.v1.NewsItem
-	(*NewsItemsRequest)(nil),         // 24: laminara.module.v1.NewsItemsRequest
-	(*NewsItemsResponse)(nil),        // 25: laminara.module.v1.NewsItemsResponse
-	nil,                              // 26: laminara.module.v1.EmitRequest.DataEntry
+	(*LookupProfileRequest)(nil),     // 18: laminara.module.v1.LookupProfileRequest
+	(*LookupProfileResponse)(nil),    // 19: laminara.module.v1.LookupProfileResponse
+	(*TexturesRequest)(nil),          // 20: laminara.module.v1.TexturesRequest
+	(*TexturesResponse)(nil),         // 21: laminara.module.v1.TexturesResponse
+	(*AccessSubject)(nil),            // 22: laminara.module.v1.AccessSubject
+	(*AllowsRequest)(nil),            // 23: laminara.module.v1.AllowsRequest
+	(*AllowsResponse)(nil),           // 24: laminara.module.v1.AllowsResponse
+	(*NewsItem)(nil),                 // 25: laminara.module.v1.NewsItem
+	(*NewsItemsRequest)(nil),         // 26: laminara.module.v1.NewsItemsRequest
+	(*NewsItemsResponse)(nil),        // 27: laminara.module.v1.NewsItemsResponse
+	nil,                              // 28: laminara.module.v1.EmitRequest.DataEntry
 }
 var file_laminara_module_v1_module_proto_depIdxs = []int32{
 	7,  // 0: laminara.module.v1.DescribeSettingsResponse.description:type_name -> laminara.module.v1.InfoResponse
 	0,  // 1: laminara.module.v1.ProviderSpec.kind:type_name -> laminara.module.v1.ProviderKind
 	5,  // 2: laminara.module.v1.InfoResponse.commands:type_name -> laminara.module.v1.CommandSpec
 	6,  // 3: laminara.module.v1.InfoResponse.providers:type_name -> laminara.module.v1.ProviderSpec
-	26, // 4: laminara.module.v1.EmitRequest.data:type_name -> laminara.module.v1.EmitRequest.DataEntry
+	28, // 4: laminara.module.v1.EmitRequest.data:type_name -> laminara.module.v1.EmitRequest.DataEntry
 	0,  // 5: laminara.module.v1.OpenProviderRequest.kind:type_name -> laminara.module.v1.ProviderKind
 	1,  // 6: laminara.module.v1.AuthenticateResponse.outcome:type_name -> laminara.module.v1.AuthOutcome
-	20, // 7: laminara.module.v1.AllowsRequest.subject:type_name -> laminara.module.v1.AccessSubject
-	23, // 8: laminara.module.v1.NewsItemsResponse.items:type_name -> laminara.module.v1.NewsItem
+	22, // 7: laminara.module.v1.AllowsRequest.subject:type_name -> laminara.module.v1.AccessSubject
+	25, // 8: laminara.module.v1.NewsItemsResponse.items:type_name -> laminara.module.v1.NewsItem
 	3,  // 9: laminara.module.v1.ModuleService.DescribeSettings:input_type -> laminara.module.v1.DescribeSettingsRequest
 	10, // 10: laminara.module.v1.ModuleService.Configure:input_type -> laminara.module.v1.ConfigureRequest
 	2,  // 11: laminara.module.v1.ModuleService.Info:input_type -> laminara.module.v1.InfoRequest
@@ -1621,21 +1752,23 @@ var file_laminara_module_v1_module_proto_depIdxs = []int32{
 	12, // 13: laminara.module.v1.ModuleService.Emit:input_type -> laminara.module.v1.EmitRequest
 	14, // 14: laminara.module.v1.ModuleService.OpenProvider:input_type -> laminara.module.v1.OpenProviderRequest
 	16, // 15: laminara.module.v1.ModuleService.Authenticate:input_type -> laminara.module.v1.AuthenticateRequest
-	18, // 16: laminara.module.v1.ModuleService.Textures:input_type -> laminara.module.v1.TexturesRequest
-	21, // 17: laminara.module.v1.ModuleService.Allows:input_type -> laminara.module.v1.AllowsRequest
-	24, // 18: laminara.module.v1.ModuleService.NewsItems:input_type -> laminara.module.v1.NewsItemsRequest
-	4,  // 19: laminara.module.v1.ModuleService.DescribeSettings:output_type -> laminara.module.v1.DescribeSettingsResponse
-	11, // 20: laminara.module.v1.ModuleService.Configure:output_type -> laminara.module.v1.ConfigureResponse
-	7,  // 21: laminara.module.v1.ModuleService.Info:output_type -> laminara.module.v1.InfoResponse
-	9,  // 22: laminara.module.v1.ModuleService.Execute:output_type -> laminara.module.v1.ExecuteResponse
-	13, // 23: laminara.module.v1.ModuleService.Emit:output_type -> laminara.module.v1.EmitResponse
-	15, // 24: laminara.module.v1.ModuleService.OpenProvider:output_type -> laminara.module.v1.OpenProviderResponse
-	17, // 25: laminara.module.v1.ModuleService.Authenticate:output_type -> laminara.module.v1.AuthenticateResponse
-	19, // 26: laminara.module.v1.ModuleService.Textures:output_type -> laminara.module.v1.TexturesResponse
-	22, // 27: laminara.module.v1.ModuleService.Allows:output_type -> laminara.module.v1.AllowsResponse
-	25, // 28: laminara.module.v1.ModuleService.NewsItems:output_type -> laminara.module.v1.NewsItemsResponse
-	19, // [19:29] is the sub-list for method output_type
-	9,  // [9:19] is the sub-list for method input_type
+	18, // 16: laminara.module.v1.ModuleService.LookupProfile:input_type -> laminara.module.v1.LookupProfileRequest
+	20, // 17: laminara.module.v1.ModuleService.Textures:input_type -> laminara.module.v1.TexturesRequest
+	23, // 18: laminara.module.v1.ModuleService.Allows:input_type -> laminara.module.v1.AllowsRequest
+	26, // 19: laminara.module.v1.ModuleService.NewsItems:input_type -> laminara.module.v1.NewsItemsRequest
+	4,  // 20: laminara.module.v1.ModuleService.DescribeSettings:output_type -> laminara.module.v1.DescribeSettingsResponse
+	11, // 21: laminara.module.v1.ModuleService.Configure:output_type -> laminara.module.v1.ConfigureResponse
+	7,  // 22: laminara.module.v1.ModuleService.Info:output_type -> laminara.module.v1.InfoResponse
+	9,  // 23: laminara.module.v1.ModuleService.Execute:output_type -> laminara.module.v1.ExecuteResponse
+	13, // 24: laminara.module.v1.ModuleService.Emit:output_type -> laminara.module.v1.EmitResponse
+	15, // 25: laminara.module.v1.ModuleService.OpenProvider:output_type -> laminara.module.v1.OpenProviderResponse
+	17, // 26: laminara.module.v1.ModuleService.Authenticate:output_type -> laminara.module.v1.AuthenticateResponse
+	19, // 27: laminara.module.v1.ModuleService.LookupProfile:output_type -> laminara.module.v1.LookupProfileResponse
+	21, // 28: laminara.module.v1.ModuleService.Textures:output_type -> laminara.module.v1.TexturesResponse
+	24, // 29: laminara.module.v1.ModuleService.Allows:output_type -> laminara.module.v1.AllowsResponse
+	27, // 30: laminara.module.v1.ModuleService.NewsItems:output_type -> laminara.module.v1.NewsItemsResponse
+	20, // [20:31] is the sub-list for method output_type
+	9,  // [9:20] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -1652,7 +1785,7 @@ func file_laminara_module_v1_module_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_laminara_module_v1_module_proto_rawDesc), len(file_laminara_module_v1_module_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

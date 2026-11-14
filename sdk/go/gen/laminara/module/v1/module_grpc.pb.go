@@ -26,6 +26,7 @@ const (
 	ModuleService_Emit_FullMethodName             = "/laminara.module.v1.ModuleService/Emit"
 	ModuleService_OpenProvider_FullMethodName     = "/laminara.module.v1.ModuleService/OpenProvider"
 	ModuleService_Authenticate_FullMethodName     = "/laminara.module.v1.ModuleService/Authenticate"
+	ModuleService_LookupProfile_FullMethodName    = "/laminara.module.v1.ModuleService/LookupProfile"
 	ModuleService_Textures_FullMethodName         = "/laminara.module.v1.ModuleService/Textures"
 	ModuleService_Allows_FullMethodName           = "/laminara.module.v1.ModuleService/Allows"
 	ModuleService_NewsItems_FullMethodName        = "/laminara.module.v1.ModuleService/NewsItems"
@@ -42,6 +43,7 @@ type ModuleServiceClient interface {
 	Emit(ctx context.Context, in *EmitRequest, opts ...grpc.CallOption) (*EmitResponse, error)
 	OpenProvider(ctx context.Context, in *OpenProviderRequest, opts ...grpc.CallOption) (*OpenProviderResponse, error)
 	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
+	LookupProfile(ctx context.Context, in *LookupProfileRequest, opts ...grpc.CallOption) (*LookupProfileResponse, error)
 	Textures(ctx context.Context, in *TexturesRequest, opts ...grpc.CallOption) (*TexturesResponse, error)
 	Allows(ctx context.Context, in *AllowsRequest, opts ...grpc.CallOption) (*AllowsResponse, error)
 	NewsItems(ctx context.Context, in *NewsItemsRequest, opts ...grpc.CallOption) (*NewsItemsResponse, error)
@@ -134,6 +136,16 @@ func (c *moduleServiceClient) Authenticate(ctx context.Context, in *Authenticate
 	return out, nil
 }
 
+func (c *moduleServiceClient) LookupProfile(ctx context.Context, in *LookupProfileRequest, opts ...grpc.CallOption) (*LookupProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LookupProfileResponse)
+	err := c.cc.Invoke(ctx, ModuleService_LookupProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *moduleServiceClient) Textures(ctx context.Context, in *TexturesRequest, opts ...grpc.CallOption) (*TexturesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TexturesResponse)
@@ -175,6 +187,7 @@ type ModuleServiceServer interface {
 	Emit(context.Context, *EmitRequest) (*EmitResponse, error)
 	OpenProvider(context.Context, *OpenProviderRequest) (*OpenProviderResponse, error)
 	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
+	LookupProfile(context.Context, *LookupProfileRequest) (*LookupProfileResponse, error)
 	Textures(context.Context, *TexturesRequest) (*TexturesResponse, error)
 	Allows(context.Context, *AllowsRequest) (*AllowsResponse, error)
 	NewsItems(context.Context, *NewsItemsRequest) (*NewsItemsResponse, error)
@@ -208,6 +221,9 @@ func (UnimplementedModuleServiceServer) OpenProvider(context.Context, *OpenProvi
 }
 func (UnimplementedModuleServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
+}
+func (UnimplementedModuleServiceServer) LookupProfile(context.Context, *LookupProfileRequest) (*LookupProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LookupProfile not implemented")
 }
 func (UnimplementedModuleServiceServer) Textures(context.Context, *TexturesRequest) (*TexturesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Textures not implemented")
@@ -358,6 +374,24 @@ func _ModuleService_Authenticate_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ModuleService_LookupProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModuleServiceServer).LookupProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModuleService_LookupProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModuleServiceServer).LookupProfile(ctx, req.(*LookupProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ModuleService_Textures_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TexturesRequest)
 	if err := dec(in); err != nil {
@@ -442,6 +476,10 @@ var ModuleService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Authenticate",
 			Handler:    _ModuleService_Authenticate_Handler,
+		},
+		{
+			MethodName: "LookupProfile",
+			Handler:    _ModuleService_LookupProfile_Handler,
 		},
 		{
 			MethodName: "Textures",

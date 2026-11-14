@@ -1,5 +1,62 @@
 use super::*;
 
+#[tokio::test]
+async fn repair_recovers_corrupt_ownership_without_touching_player_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = temp.path().join("profile");
+    let state = profile.join(".laminara");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join(LEDGER_FILE), b"{broken").unwrap();
+    std::fs::write(profile.join("options.txt"), b"player settings").unwrap();
+    let broken = verify_contents(&profile, &state);
+    assert_eq!(broken, vec![".laminara/installed.json"]);
+    discard_installed(&profile, &state, &temp.path().join("cas"), &broken).unwrap();
+    let backups: Vec<_> = std::fs::read_dir(&state)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".lam-ledger-corrupt-")
+        })
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(std::fs::read(&backups[0]).unwrap(), b"{broken");
+    assert!(install_unfinished(&state));
+    assert_eq!(
+        std::fs::read(profile.join("options.txt")).unwrap(),
+        b"player settings"
+    );
+    apply(
+        temp.path(),
+        vec![file("options.txt", b"defaults", FilePolicy::UserWritable)],
+    )
+    .await
+    .unwrap();
+    assert!(!install_unfinished(&state));
+    assert!(verify_contents(&profile, &state).is_empty());
+    assert_eq!(
+        std::fs::read(profile.join("options.txt")).unwrap(),
+        b"player settings"
+    );
+}
+
+#[test]
+fn recovery_refuses_a_hardlinked_ledger() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = temp.path().join("profile");
+    let state = profile.join(".laminara");
+    std::fs::create_dir_all(&state).unwrap();
+    let outside = temp.path().join("outside");
+    std::fs::write(&outside, b"{broken").unwrap();
+    std::fs::hard_link(&outside, state.join(LEDGER_FILE)).unwrap();
+    let broken = verify_contents(&profile, &state);
+    assert!(discard_installed(&profile, &state, &temp.path().join("cas"), &broken).is_err());
+    assert_eq!(std::fs::read(outside).unwrap(), b"{broken");
+    assert!(!install_unfinished(&state));
+}
+
 fn file(path: &str, bytes: &[u8], policy: FilePolicy) -> ManifestFile {
     ManifestFile {
         path: path.into(),
