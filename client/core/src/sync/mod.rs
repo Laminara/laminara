@@ -635,8 +635,11 @@ fn materialize_immutable(
     let parent = dest
         .parent()
         .ok_or_else(|| CoreError::Sync("dest has no parent".into()))?;
-    let tmp = parent.join(format!(".lam-link-{}", unique_suffix(dest)));
-    let _ = remove_stubborn_file(&tmp);
+    let staging = tempfile::Builder::new()
+        .prefix(".lam-place-")
+        .tempdir_in(parent)
+        .map_err(|e| CoreError::Sync(format!("не подготовить замену {}: {e}", dest.display())))?;
+    let tmp = staging.path().join("replacement");
 
     let placement = match std::fs::hard_link(cas_path, &tmp) {
         Ok(_) => Placement::Hardlink,
@@ -660,8 +663,11 @@ fn materialize_writable(
     let parent = dest
         .parent()
         .ok_or_else(|| CoreError::Sync("dest has no parent".into()))?;
-    let tmp = parent.join(format!(".lam-seed-{}", unique_suffix(dest)));
-    let _ = remove_stubborn_file(&tmp);
+    let staging = tempfile::Builder::new()
+        .prefix(".lam-place-")
+        .tempdir_in(parent)
+        .map_err(|e| CoreError::Sync(format!("не подготовить замену {}: {e}", dest.display())))?;
+    let tmp = staging.path().join("replacement");
     clone_or_copy(cas_path, &tmp).map_err(|e| CoreError::Sync(format!("seed {e}")))?;
     set_mode(&tmp, if executable { 0o755 } else { 0o644 });
     replace_file(&tmp, dest)?;
@@ -682,19 +688,81 @@ fn remove_stubborn_file(path: &Path) -> std::io::Result<()> {
 }
 
 fn replace_file(tmp: &Path, dest: &Path) -> Result<(), CoreError> {
-    if std::fs::rename(tmp, dest).is_ok() {
-        return Ok(());
-    }
-    let _ = remove_stubborn_file(dest);
-    std::fs::rename(tmp, dest).map_err(|e| {
-        let _ = std::fs::remove_file(tmp);
-        CoreError::Sync(format!("place {}: {e}", dest.display()))
-    })
+    replace_file_with(tmp, dest, |from, to| std::fs::rename(from, to))
 }
 
-fn unique_suffix(dest: &Path) -> String {
-    let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("f");
-    format!("{}-{}", name, dest.as_os_str().len())
+fn replace_file_with(
+    tmp: &Path,
+    dest: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), CoreError> {
+    let source = std::fs::symlink_metadata(tmp)
+        .map_err(|e| CoreError::Sync(format!("не прочитать замену {}: {e}", tmp.display())))?;
+    if !source.is_file() {
+        return Err(CoreError::Sync(format!(
+            "замена {} должна быть обычным файлом",
+            tmp.display()
+        )));
+    }
+    let first_error = match rename(tmp, dest) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    let place_error =
+        |e: &std::io::Error| CoreError::Sync(format!("не заменить {}: {e}", dest.display()));
+    if !matches!(
+        first_error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AlreadyExists
+    ) || !std::fs::symlink_metadata(dest).is_ok_and(|meta| meta.is_file())
+    {
+        return Err(place_error(&first_error));
+    }
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let backup_dir = tempfile::Builder::new()
+        .prefix(".lam-old-")
+        .tempdir_in(parent)
+        .map_err(|e| {
+            CoreError::Sync(format!(
+                "не сохранить {} перед заменой: {e}",
+                dest.display()
+            ))
+        })?
+        .keep();
+    let backup = backup_dir.join("original");
+    if let Err(e) = rename(dest, &backup) {
+        let _ = std::fs::remove_dir(&backup_dir);
+        return Err(CoreError::Sync(format!(
+            "не сохранить {} перед заменой: {e}",
+            dest.display()
+        )));
+    }
+    if let Err(e) = rename(tmp, dest) {
+        let restored = match std::fs::symlink_metadata(dest) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => rename(&backup, dest),
+            Ok(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "место назначения уже занято другим файлом",
+            )),
+            Err(error) => Err(error),
+        };
+        return match restored {
+            Ok(()) => {
+                let _ = std::fs::remove_dir(&backup_dir);
+                Err(place_error(&e))
+            }
+            Err(rollback) => Err(CoreError::Sync(format!(
+                "не заменить {}: {e}; восстановление не удалось: {rollback}; исходный файл сохранён в {}",
+                dest.display(),
+                backup.display()
+            ))),
+        };
+    }
+    if let Err(e) = remove_stubborn_file(&backup) {
+        tracing::warn!(path = %backup.display(), error = %e, "не удалить старый файл после замены");
+    } else {
+        let _ = std::fs::remove_dir(&backup_dir);
+    }
+    Ok(())
 }
 
 enum Action {
@@ -1307,6 +1375,234 @@ mod tests {
             is_read_only(&meta),
             "объект в CAS должен быть только для чтения, иначе проверка целостности назовёт битым весь клиент"
         );
+    }
+
+    #[test]
+    fn materialization_does_not_remove_existing_staging_names() {
+        for writable in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let dest = temp.path().join("settings.cfg");
+            let object = temp.path().join("object");
+            let kind = if writable { "seed" } else { "link" };
+            let occupied = temp.path().join(format!(
+                ".lam-{kind}-settings.cfg-{}",
+                dest.as_os_str().len()
+            ));
+            std::fs::write(&object, b"new settings").unwrap();
+            std::fs::write(&dest, b"old settings").unwrap();
+            std::fs::write(&occupied, b"unrelated settings").unwrap();
+
+            if writable {
+                materialize_writable(temp.path(), &object, &dest, false).unwrap();
+            } else {
+                materialize_immutable(temp.path(), &object, &dest, false).unwrap();
+            }
+
+            assert_eq!(std::fs::read(&dest).unwrap(), b"new settings");
+            assert_eq!(std::fs::read(&occupied).unwrap(), b"unrelated settings");
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 3);
+        }
+    }
+
+    #[test]
+    fn failed_materialization_keeps_existing_files_and_cleans_staging() {
+        for writable in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let dest = temp.path().join("settings.cfg");
+            let object = temp.path().join("missing");
+            std::fs::write(&dest, b"old settings").unwrap();
+
+            let result = if writable {
+                materialize_writable(temp.path(), &object, &dest, false)
+            } else {
+                materialize_immutable(temp.path(), &object, &dest, false).map(|_| ())
+            };
+
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn failed_rollback_does_not_overwrite_a_file_that_appeared_at_the_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let error = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            match calls {
+                1 => Err(std::io::ErrorKind::PermissionDenied.into()),
+                3 => {
+                    std::fs::write(&dest, b"other settings").unwrap();
+                    Err(std::io::ErrorKind::PermissionDenied.into())
+                }
+                _ => std::fs::rename(from, to),
+            }
+        })
+        .unwrap_err();
+
+        let backup = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.is_dir())
+            .unwrap()
+            .join("original");
+        assert_eq!(calls, 3);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"other settings");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert!(
+            error.to_string().contains(&backup.display().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn failed_replace_preserves_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        std::fs::write(&dest, b"player settings").unwrap();
+        set_mode(&dest, 0o444);
+
+        assert!(replace_file(&temp.path().join("missing"), &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
+        assert!(is_read_only(&std::fs::metadata(&dest).unwrap()));
+    }
+
+    #[test]
+    fn refuses_a_directory_as_a_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"player settings").unwrap();
+        std::fs::create_dir(&replacement).unwrap();
+
+        assert!(replace_file(&replacement, &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"player settings");
+        assert!(replacement.is_dir());
+    }
+
+    #[test]
+    fn replacement_fallback_preserves_the_original_until_placement_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            if calls == 1 {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            if calls == 3 {
+                let backups: Vec<_> = std::fs::read_dir(temp.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| path.is_dir())
+                    .collect();
+                assert_eq!(backups.len(), 1);
+                assert_eq!(
+                    std::fs::read(backups[0].join("original")).unwrap(),
+                    b"old settings"
+                );
+            }
+            std::fs::rename(from, to)
+        })
+        .unwrap();
+
+        assert_eq!(calls, 3);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_preservation_keeps_both_files_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+
+        let result = replace_file_with(&replacement, &dest, |_, _| {
+            Err(std::io::ErrorKind::PermissionDenied.into())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn failed_placement_restores_the_original() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let result = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            match calls {
+                1 | 3 => Err(std::io::ErrorKind::PermissionDenied.into()),
+                _ => std::fs::rename(from, to),
+            }
+        });
+
+        assert!(result.is_err());
+        assert_eq!(calls, 4);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old settings");
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn failed_rollback_keeps_a_named_backup_and_does_not_overwrite_previous_backups() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("options.txt");
+        let replacement = temp.path().join("replacement");
+        let previous = temp.path().join(".lam-old-previous");
+        std::fs::create_dir(&previous).unwrap();
+        std::fs::write(previous.join("original"), b"previous settings").unwrap();
+        std::fs::write(&dest, b"old settings").unwrap();
+        std::fs::write(&replacement, b"new settings").unwrap();
+        let mut calls = 0;
+
+        let error = replace_file_with(&replacement, &dest, |from, to| {
+            calls += 1;
+            if calls == 2 {
+                std::fs::rename(from, to)
+            } else {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            }
+        })
+        .unwrap_err();
+
+        assert_eq!(calls, 4);
+        let backup = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.is_dir() && *path != previous)
+            .unwrap()
+            .join("original");
+        assert!(
+            error.to_string().contains(&backup.display().to_string()),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(&backup).unwrap(), b"old settings");
+        assert_eq!(
+            std::fs::read(previous.join("original")).unwrap(),
+            b"previous settings"
+        );
+        assert_eq!(std::fs::read(&replacement).unwrap(), b"new settings");
     }
 
     #[test]
