@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use crate::backoff;
 use crate::error::{describe, CoreError};
 use crate::features::{self, FeatureSelection};
-use crate::manifest::object_key;
-use crate::proto::core::v1::{FilePolicy, HashAlgo, Manifest, ManifestFile};
+use crate::manifest::{object_key, validate_manifest_path};
+use crate::proto::core::v1::{FilePolicy, Hash, HashAlgo, Manifest, ManifestFile};
 use crate::transport::Transport;
 
 const DEFAULT_PARALLEL: usize = 8;
@@ -163,11 +163,14 @@ enum Hasher {
 }
 
 impl Hasher {
-    fn for_algo(algo: i32) -> Hasher {
-        match HashAlgo::try_from(algo).unwrap_or(HashAlgo::Blake3) {
-            HashAlgo::Sha256 => Hasher::Sha256(sha2::Sha256::new()),
-            HashAlgo::Sha1 => Hasher::Sha1(sha1::Sha1::new()),
-            _ => Hasher::Blake3(Box::new(blake3::Hasher::new())),
+    fn for_algo(algo: i32) -> Result<Hasher, CoreError> {
+        match HashAlgo::try_from(algo) {
+            Ok(HashAlgo::Blake3) => Ok(Hasher::Blake3(Box::new(blake3::Hasher::new()))),
+            Ok(HashAlgo::Sha256) => Ok(Hasher::Sha256(sha2::Sha256::new())),
+            Ok(HashAlgo::Sha1) => Ok(Hasher::Sha1(sha1::Sha1::new())),
+            _ => Err(CoreError::Sync(format!(
+                "неподдерживаемый алгоритм хеша: {algo}"
+            ))),
         }
     }
     fn update(&mut self, data: &[u8]) {
@@ -405,7 +408,7 @@ async fn download(
     meter: &Meter<'_>,
     cancel: &CancellationToken,
 ) -> Result<(), CoreError> {
-    let cas_path = cas_dir.join(object_key(wanted.algo, &wanted.value));
+    let cas_path = cas_dir.join(object_key(wanted.algo, &wanted.value)?);
     let partial = partial_path(&cas_path);
     ensure_safe_parents(cas_dir, &cas_path)?;
     safety::regular_metadata(&cas_path)?;
@@ -515,9 +518,8 @@ async fn fetch(
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
     let mode = object_mode(wanted.executable);
-    if safety::regular_metadata(cas_path)
-        .map_err(|error| disk_error(wanted, error))?
-        .is_some()
+    if file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))
+        .map_err(Attempt::Final)?
     {
         set_mode(cas_path, mode);
         meter.reconcile(counted, wanted.size);
@@ -530,6 +532,20 @@ async fn fetch(
         ))));
     };
 
+    if safety::regular_metadata(cas_path)
+        .map_err(|error| disk_error(wanted, error))?
+        .is_some()
+    {
+        if file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))
+            .map_err(Attempt::Final)?
+        {
+            set_mode(cas_path, mode);
+            meter.reconcile(counted, wanted.size);
+            return Ok(());
+        }
+        safety::remove_file(cas_path).map_err(|error| disk_error(wanted, error))?;
+    }
+
     let mut offset = file
         .metadata()
         .await
@@ -537,13 +553,13 @@ async fn fetch(
         .len();
     meter.reconcile(counted, offset.min(wanted.size));
     if offset >= wanted.size {
-        let mut hasher = Hasher::for_algo(wanted.algo);
+        let mut hasher = Hasher::for_algo(wanted.algo).map_err(Attempt::Final)?;
         let length = hash_from_start(&mut file, &mut hasher)
             .await
             .map_err(|e| disk_error(wanted, e))?;
         if length == wanted.size && hasher.finalize_hex() == wanted.hex {
             drop(file);
-            return settle_object(partial, cas_path, mode).map_err(Attempt::Again);
+            return settle_object(partial, cas_path, wanted).map_err(Attempt::Again);
         }
         empty_partial(&mut file, counted, meter)
             .await
@@ -554,7 +570,7 @@ async fn fetch(
     let url = format!(
         "{}/objects/{}",
         base_url.trim_end_matches('/'),
-        object_key(wanted.algo, &wanted.value)
+        object_key(wanted.algo, &wanted.value).map_err(Attempt::Final)?
     );
     let mut request = transport.authorize(transport.client().get(&url));
     if offset > 0 {
@@ -594,7 +610,7 @@ async fn fetch(
         ))));
     }
 
-    let mut hasher = Hasher::for_algo(wanted.algo);
+    let mut hasher = Hasher::for_algo(wanted.algo).map_err(Attempt::Final)?;
     if resumed {
         hash_from_start(&mut file, &mut hasher)
             .await
@@ -654,17 +670,17 @@ async fn fetch(
         ))));
     }
     drop(file);
-    settle_object(partial, cas_path, mode).map_err(Attempt::Again)
+    settle_object(partial, cas_path, wanted).map_err(Attempt::Again)
 }
 
-fn settle_object(from: &Path, cas_path: &Path, object_mode: u32) -> Result<(), CoreError> {
+fn settle_object(from: &Path, cas_path: &Path, wanted: &Wanted) -> Result<(), CoreError> {
     if let Err(e) = std::fs::rename(from, cas_path) {
-        if safety::regular_metadata(cas_path)?.is_none() {
+        if !file_matches(cas_path, wanted.algo, &wanted.hex, Some(wanted.size))? {
             return Err(CoreError::Sync(format!("persist object: {e}")));
         }
         let _ = std::fs::remove_file(from);
     }
-    set_mode(cas_path, object_mode);
+    set_mode(cas_path, object_mode(wanted.executable));
     Ok(())
 }
 
@@ -813,77 +829,6 @@ struct PlanItem {
     released: bool,
 }
 
-pub(crate) fn validate_manifest_path(path: &str) -> Result<(), CoreError> {
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.contains(['\\', ':'])
-        || path
-            .chars()
-            .any(|c| c.is_control() || "<>\"|?*".contains(c))
-    {
-        return Err(CoreError::Sync(format!("unsafe manifest path: {path}")));
-    }
-    for segment in path.split('/') {
-        let device = segment
-            .split('.')
-            .next()
-            .unwrap_or("")
-            .trim_end()
-            .to_uppercase();
-        let reserved = matches!(
-            device.as_str(),
-            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-        ) || ["COM", "LPT"].iter().any(|prefix| {
-            device.strip_prefix(prefix).is_some_and(|n| {
-                matches!(
-                    n,
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-                )
-            })
-        });
-        if segment.is_empty()
-            || segment == "."
-            || segment == ".."
-            || segment.ends_with(['.', ' '])
-            || reserved
-        {
-            return Err(CoreError::Sync(format!(
-                "unsafe segment in manifest path: {path}"
-            )));
-        }
-    }
-    let lower = path.to_uppercase();
-    if lower == ".LAMINARA" || lower.starts_with(".LAMINARA/") {
-        return Err(CoreError::Sync(format!(
-            "manifest path targets client state: {path}"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_manifest_paths(manifest: &Manifest) -> Result<(), CoreError> {
-    let mut paths = HashSet::new();
-    for file in &manifest.files {
-        validate_manifest_path(&file.path)?;
-        if !paths.insert(file.path.to_uppercase()) {
-            return Err(CoreError::Sync(format!(
-                "повторяющийся путь: {}",
-                file.path
-            )));
-        }
-    }
-    for path in &paths {
-        for (index, _) in path.match_indices('/') {
-            if paths.contains(&path[..index]) {
-                return Err(CoreError::Sync(format!(
-                    "файл используется как каталог: {path}"
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
 pub struct SyncPlan<'a> {
     pub transport: &'a Transport,
     pub base_url: &'a str,
@@ -916,7 +861,7 @@ pub async fn sync(
     } else {
         max_parallel
     };
-    validate_manifest_paths(manifest)?;
+    crate::manifest::validate(manifest)?;
     safety::create_root(profile_dir)?;
     safety::create_root(state_dir)?;
     safety::create_root(cas_dir)?;
@@ -960,7 +905,9 @@ pub async fn sync(
             .as_ref()
             .ok_or_else(|| CoreError::Sync("object missing hash".into()))?;
         let hex = hex::encode(&hash.value);
-        let policy = FilePolicy::try_from(file.policy).unwrap_or(FilePolicy::Unspecified);
+        let policy = FilePolicy::try_from(file.policy).map_err(|_| {
+            CoreError::Sync(format!("неподдерживаемая политика файла: {}", file.path))
+        })?;
         let dest = profile_dir.join(&file.path);
         safety::check_parents(profile_dir, &dest, false)?;
         safety::regular_metadata(&dest)?;
@@ -971,13 +918,13 @@ pub async fn sync(
             _ => (
                 plan_immutable(
                     cas_dir,
-                    hash.algo,
-                    &hash.value,
+                    hash,
+                    object.size,
                     &hex,
                     &dest,
                     file.executable,
                     previous.get(&file.path),
-                ),
+                )?,
                 false,
             ),
         };
@@ -998,11 +945,11 @@ pub async fn sync(
         });
     }
 
-    let mut needed: HashMap<String, Wanted> = HashMap::new();
+    let mut needed: HashMap<(i32, String), Wanted> = HashMap::new();
     for item in &plan {
         if matches!(item.action, Action::Link | Action::Seed) {
             needed
-                .entry(item.hex.clone())
+                .entry((item.algo, item.hex.clone()))
                 .and_modify(|object| object.executable |= item.executable)
                 .or_insert_with(|| Wanted {
                     hex: item.hex.clone(),
@@ -1018,9 +965,9 @@ pub async fn sync(
     let mut wanted: Vec<Wanted> = Vec::with_capacity(needed.len());
     let mut resumable = 0u64;
     for object in needed.into_values() {
-        let cas_path = cas_dir.join(object_key(object.algo, &object.value));
+        let cas_path = cas_dir.join(object_key(object.algo, &object.value)?);
         safety::check_parents(cas_dir, &cas_path, false)?;
-        if safety::regular_metadata(&cas_path)?.is_some() {
+        if file_matches(&cas_path, object.algo, &object.hex, Some(object.size))? {
             set_mode(&cas_path, object_mode(object.executable));
             continue;
         }
@@ -1081,7 +1028,7 @@ pub async fn sync(
     let mut linked = 0u64;
     for item in &plan {
         cancelled(&cancel)?;
-        let cas_path = cas_dir.join(object_key(item.algo, &item.value));
+        let cas_path = cas_dir.join(object_key(item.algo, &item.value)?);
         let (placement, released) = match item.action {
             Action::Skip => (Placement::Copy, false),
             Action::Leave => {
@@ -1213,18 +1160,45 @@ fn carries_code(path: &str) -> bool {
         || lower.ends_with(".dylib")
 }
 
-fn content_matches(path: &Path, entry: &OwnedEntry) -> bool {
+fn file_matches(path: &Path, algo: i32, hex: &str, size: Option<u64>) -> Result<bool, CoreError> {
     use std::io::Read;
-    let Ok(mut file) = safety::read_file(path) else {
-        return false;
+    let Some(metadata) = safety::regular_metadata(path)? else {
+        return Ok(false);
     };
-    let mut bytes = Vec::new();
-    let Ok(_) = file.read_to_end(&mut bytes) else {
-        return false;
+    if size.is_some_and(|expected| metadata.len() != expected) {
+        return Ok(false);
+    }
+    let mut file = safety::read_file(path)?;
+    let mut hasher = Hasher::for_algo(algo)?;
+    let mut buffer = [0u8; HASH_READ_BYTES];
+    let mut length = 0u64;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        length += read as u64;
+        if size.is_some_and(|expected| length > expected) {
+            return Ok(false);
+        }
+    }
+    Ok(size.is_none_or(|expected| length == expected) && hasher.finalize_hex() == hex)
+}
+
+fn content_matches(path: &Path, entry: &OwnedEntry) -> bool {
+    let algo = if entry.algo == HashAlgo::Unspecified as i32 {
+        HashAlgo::Blake3 as i32
+    } else {
+        entry.algo
     };
-    let mut hasher = Hasher::for_algo(entry.algo);
-    hasher.update(&bytes);
-    hasher.finalize_hex() == entry.object_hash
+    file_matches(
+        path,
+        algo,
+        &entry.object_hash,
+        (entry.size != 0).then_some(entry.size),
+    )
+    .unwrap_or(false)
 }
 
 pub fn discard_installed(
@@ -1253,12 +1227,12 @@ pub fn discard_installed(
         safety::regular_metadata(&target)?;
         let value = hex::decode(&entry.object_hash)
             .map_err(|_| CoreError::Sync(format!("неверный хеш в журнале владения: {path}")))?;
-        if value.len() < 2 || HashAlgo::try_from(entry.algo).is_err() {
-            return Err(CoreError::Sync(format!(
-                "неверный хеш в журнале владения: {path}"
-            )));
-        }
-        let cached = cas_dir.join(object_key(entry.algo, &value));
+        let algo = if entry.algo == HashAlgo::Unspecified as i32 {
+            HashAlgo::Blake3 as i32
+        } else {
+            entry.algo
+        };
+        let cached = cas_dir.join(object_key(algo, &value)?);
         safety::check_parents(cas_dir, &cached, false)?;
         safety::regular_metadata(&cached)?;
         checked.push((target, cached));
@@ -1358,7 +1332,7 @@ pub fn scrub_cas(cas_dir: &Path) -> Result<(u64, u64), CoreError> {
         let name = path.file_name().unwrap().to_string_lossy();
         let mut file = safety::read_file(path)?;
         let mut buffer = [0u8; HASH_READ_BYTES];
-        let mut hasher = Hasher::for_algo(algo_from_cas_path(path, cas_dir));
+        let mut hasher = Hasher::for_algo(algo_from_cas_path(path, cas_dir))?;
         loop {
             let count = file.read(&mut buffer)?;
             if count == 0 {
@@ -1401,43 +1375,39 @@ fn plan_user_writable(dest: &Path, previous: Option<&OwnedEntry>) -> (Action, bo
 
 fn plan_immutable(
     cas_dir: &Path,
-    algo: i32,
-    value: &[u8],
+    hash: &Hash,
+    size: u64,
     hex: &str,
     dest: &Path,
     executable: bool,
     previous: Option<&OwnedEntry>,
-) -> Action {
-    let cas_path = cas_dir.join(object_key(algo, value));
-    let (Ok(dest_meta), Ok(cas_meta)) = (dest.symlink_metadata(), std::fs::metadata(&cas_path))
-    else {
-        return Action::Link;
+) -> Result<Action, CoreError> {
+    let cas_path = cas_dir.join(object_key(hash.algo, &hash.value)?);
+    let Some(dest_meta) = safety::regular_metadata(dest)? else {
+        return Ok(Action::Link);
     };
-    if !dest_meta.is_file() || !is_read_only(&dest_meta) {
-        return Action::Link;
+    if !is_read_only(&dest_meta) || dest_meta.len() != size {
+        return Ok(Action::Link);
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if dest_meta.permissions().mode() & 0o111 != object_mode(executable) & 0o111 {
-            return Action::Link;
+            return Ok(Action::Link);
         }
     }
     #[cfg(not(unix))]
     let _ = executable;
-    if same_file(dest, &cas_path) || has_hardlinks(dest, &dest_meta).unwrap_or(true) {
-        return Action::Link;
+    if same_file(dest, &cas_path) || has_hardlinks(dest, &dest_meta)? {
+        return Ok(Action::Link);
     }
-    match previous {
-        Some(entry)
-            if entry.placement == Placement::Copy
-                && entry.object_hash == hex
-                && !entry.released
-                && dest_meta.len() == cas_meta.len() =>
-        {
-            Action::Skip
-        }
-        _ => Action::Link,
+    if previous.is_some_and(|entry| {
+        entry.placement == Placement::Copy && entry.object_hash == hex && !entry.released
+    }) && file_matches(dest, hash.algo, hex, Some(size))?
+    {
+        Ok(Action::Skip)
+    } else {
+        Ok(Action::Link)
     }
 }
 
@@ -1531,7 +1501,7 @@ mod tests {
             let object = temp
                 .path()
                 .join("objects")
-                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()).unwrap());
             let dest = temp.path().join("build/mods/a.jar");
             let other = temp.path().join("other.jar");
             let state = temp.path().join("build/.laminara");
@@ -1615,10 +1585,8 @@ mod tests {
         assert_eq!(server.requests.lock().unwrap().len(), 1);
         let a = temp.path().join("A/mods/a.jar");
         let b = temp.path().join("B/mods/a.jar");
-        let object = cache.join(object_key(
-            HashAlgo::Blake3 as i32,
-            blake3::hash(&content).as_bytes(),
-        ));
+        let object = cache
+            .join(object_key(HashAlgo::Blake3 as i32, blake3::hash(&content).as_bytes()).unwrap());
         set_mode(&a, 0o644);
         std::fs::write(&a, b"changed profile").unwrap();
         assert_eq!(std::fs::read(&b).unwrap(), content);
@@ -1654,7 +1622,7 @@ mod tests {
         let object = temp
             .path()
             .join("objects")
-            .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+            .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()).unwrap());
         let dest = temp.path().join("build/options.txt");
         let state = temp.path().join("build/.laminara");
         std::fs::create_dir_all(object.parent().unwrap()).unwrap();
@@ -1723,7 +1691,7 @@ mod tests {
             let object = temp
                 .path()
                 .join("objects")
-                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()));
+                .join(object_key(HashAlgo::Blake3 as i32, hash.as_bytes()).unwrap());
             std::fs::create_dir_all(object.parent().unwrap()).unwrap();
             std::fs::write(&object, content).unwrap();
             if !writable {
@@ -1847,7 +1815,16 @@ mod tests {
         let partial = partial_path(&cas_path);
         std::fs::write(&partial, b"object").unwrap();
 
-        settle_object(&partial, &cas_path, 0o444).unwrap();
+        let value = blake3::hash(b"object").as_bytes().to_vec();
+        let wanted = Wanted {
+            hex: hex::encode(&value),
+            algo: HashAlgo::Blake3 as i32,
+            value,
+            executable: false,
+            size: 6,
+            path: "object".into(),
+        };
+        settle_object(&partial, &cas_path, &wanted).unwrap();
 
         let meta = std::fs::metadata(&cas_path).unwrap();
         assert!(
@@ -2110,7 +2087,7 @@ mod tests {
         std::fs::write(&jar, &original).unwrap();
         set_mode(&jar, 0o444);
 
-        let mut hasher = Hasher::for_algo(HashAlgo::Blake3 as i32);
+        let mut hasher = Hasher::for_algo(HashAlgo::Blake3 as i32).unwrap();
         hasher.update(&original);
         let mut ledger: Ledger = BTreeMap::new();
         ledger.insert(
@@ -2191,16 +2168,16 @@ mod tests {
     }
 
     #[test]
-    fn discarding_a_broken_file_drops_its_object_too() {
+    fn discarding_a_broken_file_drops_its_legacy_object_too() {
         let tmp = tempfile::tempdir().unwrap();
         let profile = tmp.path().join("profile");
         let state = profile.join(".laminara");
         let cas = tmp.path().join("objects");
         std::fs::create_dir_all(&state).unwrap();
 
-        let value = vec![0xAAu8, 0xBB];
+        let value = blake3::hash(b"payload").as_bytes().to_vec();
         let hex = hex::encode(&value);
-        let object = cas.join(object_key(HashAlgo::Blake3 as i32, &value));
+        let object = cas.join(object_key(HashAlgo::Blake3 as i32, &value).unwrap());
         std::fs::create_dir_all(object.parent().unwrap()).unwrap();
         std::fs::write(&object, b"payload").unwrap();
         set_mode(&object, 0o444);
@@ -2219,7 +2196,7 @@ mod tests {
                 placement: Placement::Hardlink,
                 released: false,
                 size: 7,
-                algo: HashAlgo::Blake3 as i32,
+                algo: 0,
             },
         );
         save_ledger(&state.join(LEDGER_FILE), &ledger).unwrap();
@@ -2253,7 +2230,7 @@ mod tests {
         let user = profile.join("options.txt");
         std::fs::write(&user, b"x").unwrap();
 
-        let mut of_x = Hasher::for_algo(HashAlgo::Blake3 as i32);
+        let mut of_x = Hasher::for_algo(HashAlgo::Blake3 as i32).unwrap();
         of_x.update(b"x");
         let hash_of_x = of_x.finalize_hex();
 
@@ -2461,7 +2438,7 @@ mod tests {
     }
 
     fn partial_of(root: &Path, content: &[u8]) -> PathBuf {
-        let key = object_key(HashAlgo::Blake3 as i32, blake3::hash(content).as_bytes());
+        let key = object_key(HashAlgo::Blake3 as i32, blake3::hash(content).as_bytes()).unwrap();
         partial_path(&root.join("objects").join(key))
     }
 
@@ -2724,6 +2701,247 @@ mod tests {
             "user_writable file must be preserved"
         );
     }
+    #[tokio::test]
+    async fn corrupted_cache_is_verified_and_replaced_using_the_existing_partial() {
+        for algo in [HashAlgo::Blake3, HashAlgo::Sha256, HashAlgo::Sha1] {
+            for same_size in [true, false] {
+                let content = patterned(180_000);
+                let server = object_server(content.clone(), vec![Reply::Serve]).await;
+                let temp = tempfile::tempdir().unwrap();
+                let mut manifest = one_file_manifest("mods/a.jar", &content);
+                let hash = manifest.files[0]
+                    .object
+                    .as_mut()
+                    .unwrap()
+                    .hash
+                    .as_mut()
+                    .unwrap();
+                let mut hasher = Hasher::for_algo(algo as i32).unwrap();
+                hasher.update(&content);
+                hash.algo = algo as i32;
+                hash.value = hex::decode(hasher.finalize_hex()).unwrap();
+                let cached = temp
+                    .path()
+                    .join("objects")
+                    .join(object_key(hash.algo, &hash.value).unwrap());
+                std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+                std::fs::write(&cached, vec![0; if same_size { content.len() } else { 5 }])
+                    .unwrap();
+                set_mode(&cached, 0o444);
+                let partial = partial_path(&cached);
+                std::fs::write(&partial, &content[..70_000]).unwrap();
+                let (outcome, _) = sync_one(&server.base_url, temp.path(), &manifest).await;
+                assert_eq!(outcome.unwrap().downloaded, 1);
+                assert_eq!(std::fs::read(&cached).unwrap(), content);
+                assert_eq!(
+                    std::fs::read(temp.path().join("build/mods/a.jar")).unwrap(),
+                    content
+                );
+                let requests = server.requests.lock().unwrap();
+                assert_eq!(requests.len(), 1);
+                assert!(requests[0].contains("range: bytes=70000-"));
+                assert!(!partial.exists());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_corrupted_private_copy_is_repaired_even_with_an_unchanged_ledger() {
+        for corrupt_cache in [false, true] {
+            let content = b"original".to_vec();
+            let manifest = one_file_manifest("mods/a.jar", &content);
+            let temp = tempfile::tempdir().unwrap();
+            let cached = partial_of(temp.path(), &content).with_extension("");
+            std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+            std::fs::write(&cached, &content).unwrap();
+            sync_one("http://127.0.0.1:1", temp.path(), &manifest)
+                .await
+                .0
+                .unwrap();
+            let installed = temp.path().join("build/mods/a.jar");
+            set_mode(&installed, 0o644);
+            std::fs::write(&installed, b"modified").unwrap();
+            set_mode(&installed, 0o444);
+            if corrupt_cache {
+                set_mode(&cached, 0o644);
+                std::fs::write(&cached, b"modified").unwrap();
+                set_mode(&cached, 0o444);
+            }
+            let server = object_server(content.clone(), vec![Reply::Serve]).await;
+            let (outcome, _) = sync_one(&server.base_url, temp.path(), &manifest).await;
+            let outcome = outcome.unwrap();
+            assert_eq!(outcome.linked, 1);
+            assert_eq!(outcome.downloaded, u64::from(corrupt_cache));
+            assert_eq!(
+                server.requests.lock().unwrap().len(),
+                usize::from(corrupt_cache)
+            );
+            assert_eq!(std::fs::read(&installed).unwrap(), content);
+            assert_eq!(std::fs::read(&cached).unwrap(), content);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_cache_must_match_the_declared_size_as_well_as_the_hash() {
+        let content = b"object".to_vec();
+        let temp = tempfile::tempdir().unwrap();
+        let cached = partial_of(temp.path(), &content).with_extension("");
+        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+        std::fs::write(&cached, &content).unwrap();
+        let mut manifest = one_file_manifest("mods/a.jar", &content);
+        manifest.files[0].object.as_mut().unwrap().size += 1;
+        let server = object_server(content, vec![Reply::NotFound]).await;
+        let (outcome, _) = sync_one(&server.base_url, temp.path(), &manifest).await;
+        assert!(outcome.is_err());
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+        assert!(!temp.path().join("build/mods/a.jar").exists());
+    }
+
+    #[tokio::test]
+    async fn malformed_metadata_is_rejected_before_any_installation_writes() {
+        let base = one_file_manifest("mods/a.jar", b"object");
+        let mut invalid = Vec::new();
+        for (algo, len) in [
+            (0, 32),
+            (99, 32),
+            (-1, 32),
+            (1, 0),
+            (1, 1),
+            (1, 31),
+            (1, 33),
+            (2, 20),
+            (3, 32),
+        ] {
+            let mut manifest = base.clone();
+            let hash = manifest.files[0]
+                .object
+                .as_mut()
+                .unwrap()
+                .hash
+                .as_mut()
+                .unwrap();
+            hash.algo = algo;
+            hash.value = vec![0; len];
+            invalid.push(manifest);
+        }
+        for policy in [-1, 99] {
+            let mut manifest = base.clone();
+            manifest.files[0].policy = policy;
+            invalid.push(manifest);
+        }
+        let mut manifest = base.clone();
+        manifest.files[0].object = None;
+        invalid.push(manifest);
+        let mut manifest = base.clone();
+        manifest.files[0].object.as_mut().unwrap().hash = None;
+        invalid.push(manifest);
+        let mut manifest = base.clone();
+        manifest.files.push(manifest.files[0].clone());
+        manifest.files[1].path = "mods/b.jar".into();
+        manifest.files[1].object.as_mut().unwrap().size += 1;
+        invalid.push(manifest);
+        let mut manifest = base.clone();
+        manifest.files[0].object.as_mut().unwrap().size = u64::MAX;
+        manifest
+            .files
+            .push(one_file_manifest("mods/b.jar", b"other").files.remove(0));
+        invalid.push(manifest);
+        for mut manifest in invalid {
+            let mut malformed = manifest.files.remove(0);
+            malformed.path = "mods/optional.jar".into();
+            manifest.files.push(base.files[0].clone());
+            manifest.files.push(malformed);
+            manifest.features = Some(crate::proto::core::v1::FeatureModel {
+                groups: vec![crate::proto::core::v1::FeatureGroup {
+                    options: vec![crate::proto::core::v1::FeatureOption {
+                        id: "optional".into(),
+                        files: vec!["mods/optional.jar".into()],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            });
+            let temp = tempfile::tempdir().unwrap();
+            let (result, progress) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+            assert!(result.is_err());
+            assert!(progress.is_empty());
+            assert!(!temp.path().join("build").exists());
+            assert!(!temp.path().join("objects").exists());
+        }
+    }
+    #[test]
+    fn a_failed_rename_only_reuses_a_verified_cache_object() {
+        let temp = tempfile::tempdir().unwrap();
+        let cached = temp.path().join("object");
+        let missing = temp.path().join("missing.part");
+        let value = blake3::hash(b"object").as_bytes().to_vec();
+        let wanted = Wanted {
+            hex: hex::encode(&value),
+            algo: HashAlgo::Blake3 as i32,
+            value,
+            executable: false,
+            size: 6,
+            path: "mods/a.jar".into(),
+        };
+        std::fs::write(&cached, b"broken").unwrap();
+        assert!(settle_object(&missing, &cached, &wanted).is_err());
+        std::fs::write(&cached, b"object").unwrap();
+        settle_object(&missing, &cached, &wanted).unwrap();
+        assert_eq!(std::fs::read(&cached).unwrap(), b"object");
+    }
+
+    #[tokio::test]
+    async fn a_valid_empty_cache_object_needs_no_network_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = one_file_manifest("empty.txt", b"");
+        let cached = partial_of(temp.path(), b"").with_extension("");
+        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+        std::fs::write(&cached, b"").unwrap();
+        let (outcome, _) = sync_one("http://127.0.0.1:1", temp.path(), &manifest).await;
+        assert_eq!(outcome.unwrap().downloaded, 0);
+        assert_eq!(
+            std::fs::read(temp.path().join("build/empty.txt")).unwrap(),
+            b""
+        );
+    }
+    #[tokio::test]
+    async fn failed_cache_repair_preserves_the_installed_release_and_partial() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = b"old release";
+        let new = b"new release".to_vec();
+        let old_manifest = one_file_manifest("mods/a.jar", old);
+        let old_cached = partial_of(temp.path(), old).with_extension("");
+        std::fs::create_dir_all(old_cached.parent().unwrap()).unwrap();
+        std::fs::write(&old_cached, old).unwrap();
+        sync_one("http://127.0.0.1:1", temp.path(), &old_manifest)
+            .await
+            .0
+            .unwrap();
+        let state = temp.path().join("build/.laminara");
+        let ledger = std::fs::read(state.join(LEDGER_FILE)).unwrap();
+        let partial = partial_of(temp.path(), &new);
+        let new_cached = partial.with_extension("");
+        std::fs::create_dir_all(new_cached.parent().unwrap()).unwrap();
+        std::fs::write(&new_cached, b"bad release").unwrap();
+        set_mode(&new_cached, 0o444);
+        std::fs::write(&partial, &new[..3]).unwrap();
+        let server = object_server(new.clone(), vec![Reply::NotFound]).await;
+        let (outcome, _) = sync_one(
+            &server.base_url,
+            temp.path(),
+            &one_file_manifest("mods/a.jar", &new),
+        )
+        .await;
+        assert!(outcome.is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("build/mods/a.jar")).unwrap(),
+            old
+        );
+        assert_eq!(std::fs::read(&old_cached).unwrap(), old);
+        assert_eq!(std::fs::read(state.join(LEDGER_FILE)).unwrap(), ledger);
+        assert_eq!(std::fs::read(&partial).unwrap(), &new[..3]);
+        assert!(install_unfinished(&state));
+    }
 }
 
 #[cfg(test)]
@@ -2864,10 +3082,10 @@ mod live {
             let sample = &verified.manifest.files[0].path;
             let am = std::fs::metadata(a_dir.join(sample)).unwrap();
             let bm = std::fs::metadata(b_dir.join(sample)).unwrap();
+            assert_ne!(am.ino(), bm.ino(), "profiles must have private copies");
             assert_eq!(
-                am.ino(),
-                bm.ino(),
-                "A and B share one inode (cross-build dedup)"
+                std::fs::read(a_dir.join(sample)).unwrap(),
+                std::fs::read(b_dir.join(sample)).unwrap()
             );
             assert!(is_read_only(&am), "immutable file is read-only");
         }

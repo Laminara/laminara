@@ -347,7 +347,7 @@ async fn case_only_path_changes_do_not_delete_the_new_file_or_leave_a_duplicate(
         let cached = temp
             .path()
             .join("cas")
-            .join(object_key(hash.algo, &hash.value));
+            .join(object_key(hash.algo, &hash.value).unwrap());
         std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
         std::fs::write(&cached, b"object").unwrap();
         apply(temp.path(), vec![initial]).await.unwrap();

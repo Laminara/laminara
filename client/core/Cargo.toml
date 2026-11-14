@@ -9,7 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 prost = "0.13"
-prost-types = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "sync", "io-util", "time", "net"] }
 tokio-util = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "system-proxy", "json", "stream"] }

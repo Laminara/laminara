@@ -10,11 +10,13 @@ pub const SPKI_ED25519_PREFIX: [u8; 12] = [
     0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00,
 ];
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub const SPKI_EC_P256_PREFIX: [u8; 27] = [
     0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A,
     0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04,
 ];
 
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
 pub(super) fn ecdsa_der(r: &[u8], s: &[u8]) -> Vec<u8> {
     fn integer(value: &[u8]) -> Vec<u8> {
         let trimmed = value
@@ -39,6 +41,7 @@ pub(super) fn ecdsa_der(r: &[u8], s: &[u8]) -> Vec<u8> {
     out
 }
 
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
 pub(super) fn pad_left(target: &mut [u8], value: &[u8]) {
     let width = target.len();
     let source = &value[value.len().saturating_sub(width)..];
@@ -47,6 +50,7 @@ pub(super) fn pad_left(target: &mut [u8], value: &[u8]) {
     target[start..].copy_from_slice(source);
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(super) fn p256_spki(point: &[u8; 64]) -> Vec<u8> {
     let mut der = Vec::with_capacity(SPKI_EC_P256_PREFIX.len() + 64);
     der.extend_from_slice(&SPKI_EC_P256_PREFIX);

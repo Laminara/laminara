@@ -26,7 +26,9 @@ pub struct LaunchInputs<'a> {
 }
 
 fn excluded(entry: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| matches_pattern(entry, pattern))
+    patterns
+        .iter()
+        .any(|pattern| matches_pattern(entry, pattern))
 }
 
 fn matches_pattern(entry: &str, pattern: &str) -> bool {
@@ -514,7 +516,10 @@ mod tests {
             classpath_first: vec!["libraries/patches/forgePatches.jar".into()],
             classpath_exclude: vec!["libraries/org/lwjgl/lwjgl/*".into()],
             main_class: Some("com.example.Boot".into()),
-            jvm_args: vec!["--add-opens".into(), "java.base/java.lang=ALL-UNNAMED".into()],
+            jvm_args: vec![
+                "--add-opens".into(),
+                "java.base/java.lang=ALL-UNNAMED".into(),
+            ],
             ..Default::default()
         };
         let argv = build_argv(&inputs(&profile, &session, &paths, &[], &extras));
@@ -531,7 +536,10 @@ mod tests {
         );
         assert!(argv.contains(&"com.example.Boot".to_string()));
         assert!(!argv.contains(&"net.minecraft.launchwrapper.Launch".to_string()));
-        let opens = argv.iter().position(|a| a == "--add-opens").expect("--add-opens");
+        let opens = argv
+            .iter()
+            .position(|a| a == "--add-opens")
+            .expect("--add-opens");
         assert_eq!(argv[opens + 1], "java.base/java.lang=ALL-UNNAMED");
     }
 
@@ -568,7 +576,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod boot {
     use super::*;
@@ -593,7 +600,11 @@ mod boot {
 
     const HEAD_BYTES: u64 = 256 * 1024;
 
-    fn as_the_player_gets_it(prepared: &Path, platform_dir: &Path, manifest_path: &Path) -> PathBuf {
+    fn as_the_player_gets_it(
+        prepared: &Path,
+        platform_dir: &Path,
+        manifest_path: &Path,
+    ) -> PathBuf {
         use prost::Message;
         let bytes = std::fs::read(manifest_path).expect("файл манифеста");
         let manifest = crate::proto::core::v1::Manifest::decode(bytes.as_slice())
@@ -705,20 +716,25 @@ mod boot {
             .and_then(|value| value.parse().ok())
             .unwrap_or(120);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
-        let mut head = String::new();
-        loop {
-            head = head_of(&log);
+        let head = loop {
+            let head = head_of(&log);
             let decided = REACHED_GRAPHICS.iter().any(|marker| head.contains(marker));
             let finished = child.try_wait().expect("ожидание java").is_some();
             if decided || finished || std::time::Instant::now() > deadline {
                 let _ = child.kill();
                 let _ = child.wait();
-                break;
+                break head;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-        match REACHED_GRAPHICS.iter().find(|marker| head.contains(**marker)) {
-            Some(marker) => eprintln!("BOOT: дошло до графики по признаку «{marker}», лог в {}", log.display()),
+        };
+        match REACHED_GRAPHICS
+            .iter()
+            .find(|marker| head.contains(**marker))
+        {
+            Some(marker) => eprintln!(
+                "BOOT: дошло до графики по признаку «{marker}», лог в {}",
+                log.display()
+            ),
             None => panic!(
                 "сборка не дошла до графики — значит не запустится и у игрока. Лог в {}. Начало:
 {}",
