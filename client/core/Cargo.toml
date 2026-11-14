@@ -40,6 +40,9 @@ tracing = "0.1"
 encoding_rs = "0.8.42"
 png = "0.18.1"
 
+[target.'cfg(windows)'.dependencies]
+winapi-util = "0.1.11"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
