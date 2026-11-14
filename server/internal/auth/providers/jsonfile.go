@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -33,11 +33,6 @@ type jsonFileConfig struct {
 	} `json:"fields"`
 }
 
-type fileStamp struct {
-	size    int64
-	changed time.Time
-}
-
 type jsonFileProvider struct {
 	verifier    hash.Verifier
 	scheme      string
@@ -51,7 +46,6 @@ type jsonFileProvider struct {
 	mu      sync.RWMutex
 	records []map[string]any
 	users   map[string]map[string]any
-	stamp   fileStamp
 }
 
 func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
@@ -80,14 +74,6 @@ func newJSONFile(raw json.RawMessage) (auth.Provider, error) {
 	return provider, nil
 }
 
-func stampOf(path string) fileStamp {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fileStamp{}
-	}
-	return fileStamp{size: info.Size(), changed: info.ModTime()}
-}
-
 func (p *jsonFileProvider) load() error {
 	data, err := os.ReadFile(p.path)
 	if err != nil {
@@ -107,40 +93,54 @@ func (p *jsonFileProvider) load() error {
 			}
 		}
 		if name != "" {
+			for existing := range users {
+				if strings.EqualFold(existing, name) {
+					return fmt.Errorf("имя аккаунта %q встречается несколько раз без учёта регистра", name)
+				}
+			}
+			if raw, present := record[p.uuidKey]; present && raw != nil {
+				text, ok := raw.(string)
+				if !ok {
+					return fmt.Errorf("UUID аккаунта %q должен быть строкой", name)
+				}
+				if _, err := accountUUID(text, name); err != nil {
+					return err
+				}
+			}
 			users[name] = record
 		}
 	}
 	p.mu.Lock()
 	p.records = records
 	p.users = users
-	p.stamp = stampOf(p.path)
 	p.mu.Unlock()
 	return nil
 }
 
-func (p *jsonFileProvider) record(username string) (map[string]any, bool) {
-	p.mu.RLock()
-	fresh := p.stamp == stampOf(p.path)
-	record, ok := p.users[username]
-	p.mu.RUnlock()
-	if fresh {
-		return record, ok
-	}
+func (p *jsonFileProvider) record(username string) (map[string]any, bool, error) {
 	if err := p.load(); err != nil {
-		return record, ok
+		return nil, false, err
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	record, ok = p.users[username]
-	return record, ok
+	for name, record := range p.users {
+		if strings.EqualFold(name, username) {
+			return maps.Clone(record), true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credentials) (auth.Identity, error) {
-	record, ok := p.record(creds.Username)
+	record, ok, err := p.record(creds.Username)
+	if err != nil {
+		return auth.Identity{}, err
+	}
 	if !ok {
 		spendSameTime(p.verifier, creds.Password)
 		return auth.Identity{}, auth.ErrInvalidCredentials
 	}
+	creds.Username, _ = record[p.usernameKey].(string)
 	stored, _ := record[p.passwordKey].(string)
 	valid, err := verify(p.verifier, p.scheme, creds.Password, stored)
 	if err != nil {
@@ -161,12 +161,9 @@ func (p *jsonFileProvider) Authenticate(_ context.Context, creds auth.Credential
 }
 
 func identityUUID(record map[string]any, key, username string) uuid.UUID {
-	if raw, ok := record[key].(string); ok {
-		if parsed, err := uuid.Parse(raw); err == nil {
-			return parsed
-		}
-	}
-	return auth.OfflineUUID(username)
+	raw, _ := record[key].(string)
+	id, _ := accountUUID(raw, username)
+	return id
 }
 
 func (p *jsonFileProvider) hashed(password string) (string, error) {
@@ -181,7 +178,6 @@ func (p *jsonFileProvider) save() error {
 	if err := atomicfile.Write(p.path, append(data, '\n'), 0o600); err != nil {
 		return err
 	}
-	p.stamp = stampOf(p.path)
 	return nil
 }
 
@@ -191,21 +187,19 @@ func (p *jsonFileProvider) Add(_ context.Context, username, password, wanted str
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, taken := p.users[username]; taken {
-		return auth.Identity{}, fmt.Errorf("игрок «%s» уже есть — сменить пароль: auth passwd %s", username, username)
+	for name := range p.users {
+		if strings.EqualFold(name, username) {
+			return auth.Identity{}, fmt.Errorf("игрок «%s» уже есть — сменить пароль: auth passwd %s", username, username)
+		}
 	}
 	digest, err := hash.ProduceCost(p.scheme, password, 0)
 	if err != nil {
 		return auth.Identity{}, err
 	}
 	record := map[string]any{p.usernameKey: username, p.passwordKey: digest}
-	id := auth.OfflineUUID(username)
-	if strings.TrimSpace(wanted) != "" {
-		parsed, err := uuid.Parse(wanted)
-		if err != nil {
-			return auth.Identity{}, fmt.Errorf("«%s» не похож на uuid: %w", wanted, err)
-		}
-		id = parsed
+	id, err := accountUUID(strings.TrimSpace(wanted), username)
+	if err != nil {
+		return auth.Identity{}, err
 	}
 	record[p.uuidKey] = id.String()
 	p.records = append(p.records, record)
@@ -284,4 +278,16 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func (p *jsonFileProvider) LookupProfile(_ context.Context, username string) (auth.Identity, error) {
+	record, ok, err := p.record(username)
+	if err != nil {
+		return auth.Identity{}, err
+	}
+	if !ok {
+		return auth.Identity{}, auth.ErrInvalidCredentials
+	}
+	name, _ := record[p.usernameKey].(string)
+	return auth.Identity{Subject: name, Username: name, UUID: identityUUID(record, p.uuidKey, name)}, nil
 }

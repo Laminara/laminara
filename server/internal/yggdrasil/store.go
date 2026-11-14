@@ -2,7 +2,9 @@ package yggdrasil
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,13 @@ type session struct {
 }
 
 type joinRecord struct {
+	Identity    auth.Identity
+	AccessToken string
+	IP          string
+	expiresAt   time.Time
+}
+
+type profileRecord struct {
 	identity  auth.Identity
 	expiresAt time.Time
 }
@@ -27,7 +36,7 @@ type store struct {
 	mu       sync.Mutex
 	sessions map[string]session
 	joins    map[string]joinRecord
-	profiles map[string]auth.Identity
+	profiles map[string]profileRecord
 	now      func() time.Time
 	remote   *redisSessions
 }
@@ -36,7 +45,7 @@ func newStore(now func() time.Time, sessions *redis.Client) *store {
 	built := &store{
 		sessions: make(map[string]session),
 		joins:    make(map[string]joinRecord),
-		profiles: make(map[string]auth.Identity),
+		profiles: make(map[string]profileRecord),
 		now:      now,
 	}
 	if sessions != nil {
@@ -47,96 +56,89 @@ func newStore(now func() time.Time, sessions *redis.Client) *store {
 
 const maxLiveRecords = 20_000
 
-func (s *store) putSession(ctx context.Context, accessToken, clientToken string, identity auth.Identity, ttl time.Duration) {
+func (s *store) putSession(ctx context.Context, accessToken, clientToken string, identity auth.Identity, ttl time.Duration) error {
 	sess := session{clientToken: clientToken, identity: identity, expiresAt: s.now().Add(ttl)}
 	if s.remote != nil {
-		if err := s.remote.put(ctx, accessToken, sess, ttl); err != nil {
-			slog.Error("игровая сессия не записалась в redis", "source", "yggdrasil", "ошибка", err)
-		}
-		return
+		return s.remote.put(ctx, accessToken, sess, ttl)
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.sessions) >= maxLiveRecords {
 		s.sweepLocked()
 	}
+	if len(s.sessions) >= maxLiveRecords {
+		return fmt.Errorf("достигнут предел игровых сессий")
+	}
 	s.sessions[accessToken] = sess
+	return nil
 }
 
 func (s *store) sweepLocked() {
 	now := s.now()
 	for token, sess := range s.sessions {
-		if now.After(sess.expiresAt) {
+		if !now.Before(sess.expiresAt) {
 			delete(s.sessions, token)
 		}
 	}
 	for id, record := range s.joins {
-		if now.After(record.expiresAt) {
+		if !now.Before(record.expiresAt) {
 			delete(s.joins, id)
 		}
 	}
 }
 
-func (s *store) session(ctx context.Context, accessToken string) (session, bool) {
+func (s *store) session(ctx context.Context, accessToken string) (session, bool, error) {
 	if s.remote != nil {
-		sess, found, err := s.remote.get(ctx, accessToken)
-		if err != nil {
-			slog.Error("игровая сессия не читается из redis", "source", "yggdrasil", "ошибка", err)
-		}
-		return sess, found
+		return s.remote.get(ctx, accessToken)
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[accessToken]
 	if !ok {
-		return session{}, false
+		return session{}, false, nil
 	}
-	if s.now().After(sess.expiresAt) {
+	if !s.now().Before(sess.expiresAt) {
 		delete(s.sessions, accessToken)
-		return session{}, false
+		return session{}, false, nil
 	}
-	return sess, true
+	return sess, true, nil
 }
 
-func (s *store) rotateSession(ctx context.Context, oldToken, newToken string, ttl time.Duration) (session, bool) {
+func (s *store) rotateSession(ctx context.Context, oldToken, newToken string, ttl time.Duration) (session, bool, error) {
 	if s.remote != nil {
-		sess, rotated, err := s.remote.rotate(ctx, oldToken, newToken, ttl)
-		if err != nil {
-			slog.Error("игровая сессия не продлилась в redis", "source", "yggdrasil", "ошибка", err)
-		}
-		return sess, rotated
+		return s.remote.rotate(ctx, oldToken, newToken, ttl)
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[oldToken]
-	if !ok {
-		return session{}, false
+	if !ok || !s.now().Before(sess.expiresAt) {
+		return session{}, false, nil
 	}
 	delete(s.sessions, oldToken)
 	sess.expiresAt = s.now().Add(ttl)
 	s.sessions[newToken] = sess
-	return sess, true
+	return sess, true, nil
 }
 
-func (s *store) deleteSession(ctx context.Context, accessToken string) {
+func (s *store) deleteSession(ctx context.Context, accessToken string) error {
 	if s.remote != nil {
-		if err := s.remote.remove(ctx, accessToken); err != nil {
-			slog.Error("игровая сессия не удалилась из redis", "source", "yggdrasil", "ошибка", err)
-		}
-		return
+		return s.remote.remove(ctx, accessToken)
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, accessToken)
+	return nil
 }
 
-func (s *store) deleteUser(ctx context.Context, username string) {
+func (s *store) deleteUser(ctx context.Context, username string) error {
 	if s.remote != nil {
-		if err := s.remote.removeUser(ctx, username); err != nil {
-			slog.Error("сессии игрока не удалились из redis", "source", "yggdrasil", "ошибка", err)
-		}
-		return
+		return s.remote.removeUser(ctx, username)
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {
@@ -144,37 +146,82 @@ func (s *store) deleteUser(ctx context.Context, username string) {
 			delete(s.sessions, token)
 		}
 	}
+	return nil
 }
 
-func (s *store) putJoin(serverID string, identity auth.Identity, ttl time.Duration) {
+func joinKey(serverID, username string) string {
+	return fmt.Sprintf("%d:%s%s", len(serverID), serverID, strings.ToLower(username))
+}
+
+func (s *store) putJoin(ctx context.Context, serverID, token, ip string, identity auth.Identity, ttl time.Duration) error {
+	record := joinRecord{Identity: identity, AccessToken: token, IP: ip, expiresAt: s.now().Add(ttl)}
+	key := joinKey(serverID, identity.Username)
+	if s.remote != nil {
+		return s.remote.putJoin(ctx, key, record, ttl)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.joins) >= maxLiveRecords {
 		s.sweepLocked()
 	}
-	s.joins[serverID] = joinRecord{identity: identity, expiresAt: s.now().Add(ttl)}
+	if len(s.joins) >= maxLiveRecords {
+		return fmt.Errorf("достигнут предел ожидающих подключений")
+	}
+	s.joins[key] = record
+	return nil
 }
 
-func (s *store) join(serverID string) (auth.Identity, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.joins[serverID]
+func (s *store) join(ctx context.Context, serverID, username, ip string) (auth.Identity, bool, error) {
+	key := joinKey(serverID, username)
+	var record joinRecord
+	var ok bool
+	if s.remote != nil {
+		var err error
+		record, ok, err = s.remote.getJoin(ctx, key)
+		if err != nil {
+			return auth.Identity{}, false, err
+		}
+	} else {
+		s.mu.Lock()
+		record, ok = s.joins[key]
+		if ok && !s.now().Before(record.expiresAt) {
+			delete(s.joins, key)
+			ok = false
+		}
+		s.mu.Unlock()
+	}
+	if ip != "" {
+		expected, expectedErr := netip.ParseAddr(ip)
+		actual, actualErr := netip.ParseAddr(record.IP)
+		if expectedErr != nil || actualErr != nil || expected.Unmap() != actual.Unmap() {
+			return auth.Identity{}, false, nil
+		}
+	}
 	if !ok {
-		return auth.Identity{}, false
+		return auth.Identity{}, false, nil
 	}
-	if s.now().After(record.expiresAt) {
-		delete(s.joins, serverID)
-		return auth.Identity{}, false
+	sess, valid, err := s.session(ctx, record.AccessToken)
+	if err != nil || !valid {
+		return auth.Identity{}, false, err
 	}
-	return record.identity, true
+	if sess.identity.UUID != record.Identity.UUID || !strings.EqualFold(sess.identity.Username, username) {
+		return auth.Identity{}, false, nil
+	}
+	return record.Identity, true, nil
 }
 
 func (s *store) rememberProfile(ctx context.Context, identity auth.Identity) {
 	key := dashless(identity.UUID)
-	s.mu.Lock()
-	s.profiles[key] = identity
-	s.mu.Unlock()
 	if s.remote == nil {
+		s.mu.Lock()
+		if len(s.profiles) >= maxLiveRecords {
+			for k := range s.profiles {
+				delete(s.profiles, k)
+				break
+			}
+		}
+		s.profiles[key] = profileRecord{identity: identity, expiresAt: s.now().Add(profileTTL)}
+		s.mu.Unlock()
 		return
 	}
 	if err := s.remote.putProfile(ctx, key, identity); err != nil {
@@ -182,22 +229,16 @@ func (s *store) rememberProfile(ctx context.Context, identity auth.Identity) {
 	}
 }
 
-func (s *store) profile(ctx context.Context, uuid string) (auth.Identity, bool) {
+func (s *store) profile(ctx context.Context, uuid string) (auth.Identity, bool, error) {
+	if s.remote != nil {
+		return s.remote.getProfile(ctx, uuid)
+	}
 	s.mu.Lock()
-	identity, ok := s.profiles[uuid]
-	s.mu.Unlock()
-	if ok || s.remote == nil {
-		return identity, ok
+	defer s.mu.Unlock()
+	record, ok := s.profiles[uuid]
+	if ok && !s.now().Before(record.expiresAt) {
+		delete(s.profiles, uuid)
+		ok = false
 	}
-	identity, found, err := s.remote.getProfile(ctx, uuid)
-	if err != nil {
-		slog.Error("профиль игрока не читается из redis", "source", "yggdrasil", "ошибка", err)
-		return auth.Identity{}, false
-	}
-	if found {
-		s.mu.Lock()
-		s.profiles[uuid] = identity
-		s.mu.Unlock()
-	}
-	return identity, found
+	return record.identity, ok, nil
 }

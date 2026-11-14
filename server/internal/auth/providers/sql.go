@@ -10,7 +10,6 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
@@ -89,7 +88,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	columns := quote(passwordCol)
+	columns := quote(usernameCol) + ", " + quote(passwordCol)
 	hasUUID := cfg.Fields.UUID != ""
 	uuidCol := ""
 	if hasUUID {
@@ -113,7 +112,7 @@ func newSQL(raw json.RawMessage) (auth.Provider, error) {
 		return nil, err
 	}
 	tunePool(db)
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s",
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE LOWER(%s) = LOWER(%s)",
 		columns, quote(table), quote(usernameCol), placeholder)
 	return &sqlProvider{
 		db:          db,
@@ -140,13 +139,15 @@ func tunePool(db *sql.DB) {
 }
 
 func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) (auth.Identity, error) {
-	stored, rawUUID, rawSecret, err := p.lookup(ctx, creds.Username)
+	account, err := p.lookup(ctx, creds.Username)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			spendSameTime(p.verifier, creds.Password)
 		}
 		return auth.Identity{}, err
 	}
+	creds.Username = account.name
+	stored, rawSecret := account.password, account.secret
 	valid, err := verify(p.verifier, p.scheme, creds.Password, stored)
 	if err != nil {
 		return auth.Identity{}, err
@@ -162,66 +163,75 @@ func (p *sqlProvider) Authenticate(ctx context.Context, creds auth.Credentials) 
 			return auth.Identity{}, auth.ErrInvalidCredentials
 		}
 	}
-	id := auth.OfflineUUID(creds.Username)
-	if rawUUID.Valid {
-		if parsed, err := uuid.Parse(rawUUID.String); err == nil {
-			id = parsed
-		}
-	}
-	return auth.Identity{Subject: creds.Username, Username: creds.Username, UUID: id}, nil
+	return account.identity()
 }
 
-func (p *sqlProvider) lookup(ctx context.Context, username string) (string, sql.NullString, sql.NullString, error) {
-	var stored string
-	var rawUUID sql.NullString
-	var rawSecret sql.NullString
+type sqlAccount struct {
+	name     string
+	password string
+	uuid     sql.NullString
+	secret   sql.NullString
+}
 
-	if !p.custom {
-		dest := []any{&stored}
-		if p.hasUUID {
-			dest = append(dest, &rawUUID)
-		}
-		if p.hasSecret {
-			dest = append(dest, &rawSecret)
-		}
-		if err := p.db.QueryRowContext(ctx, p.query, username).Scan(dest...); err != nil {
-			return "", rawUUID, rawSecret, translate(err)
-		}
-		return stored, rawUUID, rawSecret, nil
+func (a sqlAccount) identity() (auth.Identity, error) {
+	id, err := accountUUID(a.uuid.String, a.name)
+	if err != nil {
+		return auth.Identity{}, err
 	}
+	return auth.Identity{Subject: a.name, Username: a.name, UUID: id}, nil
+}
 
+func (p *sqlProvider) lookup(ctx context.Context, username string) (sqlAccount, error) {
+	account := sqlAccount{name: username}
 	rows, err := p.db.QueryContext(ctx, p.query, username)
 	if err != nil {
-		return "", rawUUID, rawSecret, err
+		return account, err
 	}
 	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return "", rawUUID, rawSecret, err
-	}
-	if len(columns) == 0 || len(columns) > 2 {
-		return "", rawUUID, rawSecret, fmt.Errorf("запрос за аккаунтом должен выбирать пароль и, если нужно, uuid, а выбрал %d колонок", len(columns))
+	var dest []any
+	if p.custom {
+		columns, err := rows.Columns()
+		if err != nil {
+			return account, err
+		}
+		if len(columns) < 1 || len(columns) > 3 {
+			return account, fmt.Errorf("запрос за аккаунтом должен выбирать пароль и, если нужно, UUID и имя игрока, а выбрал %d колонок", len(columns))
+		}
+		dest = []any{&account.password}
+		if len(columns) >= 2 {
+			dest = append(dest, &account.uuid)
+		}
+		if len(columns) == 3 {
+			dest = append(dest, &account.name)
+		}
+	} else {
+		dest = []any{&account.name, &account.password}
+		if p.hasUUID {
+			dest = append(dest, &account.uuid)
+		}
+		if p.hasSecret {
+			dest = append(dest, &account.secret)
+		}
 	}
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return "", rawUUID, rawSecret, err
+			return account, err
 		}
-		return "", rawUUID, rawSecret, auth.ErrInvalidCredentials
-	}
-	dest := []any{&stored}
-	if len(columns) == 2 {
-		dest = append(dest, &rawUUID)
+		return account, auth.ErrInvalidCredentials
 	}
 	if err := rows.Scan(dest...); err != nil {
-		return "", rawUUID, rawSecret, err
+		return account, err
 	}
-	return stored, rawUUID, rawSecret, rows.Err()
+	if rows.Next() {
+		return account, fmt.Errorf("по имени найдено несколько аккаунтов")
+	}
+	return account, rows.Err()
 }
 
-func translate(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return auth.ErrInvalidCredentials
+func (p *sqlProvider) LookupProfile(ctx context.Context, username string) (auth.Identity, error) {
+	account, err := p.lookup(ctx, username)
+	if err != nil {
+		return auth.Identity{}, err
 	}
-	return err
+	return account.identity()
 }
