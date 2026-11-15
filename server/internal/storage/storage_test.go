@@ -253,20 +253,34 @@ func TestPutFileRefusesAFileThatChangedWhileItWasPublished(t *testing.T) {
 	}
 }
 
-func TestStreamedPutFileRefusesAFileThatChangedWhileItWasPublished(t *testing.T) {
+func TestStreamedPutFileKeepsVerifiedBytesIfSourceChangesDuringUpload(t *testing.T) {
 	ctx := context.Background()
 	payload := bytes.Repeat([]byte("s3"), 1024)
 	source := writeSource(t, payload)
 	inner := newBackend(t)
 	backend := &plainBackend{Backend: inner, source: source, replace: []byte("something else entirely")}
-
-	if _, err := storage.NewCAS(backend, corev1.HashAlgo_HASH_ALGO_BLAKE3).PutFile(ctx, source); err == nil {
-		t.Fatal("a file that changed under us must not be published")
+	ref, err := storage.NewCAS(backend, corev1.HashAlgo_HASH_ALGO_BLAKE3).PutFile(ctx, source)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	key := storage.ObjectKey(corev1.HashAlgo_HASH_ALGO_BLAKE3, refOf(t, payload).Hash.Value)
-	if _, exists, err := inner.Stat(ctx, key); err != nil || exists {
-		t.Fatal("the mismatching object must be removed from the store")
+	reader, err := inner.Get(ctx, storage.ObjectKey(ref.Hash.Algo, ref.Hash.Value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("the object must contain the verified snapshot")
+	}
+	changed, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(changed, payload) {
+		t.Fatal("the source did not change during upload")
 	}
 }
 
