@@ -5,7 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"testing"
 
 	"github.com/johannesboyne/gofakes3"
@@ -14,10 +19,21 @@ import (
 	"github.com/laminara/laminara/server/internal/storage"
 )
 
-func TestS3Backend(t *testing.T) {
+func newS3Backend(t *testing.T) storage.Backend {
+	t.Helper()
+	backend, _ := newS3Fixture(t, nil)
+	return backend
+}
+
+func newS3Fixture(t *testing.T, wrap func(http.Handler) http.Handler) (storage.Backend, *minio.Client) {
+	t.Helper()
 	memory := s3mem.New()
-	server := httptest.NewServer(gofakes3.New(memory).Server())
-	defer server.Close()
+	handler := gofakes3.New(memory).Server()
+	if wrap != nil {
+		handler = wrap(handler)
+	}
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 	if err := memory.CreateBucket("laminara"); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +50,17 @@ func TestS3Backend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{
+		Region: "us-east-1", Creds: credentials.NewStaticV4("test", "test", ""), BucketLookup: minio.BucketLookupPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend, client
+}
+
+func TestS3Backend(t *testing.T) {
+	backend := newS3Backend(t)
 	ctx := context.Background()
 	key := "objects/blake3/ab/cd/abcd"
 	content := []byte("object storage content")

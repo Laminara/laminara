@@ -34,29 +34,28 @@ func (c *CAS) Put(ctx context.Context, r io.Reader) (*corev1.ObjectRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	staged, err := os.CreateTemp("", "laminara-cas-*")
+	staged, err := createStagingFile()
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(staged.Name())
 	defer staged.Close()
 
-	size, err := io.Copy(io.MultiWriter(staged, hasher), r)
+	size, err := io.Copy(io.MultiWriter(staged, hasher), contextReader{ctx: ctx, reader: r})
 	if err != nil {
 		return nil, err
 	}
 	sum := hasher.Sum(nil)
 	key := ObjectKey(c.algo, sum)
 
-	exists, err := c.exists(ctx, key)
+	valid, err := c.existingMatches(ctx, key, sum, size)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
+	if !valid {
 		if _, err := staged.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
-		if err := c.backend.Put(ctx, key, staged, size); err != nil {
+		if err := c.backend.Put(ctx, key, contextFile{ctx: ctx, file: staged}, size); err != nil {
 			return nil, err
 		}
 	}
@@ -70,17 +69,17 @@ type FileSource interface {
 var errObjectMismatch = errors.New("записанные байты не совпали с тем файлом, который хешировали")
 
 func (c *CAS) PutFile(ctx context.Context, path string) (*corev1.ObjectRef, error) {
-	sum, size, err := c.hashFile(path)
+	sum, size, err := c.hashFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 	key := ObjectKey(c.algo, sum)
 
-	exists, err := c.exists(ctx, key)
+	valid, err := c.existingMatches(ctx, key, sum, size)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
+	if !valid {
 		if err := c.storeFile(ctx, key, path, sum, size); err != nil {
 			return nil, err
 		}
@@ -93,9 +92,9 @@ func (c *CAS) storeFile(ctx context.Context, key, path string, sum []byte, size 
 	if !ok {
 		return c.streamFile(ctx, key, path, sum, size)
 	}
-	err := source.PutFromFile(ctx, key, path, c.matches(sum, size))
+	err := source.PutFromFile(ctx, key, path, c.matches(ctx, sum, size))
 	if errors.Is(err, errObjectMismatch) {
-		return changedWhilePublished(path, nil)
+		return changedWhilePublished(path)
 	}
 	return err
 }
@@ -109,33 +108,40 @@ func (c *CAS) streamFile(ctx context.Context, key, path string, sum []byte, size
 	if err != nil {
 		return err
 	}
-	err = c.backend.Put(ctx, key, io.TeeReader(file, hasher), size)
-	file.Close()
+	defer file.Close()
+	staged, err := createStagingFile()
 	if err != nil {
 		return err
 	}
-	if bytes.Equal(hasher.Sum(nil), sum) {
-		return nil
-	}
-	return changedWhilePublished(path, c.backend.Delete(ctx, key))
-}
-
-func changedWhilePublished(path string, cleanup error) error {
-	err := fmt.Errorf("%s changed while it was being published", path)
-	if cleanup == nil {
+	defer staged.Close()
+	written, err := io.Copy(io.MultiWriter(staged, hasher), contextReader{ctx: ctx, reader: file})
+	if err != nil {
 		return err
 	}
-	return errors.Join(err, fmt.Errorf("получившийся объект остался в хранилище, его надо убрать руками: %w", cleanup))
+	if written != size || !bytes.Equal(hasher.Sum(nil), sum) {
+		return changedWhilePublished(path)
+	}
+	if _, err := staged.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	return c.backend.Put(ctx, key, contextFile{ctx: ctx, file: staged}, size)
 }
 
-func (c *CAS) matches(sum []byte, size int64) func(io.Reader) error {
+func changedWhilePublished(path string) error {
+	return fmt.Errorf("файл %s изменился во время публикации — повторите публикацию", path)
+}
+
+func (c *CAS) matches(ctx context.Context, sum []byte, size int64) func(io.Reader) error {
 	return func(r io.Reader) error {
 		hasher, err := newHasher(c.algo)
 		if err != nil {
 			return err
 		}
-		written, err := io.Copy(hasher, r)
+		written, err := io.Copy(hasher, contextReader{ctx: ctx, reader: r})
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if written != size || !bytes.Equal(hasher.Sum(nil), sum) {
@@ -145,7 +151,7 @@ func (c *CAS) matches(sum []byte, size int64) func(io.Reader) error {
 	}
 }
 
-func (c *CAS) hashFile(path string) ([]byte, int64, error) {
+func (c *CAS) hashFile(ctx context.Context, path string) ([]byte, int64, error) {
 	hasher, err := newHasher(c.algo)
 	if err != nil {
 		return nil, 0, err
@@ -154,7 +160,7 @@ func (c *CAS) hashFile(path string) ([]byte, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	size, err := io.Copy(hasher, file)
+	size, err := io.Copy(hasher, contextReader{ctx: ctx, reader: file})
 	file.Close()
 	if err != nil {
 		return nil, 0, err
@@ -162,9 +168,71 @@ func (c *CAS) hashFile(path string) ([]byte, int64, error) {
 	return hasher.Sum(nil), size, nil
 }
 
-func (c *CAS) exists(ctx context.Context, key string) (bool, error) {
-	_, exists, err := c.backend.Stat(ctx, key)
-	return exists, err
+func (c *CAS) existingMatches(ctx context.Context, key string, sum []byte, size int64) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	storedSize, exists, err := c.backend.Stat(ctx, key)
+	if err != nil || !exists {
+		return false, err
+	}
+	if storedSize != size {
+		return false, nil
+	}
+	reader, err := c.backend.Get(ctx, key)
+	if err != nil {
+		return false, fmt.Errorf("не удалось проверить объект %s: %w", key, err)
+	}
+	err = c.matches(ctx, sum, size)(reader)
+	closeErr := reader.Close()
+	if cancelled := ctx.Err(); cancelled != nil {
+		return false, errors.Join(cancelled, closeErr)
+	}
+	if err != nil && !errors.Is(err, errObjectMismatch) {
+		return false, fmt.Errorf("не удалось проверить объект %s: %w", key, errors.Join(err, closeErr))
+	}
+	if closeErr != nil {
+		return false, fmt.Errorf("не удалось закрыть объект %s после проверки: %w", key, closeErr)
+	}
+	return err == nil, nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(buffer)
+}
+
+type contextFile struct {
+	ctx  context.Context
+	file *os.File
+}
+
+func (f contextFile) Read(buffer []byte) (int, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.file.Read(buffer)
+}
+
+func (f contextFile) ReadAt(buffer []byte, offset int64) (int, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.file.ReadAt(buffer, offset)
+}
+
+func (f contextFile) Seek(offset int64, whence int) (int64, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.file.Seek(offset, whence)
 }
 
 func objectRef(algo corev1.HashAlgo, sum []byte, size int64) *corev1.ObjectRef {

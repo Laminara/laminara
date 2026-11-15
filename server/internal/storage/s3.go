@@ -81,11 +81,6 @@ func newS3(raw json.RawMessage) (Backend, error) {
 	return &s3Backend{client: client, bucket: cfg.Bucket, endpoint: cfg.Endpoint}, nil
 }
 
-func (b *s3Backend) Put(ctx context.Context, key string, r io.Reader, size int64) error {
-	_, err := b.client.PutObject(ctx, b.bucket, key, r, size, minio.PutObjectOptions{})
-	return err
-}
-
 func (b *s3Backend) Readiness(ctx context.Context) error {
 	exists, err := b.client.BucketExists(ctx, b.bucket)
 	if err != nil {
