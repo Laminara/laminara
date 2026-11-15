@@ -542,13 +542,17 @@ impl Core {
         client_version: &str,
     ) -> Result<tokio::process::Child, CoreError> {
         let profile_dir = self.profile_dir(profile);
+        let state_dir = profile_dir.join(".laminara");
+        if sync::install_unfinished(&state_dir) {
+            return Err(CoreError::Launch(
+                "установка сборки не завершена; синхронизируйте её перед запуском".into(),
+            ));
+        }
+
         let launch_profile =
             LaunchProfile::load(&profile_dir.join(crate::launch::LAUNCH_PROFILE_NAME))?;
 
-        let natives_dir = self
-            .state_dir(profile)
-            .join("natives")
-            .join(&launch_profile.platform_key);
+        let natives_dir = state_dir.join("natives").join(&launch_profile.platform_key);
         extract_natives(&launch_profile, &profile_dir, &natives_dir)?;
 
         let base = self.pool.current_base_url().ok_or(CoreError::NoEndpoint)?;
@@ -857,6 +861,85 @@ mod tests {
             size: 0,
             algo: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn unfinished_install_blocks_launch_before_loading_the_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = test_core(tmp.path());
+        let state_dir = core.state_dir("test");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let marker = state_dir.join(sync::UNFINISHED_FILE);
+        let session = GameSession {
+            uuid: "00000000000000000000000000000001".into(),
+            name: "Player".into(),
+            access_token: "access".into(),
+            client_token: "client".into(),
+        };
+        let authlib = tmp.path().join("authlib.jar");
+
+        let error = core
+            .launch("test", &session, &authlib, "test")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, CoreError::Launch(message) if message.starts_with("read profile:"))
+        );
+
+        for directory in [false, true] {
+            if directory {
+                std::fs::create_dir(&marker).unwrap();
+            } else {
+                std::fs::write(&marker, b"").unwrap();
+            }
+            let error = core
+                .launch("test", &session, &authlib, "test")
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, CoreError::Launch(message) if message.contains("установка сборки не завершена"))
+            );
+            assert!(marker.exists());
+            assert!(!state_dir.join("natives").exists());
+            if directory {
+                std::fs::remove_dir(&marker).unwrap();
+            } else {
+                std::fs::remove_file(&marker).unwrap();
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(state_dir.join("missing"), &marker).unwrap();
+            let error = core
+                .launch("test", &session, &authlib, "test")
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, CoreError::Launch(message) if message.contains("установка сборки не завершена"))
+            );
+            assert!(std::fs::symlink_metadata(&marker).unwrap().is_symlink());
+            assert!(!state_dir.join("natives").exists());
+            std::fs::remove_file(&marker).unwrap();
+        }
+
+        let error = core
+            .launch("test", &session, &authlib, "test")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, CoreError::Launch(message) if message.starts_with("read profile:"))
+        );
+
+        std::fs::remove_dir(&state_dir).unwrap();
+        std::fs::write(&state_dir, b"not a directory").unwrap();
+        let error = core
+            .launch("test", &session, &authlib, "test")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, CoreError::Launch(message) if message.contains("установка сборки не завершена"))
+        );
     }
 
     #[test]
