@@ -117,25 +117,29 @@ pub fn quit() {
 }
 
 #[derive(Clone)]
+enum RetryAction {
+    Play(String),
+    Repair(String),
+}
+
+#[derive(Clone)]
 struct Problem {
     message: String,
-    retry: bool,
+    retry: Option<RetryAction>,
 }
 
 impl Problem {
     fn plain(message: impl Into<String>) -> Self {
         Problem {
             message: message.into(),
-            retry: false,
+            retry: None,
         }
     }
-}
 
-impl From<Failure> for Problem {
-    fn from(failure: Failure) -> Self {
+    fn from_failure(failure: Failure, action: RetryAction) -> Self {
         Problem {
             message: failure.message,
-            retry: failure.retry,
+            retry: failure.retry.then_some(action),
         }
     }
 }
@@ -644,8 +648,12 @@ impl App {
         on!(on_open_modal, |app, kind| app.open_modal(kind));
         on!(on_close_modal, |app| app.close_modal());
         on!(on_select, |app, name| app.select(name.to_string()));
-        on!(on_play, |app| app
-            .spawn(|app| async move { app.play().await }));
+        on!(on_play, |app| {
+            let selected = app.model.borrow().selected.clone();
+            if let Some(name) = selected {
+                app.spawn(move |app| async move { app.play(name).await });
+            }
+        });
         on!(on_cancel_sync, |app| app
             .spawn(|app| async move { app.cancel_sync().await }));
         on!(on_stop_game, |app| app
@@ -657,8 +665,21 @@ impl App {
             .spawn(|app| async move { app.open_launcher_logs().await }));
         on!(on_dismiss_error, |app| app.dismiss_error());
         on!(on_retry, |app| {
-            app.dismiss_error();
-            app.spawn(|app| async move { app.play().await });
+            let action = app
+                .model
+                .borrow()
+                .error
+                .as_ref()
+                .and_then(|error| error.retry.clone());
+            if let Some(action) = action {
+                app.dismiss_error();
+                app.spawn(move |app| async move {
+                    match action {
+                        RetryAction::Play(name) => app.play(name).await,
+                        RetryAction::Repair(name) => app.repair_build(name).await,
+                    }
+                });
+            }
         });
         on!(on_dismiss_update, |app| {
             app.model.borrow_mut().update_dismissed = true;
@@ -1431,15 +1452,12 @@ impl App {
         self.render();
     }
 
-    async fn play(self: &Rc<Self>) {
-        let (name, run) = {
+    async fn play(self: &Rc<Self>, name: String) {
+        let run = {
             let mut model = self.model.borrow_mut();
             if model.phase != Phase::Home || model.busy {
                 return;
             }
-            let Some(name) = model.selected.clone() else {
-                return;
-            };
             if let Some(block) = model
                 .builds
                 .iter()
@@ -1451,6 +1469,7 @@ impl App {
                 self.render();
                 return;
             }
+            model.selected = Some(name.clone());
             model.error = None;
             model.crash_open = false;
             drop(model);
@@ -1466,7 +1485,7 @@ impl App {
             model.crash_sent = None;
             model.crash_error = None;
             model.cancel_requested = false;
-            (name, model.sync_run)
+            model.sync_run
         };
         self.render();
         let current = |app: &App| app.model.borrow().sync_run == run;
@@ -1475,7 +1494,7 @@ impl App {
             return;
         }
         if let Err(failure) = synced {
-            self.sync_failed(failure);
+            self.sync_failed(Problem::from_failure(failure, RetryAction::Play(name)));
             return;
         }
         self.model.borrow_mut().stale.retain(|stale| stale != &name);
@@ -1517,7 +1536,9 @@ impl App {
                 }
                 self.render();
             }
-            Err(failure) => self.sync_failed(failure),
+            Err(failure) => {
+                self.sync_failed(Problem::from_failure(failure, RetryAction::Play(name)));
+            }
         }
     }
 
@@ -1529,12 +1550,12 @@ impl App {
         self.render();
     }
 
-    fn sync_failed(&self, failure: Failure) {
+    fn sync_failed(&self, problem: Problem) {
         let mut model = self.model.borrow_mut();
         model.phase = Phase::Home;
         model.sync = None;
         if !model.cancel_requested {
-            model.error = Some(failure.into());
+            model.error = Some(problem);
         }
         drop(model);
         self.render();
@@ -1610,9 +1631,10 @@ impl App {
     async fn repair_build(self: &Rc<Self>, name: String) {
         let run = {
             let mut model = self.model.borrow_mut();
-            if model.phase != Phase::Home {
+            if model.phase != Phase::Home || model.busy {
                 return;
             }
+            model.selected = Some(name.clone());
             model.error = None;
             drop(model);
             self.render();
@@ -1623,7 +1645,6 @@ impl App {
             model.phase = Phase::Syncing;
             model.sync = None;
             model.cancel_requested = false;
-            model.selected.get_or_insert_with(|| name.clone());
             model.sync_run
         };
         self.render();
@@ -1635,22 +1656,19 @@ impl App {
             return;
         }
         if let Err(message) = discarded {
-            self.sync_failed(Failure {
-                message,
-                retry: false,
-            });
+            self.sync_failed(Problem::plain(message));
             return;
         }
         if self.model.borrow().cancel_requested {
             self.back_home();
             return;
         }
-        let synced = self.sync(name, run, SyncShown::Done).await;
+        let synced = self.sync(name.clone(), run, SyncShown::Done).await;
         if !current(self) {
             return;
         }
         if let Err(failure) = synced {
-            self.sync_failed(failure);
+            self.sync_failed(Problem::from_failure(failure, RetryAction::Repair(name)));
             return;
         }
         let state = self.state.clone();
@@ -1664,10 +1682,7 @@ impl App {
                 }
                 self.render();
             }
-            Err(message) => self.sync_failed(Failure {
-                message,
-                retry: false,
-            }),
+            Err(message) => self.sync_failed(Problem::plain(message)),
         }
     }
 
@@ -2085,7 +2100,11 @@ impl App {
         replace_rows(&self.lists.news, news);
         store.set_unread(model.unread as i32);
 
-        store.set_running_build(model.selected.clone().unwrap_or_default().into());
+        let running_build = model.running_session.and_then(|session| {
+            let log = crate::console::lock(&self.state.game_log);
+            (log.session() == session).then(|| log.build().to_owned())
+        });
+        store.set_running_build(running_build.unwrap_or_default().into());
 
         render_sync(&store, &model);
 
@@ -2129,7 +2148,7 @@ impl App {
         store.set_error_shown(model.error.is_some());
         if let Some(error) = &model.error {
             store.set_error_message(error.message.clone().into());
-            store.set_error_retry(error.retry);
+            store.set_error_retry(error.retry.is_some());
         }
         let (report, report_message) = match &model.report {
             LogReport::Idle => (Report::Idle, String::new()),
