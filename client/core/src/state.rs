@@ -932,6 +932,15 @@ mod tests {
         );
 
         std::fs::remove_dir(&state_dir).unwrap();
+        assert!(!sync::install_unfinished(&state_dir));
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(tmp.path(), &state_dir).unwrap();
+            assert!(sync::install_unfinished(&state_dir));
+            std::fs::remove_file(&state_dir).unwrap();
+        }
+
         std::fs::write(&state_dir, b"not a directory").unwrap();
         let error = core
             .launch("test", &session, &authlib, "test")
