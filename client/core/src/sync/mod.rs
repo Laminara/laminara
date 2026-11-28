@@ -106,6 +106,11 @@ fn read_ledger(path: &Path) -> Result<Ledger, CoreError> {
 pub(crate) const UNFINISHED_FILE: &str = "unfinished";
 
 pub fn install_unfinished(state_dir: &Path) -> bool {
+    match std::fs::symlink_metadata(state_dir) {
+        Ok(metadata) if metadata.is_dir() && !safety::is_link(&metadata) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        _ => return true,
+    }
     match std::fs::symlink_metadata(state_dir.join(UNFINISHED_FILE)) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         _ => true,
